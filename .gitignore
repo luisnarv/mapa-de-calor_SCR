@@ -1,0 +1,22 @@
+# ===== ETL: fuentes y salidas (NO los usa la app; se regeneran con Index.py) =====
+# La app despliega dashboard/ y lee sus datos de dashboard/public/*.json.
+*.csv
+*.xlsx
+*.xls
+__pycache__/
+*.pyc
+
+# Fuentes geográficas y respaldos autónomos del ETL
+/Base/
+/Limetes/
+/Nueva carpeta/
+/index.html
+/mapa_operativo.html
+
+# Respaldos locales del dashboard (no deben ir al repo)
+/dashboard/public/*.bak
+/dashboard/public/data_history.json
+
+# Sistema
+.DS_Store
+Thumbs.db
