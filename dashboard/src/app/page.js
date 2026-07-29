@@ -1061,36 +1061,20 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          background: "var(--bg)",
-          height: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "18px",
-          padding: "0 24px",
-          textAlign: "center",
-          color: "var(--cu2)"
-        }}
-      >
-        <Image
-          src={isesSymbol}
-          alt="ISES"
-          priority
-          className="ises-spin"
-          style={{ width: "clamp(56px,14vw,78px)", height: "auto" }}
-        />
-        <div
-          style={{
-            fontFamily: "var(--ff)",
-            fontWeight: 700,
-            fontSize: "clamp(15px,4vw,22px)",
-            letterSpacing: ".18em"
-          }}
-        >
-          CARGANDO VISOR OPERATIVO
+      <div className="loader-screen">
+        <div className="loader-badge">
+          <span className="loader-ring-bg" aria-hidden="true" />
+          <span className="loader-ring" aria-hidden="true" />
+          <Image
+            src={isesSymbol}
+            alt="ISES"
+            priority
+            className="ises-spin loader-logo"
+          />
+        </div>
+        <div className="loader-title">CARGANDO VISOR OPERATIVO</div>
+        <div className="loader-bar" role="progressbar" aria-label="Cargando información">
+          <span className="loader-bar-fill" />
         </div>
       </div>
     );

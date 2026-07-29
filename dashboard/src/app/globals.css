@@ -192,7 +192,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
 .mm-chev{flex:0 0 auto;font-size:10px;color:var(--mut);transition:transform .15s ease}
 .mm-btn.open .mm-chev{transform:rotate(180deg)}
 
-.mm-pop{position:absolute;top:calc(100% + 5px);left:0;z-index:950;width:250px;
+.mm-pop{position:absolute;top:calc(100% + 5px);right:0;z-index:950;width:250px;
   background:var(--pan);border:1px solid var(--line2);border-radius:var(--r);
   box-shadow:var(--shadow);padding:10px}
 .mm-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
@@ -299,6 +299,26 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
 /* símbolo ISES girando en la pantalla de carga */
 .ises-spin{animation:ises-spin 1.9s linear infinite;transform-origin:50% 50%}
 @keyframes ises-spin{to{transform:rotate(360deg)}}
+
+/* ===== PANTALLA DE CARGA: logo girando + anillo + barra ===== */
+.loader-screen{background:var(--bg);height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:24px;padding:0 24px;text-align:center;color:var(--cu2)}
+.loader-badge{position:relative;display:flex;align-items:center;justify-content:center;
+  width:clamp(104px,22vw,132px);height:clamp(104px,22vw,132px)}
+/* anillo exterior que gira alrededor del logo */
+.loader-ring{position:absolute;inset:0;border-radius:50%;
+  border:3px solid var(--line2);border-top-color:var(--cu);border-right-color:var(--cu);
+  animation:ises-spin 1s linear infinite}
+/* pista tenue de fondo del anillo (para que se vea "barra alrededor") */
+.loader-ring-bg{position:absolute;inset:0;border-radius:50%;border:3px solid var(--line2);opacity:.4}
+.loader-logo{position:relative;z-index:1;width:clamp(54px,13vw,72px);height:auto}
+.loader-title{font-family:var(--ff);font-weight:700;font-size:clamp(15px,4vw,22px);letter-spacing:.18em}
+/* barra de carga indeterminada */
+.loader-bar{position:relative;width:min(280px,72vw);height:5px;border-radius:999px;
+  background:var(--line2);overflow:hidden}
+.loader-bar-fill{position:absolute;top:0;height:100%;width:40%;border-radius:999px;
+  background:var(--cu);animation:loader-slide 1.2s ease-in-out infinite}
+@keyframes loader-slide{0%{left:-45%}100%{left:100%}}
 .sp-bar{display:flex;height:4px;margin:5px 0;background:var(--line);border-radius:3px;overflow:hidden}
 .sp-bar i{display:block;height:100%}
 .sp-f{display:flex;gap:8px;font-size:10px;color:var(--mut);font-family:var(--ff-num)}
