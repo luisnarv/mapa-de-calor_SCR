@@ -245,7 +245,15 @@ export default function LeafletMap({
     // layout still settling) the map renders smaller than it should, leaving grey
     // gaps. We also re-measure whenever the container resizes — e.g. when the
     // details or layers panels are collapsed/expanded and the map area grows.
-    const invalidate = () => map.invalidateSize({ animate: false });
+    // Bandera para no tocar el mapa tras desmontarlo. En StrictMode (dev) el
+    // efecto se monta → limpia (map.remove(), que borra los panes) → remonta;
+    // un invalidate() rezagado sobre el mapa removido leía map._mapPane
+    // (undefined) y lanzaba "Cannot read properties of undefined (_leaflet_pos)".
+    let destroyed = false;
+    const invalidate = () => {
+      if (destroyed || !map._mapPane) return;
+      map.invalidateSize({ animate: false });
+    };
 
     // Initial corrections after the first paints (covers the "not full size on
     // load" case).
@@ -255,13 +263,14 @@ export default function LeafletMap({
 
     // React to any later size change of the map container.
     let ro = null;
+    let roRaf = null;
     if (typeof ResizeObserver !== "undefined" && mapContainerRef.current) {
       let pending = false;
       ro = new ResizeObserver(() => {
         // Defer to the next frame to avoid "ResizeObserver loop" warnings.
         if (pending) return;
         pending = true;
-        requestAnimationFrame(() => {
+        roRaf = requestAnimationFrame(() => {
           pending = false;
           invalidate();
         });
@@ -271,8 +280,10 @@ export default function LeafletMap({
 
     // Clean up
     return () => {
+      destroyed = true;
       document.removeEventListener("click", handleMapClick, true);
       cancelAnimationFrame(raf);
+      if (roRaf) cancelAnimationFrame(roRaf);
       clearTimeout(t1);
       clearTimeout(t2);
       if (ro) ro.disconnect();
@@ -426,6 +437,29 @@ export default function LeafletMap({
           .on("click", () => {
             if (p.b >= 0) onSelectBarrio(p.b);
           })
+          .addTo(hullLayerRef.current);
+      }
+    }
+
+    // --- A bis. Barrios sin visitar: polígonos sin ninguna orden (NIC)
+    // enlazada (b === -1). Se resaltan en amarillo fuerte. ---
+    if (st.layers.sinNic && geo.bp) {
+      const selMuni = st.muni !== "" ? dim.munis[+st.muni].toLowerCase() : null;
+      for (const p of geo.bp) {
+        if (p.b !== -1) continue; // solo los que no matchearon con ningún NIC
+        if (selMuni && (p.m || "").toLowerCase() !== selMuni) continue;
+        L.polygon(p.r, {
+          color: P.sinNic,
+          weight: 1.4,
+          opacity: 0.95,
+          fillColor: P.sinNic,
+          fillOpacity: 0.4,
+          renderer: vecRenderer
+        })
+          .bindTooltip(
+            `<b>${p.n}</b><span class="tt-m">${p.m} · sin órdenes registradas</span>`,
+            { sticky: true, className: "tt" }
+          )
           .addTo(hullLayerRef.current);
       }
     }

@@ -60,7 +60,7 @@ export default function Topbar({
   return (
     <header id="top">
       <div className="brand">
-        <b>ISES <i>|</i> AIR<i>·</i>E <i>|</i> SCR</b>
+        <b>ISES <i>|</i> SCR</b>
         <span>Centro Operativo</span>
       </div>
       <div id="meta">

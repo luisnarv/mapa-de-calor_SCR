@@ -25,29 +25,39 @@ export const BRAND = {
   grisClaro: "#E0E0E0"
 };
 
-/* Tokens del modo oscuro — V1_Guia_Dark_SCR.pptx (láminas 3, 4 y 7) */
+/* Tokens del modo oscuro — Identidad Navy (SIP): superficies azul medianoche,
+   marca en azul cielo, acento financiero en verde menta. El verde queda
+   reservado para «orden efectiva». */
 export const DARK = {
-  base: "#0E1411",
-  surface: "#141D18",
-  card: "#1A241E",
-  elev: "#212D26",
-  line: "#293730",
-  borderStrong: "#3A4C41",
-  text1: "#E9EFE9",
-  text2: "#9FADA4",
-  text3: "#6B786F",
-  acento: "#8FC16A",
-  activo: "#6FA03E",
-  acentoFondo: "#405C2F",
-  ok: "#63B168",
-  alerta: "#CBA24A",
-  critico: "#D16B57",
-  perdida: "#D98A6F"
+  base: "#0A1A2F",          // azul medianoche profundo
+  surface: "#102A4A",       // paneles
+  card: "#0F2744",          // tarjetas
+  elev: "#16355C",          // elevado
+  line: "#1E3A5F",          // divisores
+  borderStrong: "#2C5482",  // bordes de control
+  text1: "#F2F7FF",         // títulos · blanco hielo
+  text2: "#C9DAEE",         // cuerpo · azul acero claro
+  text3: "#85A3C4",         // secundario
+  text4: "#7E9BBF",         // atenuado · etiquetas y cifras de apoyo (AA sobre base Y paneles)
+  acento: "#4A9EE8",        // marca SIP en oscuro · azul cielo
+  activo: "#3B8AD9",        // marca presionada / borde de acento
+  acentoFondo: "#143A63",   // fondo de acento tenue
+  otc: "#2BD98C",           // módulo financiero · verde menta neón
+  ok: "#2BD98C",
+  alerta: "#F0C040",
+  critico: "#FF5A5F",
+  perdida: "#FF7A7E"        // variante de texto del crítico
 };
 
-/* Serie de datos de claro a oscuro + gris de referencia para totales */
+/* Serie de datos de claro a oscuro + gris de referencia para totales.
+   SERIES es solo para el modo claro (limas y verdes de marca). */
 export const SERIES = [BRAND.lima, BRAND.verde, BRAND.verdeMedio, BRAND.verdeOscuro];
 export const SERIE_REF = BRAND.grisMedio;
+
+/* Serie del modo oscuro: sobre navy los verdes de marca se leen apagados y
+   chocan con el semáforo, así que se declara aparte (azul cielo · menta ·
+   ámbar · azul activo). */
+export const SERIES_DARK = ["#4A9EE8", "#2BD98C", "#F0C040", "#3B8AD9"];
 
 export const PALETTES = {
   light: {
@@ -74,6 +84,8 @@ export const PALETTES = {
     warnText: "#6E7300",
     badText: "#A5301F",
     none: BRAND.grisMedio,
+    /* barrios sin ninguna orden (NIC) enlazada — amarillo fuerte */
+    sinNic: "#FFD500",
 
     /* Efectivas · Fallidas · Perdidas */
     st: [BRAND.verdeMedio, BRAND.lima, "#C0392B"],
@@ -103,8 +115,9 @@ export const PALETTES = {
     ]
   },
 
-  /* Modo oscuro según V1_Guia_Dark_SCR: escala de superficies gris-verdosa,
-     verde de marca solo como acento y estados en su versión desaturada. */
+  /* Modo oscuro — Identidad Navy (SIP): superficies azul medianoche, marca en
+     azul cielo, acento en verde menta. El verde queda reservado para «efectiva»;
+     los estados usan sus variantes claras sobre navy. */
   dark: {
     name: "dark",
     bg: DARK.base,
@@ -129,22 +142,24 @@ export const PALETTES = {
     warnText: DARK.alerta,
     badText: DARK.perdida,
     none: DARK.text3,
+    /* barrios sin ninguna orden (NIC) enlazada — amarillo fuerte */
+    sinNic: "#FFD500",
 
     st: [DARK.ok, DARK.alerta, DARK.critico],
     stText: [DARK.ok, DARK.alerta, DARK.perdida],
     /* los tres rellenos son claros: la tinta va sobre la base (guía, lámina 6) */
     stInk: [DARK.base, DARK.base, DARK.base],
 
-    series: SERIES,
-    serieRef: SERIE_REF,
+    series: SERIES_DARK,
+    serieRef: DARK.text3,
 
     ink: "#FFFFFF",
     inkSoft: DARK.base,
     /* el mapa comparte el fondo base (regla 4 de la guía) */
     mapBg: DARK.base,
-    overlay: "rgba(16,24,20,.94)",
+    overlay: "rgba(10,26,47,.94)",
     overlayLine: DARK.line,
-    pointStroke: "rgba(14,20,17,.75)",
+    pointStroke: "rgba(10,26,47,.75)",
     markerSel: DARK.text1,
     markerHalo: DARK.acento,
     limitStroke: DARK.acento,
@@ -153,9 +168,9 @@ export const PALETTES = {
       labels: "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png"
     },
     heat: [
-      { 0.35: "#0E3A2C", 0.65: "#1E8A64", 1.0: "#35C08A" },
-      { 0.35: "#5C4712", 0.65: "#C09526", 1.0: "#E9B949" },
-      { 0.35: "#7A1A1E", 0.65: "#C93B41", 1.0: "#E5484D" }
+      { 0.35: "#0E3A2C", 0.65: "#1E8A64", 1.0: "#2BD98C" },
+      { 0.35: "#5C4712", 0.65: "#C09526", 1.0: "#F0C040" },
+      { 0.35: "#7A1A1E", 0.65: "#C93B41", 1.0: "#FF5A5F" }
     ]
   }
 };

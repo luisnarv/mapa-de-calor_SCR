@@ -17,6 +17,11 @@ __pycache__/
 /dashboard/public/*.bak
 /dashboard/public/data_history.json
 
+# Secretos: el .env real nunca al repo (sí se versiona .env.example)
+.env
+dashboard/.env
+*.pyc
+
 # Sistema
 .DS_Store
 Thumbs.db

@@ -26,46 +26,46 @@
 }
 
 /* ===================== TEMA DARK (por defecto) =====================
-   V1_Guia_Dark_SCR.pptx — escala de superficies gris-verdosa, el verde de
-   marca solo como acento (nunca fondo amplio) y estados desaturados. */
+   Identidad Navy (SIP): superficies azul medianoche, marca en azul cielo,
+   acento en verde menta. El verde queda reservado para «orden efectiva». */
 :root,
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0E1411;            /* base */
-  --pan:#141D18;           /* superficie */
-  --pan2:#1A241E;          /* tarjeta */
-  --elev:#212D26;          /* elevado */
-  --line:#293730;          /* línea interna */
-  --line2:#3A4C41;         /* borde fuerte */
-  --tx:#E9EFE9;            /* texto 1 */
-  --ttl:#E9EFE9;
-  --mut:#9FADA4;           /* texto 2 */
-  --dim:#6B786F;           /* texto 3 · tenue */
-  --cu:#8FC16A;            /* acento de marca */
-  --cu2:#8FC16A;           /* acento de texto */
-  --cu-strong:#6FA03E;     /* activo */
-  --cu-deep:#405C2F;       /* fondo de acento (badges, botón activo) */
-  --ok:#63B168; --warn:#CBA24A; --bad:#D16B57;
-  --ok-tx:#63B168; --warn-tx:#CBA24A; --bad-tx:#D98A6F;
-  --none:#6B786F;
-  --ink:#FFFFFF; --ink-soft:#0E1411;
-  /* la barra superior es superficie oscura con acento verde lateral */
+  --bg:#0A1A2F;            /* base · azul medianoche */
+  --pan:#102A4A;           /* superficie · paneles */
+  --pan2:#0F2744;          /* tarjeta */
+  --elev:#16355C;          /* elevado */
+  --line:#1E3A5F;          /* línea interna */
+  --line2:#2C5482;         /* borde fuerte */
+  --tx:#F2F7FF;            /* texto 1 · blanco hielo */
+  --ttl:#F2F7FF;
+  --mut:#C9DAEE;           /* texto 2 · azul acero claro */
+  --dim:#85A3C4;           /* texto 3 · secundario */
+  --cu:#4A9EE8;            /* acento de marca · azul cielo */
+  --cu2:#4A9EE8;           /* acento de texto */
+  --cu-strong:#3B8AD9;     /* activo / borde de acento */
+  --cu-deep:#143A63;       /* fondo de acento (badges, botón activo) */
+  --ok:#2BD98C; --warn:#F0C040; --bad:#FF5A5F;
+  --ok-tx:#2BD98C; --warn-tx:#F0C040; --bad-tx:#FF7A7E;
+  --none:#85A3C4;
+  --ink:#FFFFFF; --ink-soft:#0A1A2F;
+  /* la barra superior es superficie navy con acento azul lateral */
   --banner:var(--pan);
-  --banner-tx:#E9EFE9;
-  --banner-sub:#6B786F;
-  --banner-line:#3A4C41;
-  --brand-sep:#8FC16A;
-  --top-accent:#8FC16A;
-  --btn-bg:transparent; --btn-tx:#9FADA4; --btn-line:#3A4C41; --btn-bg-h:#212D26;
-  --theme-bg:#405C2F; --theme-tx:#8FC16A; --theme-line:#405C2F;
-  --track:#3A4C41; --thumb:#8FC16A;
-  --kv-tx:#9FADA4;
-  --badge-bg:#405C2F; --badge-tx:#8FC16A;
-  --map-bg:#0E1411;
-  --overlay:rgba(16,24,20,.94);
-  --shadow:0 10px 30px rgba(0,0,0,.5);
-  --accent-wash:rgba(143,193,106,.10);
-  --row-line:#293730;
+  --banner-tx:#F2F7FF;
+  --banner-sub:#85A3C4;
+  --banner-line:#2C5482;
+  --brand-sep:#4A9EE8;
+  --top-accent:#4A9EE8;
+  --btn-bg:transparent; --btn-tx:#C9DAEE; --btn-line:#2C5482; --btn-bg-h:#16355C;
+  --theme-bg:#143A63; --theme-tx:#4A9EE8; --theme-line:#143A63;
+  --track:#2C5482; --thumb:#4A9EE8;
+  --kv-tx:#C9DAEE;
+  --badge-bg:#143A63; --badge-tx:#4A9EE8;
+  --map-bg:#0A1A2F;
+  --overlay:rgba(10,26,47,.94);
+  --shadow:0 10px 30px rgba(0,0,0,.55);
+  --accent-wash:rgba(59,138,217,.12);
+  --row-line:#16304F;
 }
 
 /* ===================== TEMA LIGHT ===================== */
@@ -380,7 +380,17 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
   cursor:pointer;letter-spacing:.05em;border-bottom:2px solid transparent;white-space:nowrap}
 .dtab:hover,.ptab:hover{color:var(--ttl)}
 .dtab.on,.ptab.on{color:var(--cu2);border-bottom-color:var(--cu);font-weight:600}
-#dockToggle{margin-left:auto}
+/* El botón Contraer/Expandir vive sobre un panel (--pan), no sobre el banner,
+   así que NO puede usar los tokens --btn-* (texto blanco, pensados para el
+   banner: en claro quedarían blanco sobre claro = invisible). Usa colores de
+   panel, legibles en ambos temas. */
+#dockToggle{
+  margin-left:auto;
+  background:var(--pan2);
+  border-color:var(--line2);
+  color:var(--tx);
+}
+#dockToggle:hover{background:var(--elev);border-color:var(--cu)}
 #gran{min-width:96px;margin-left:8px;background:var(--bg);color:var(--tx);border:1px solid var(--line);
   border-radius:var(--r-sm);padding:5px 6px;font:400 11px var(--ff)}
 #dockBody{flex:1;overflow:auto;padding:12px 14px}
@@ -467,7 +477,7 @@ tr.clk:hover td{background:var(--pan2)}
 .act{border-left:3px solid var(--line2);background:var(--pan2);border-radius:0 var(--r) var(--r) 0;padding:9px 10px}
 .act.crit{border-left-color:var(--bad)}
 .act.warn{border-left-color:var(--warn)}
-.act.info{border-left-color:var(--ises-oscuro)}
+.act.info{border-left-color:var(--cu2)}
 .act.ok{border-left-color:var(--ok)}
 .act b{font-size:12px;display:block;margin-bottom:3px;font-weight:700;color:var(--ttl)}
 .act p{font-size:11px;color:var(--mut);line-height:1.5}
@@ -755,6 +765,21 @@ tr.clk:hover td{background:var(--pan2)}
   flex: 1 1 0% !important;
   height: 100% !important;
   position: relative !important;
+}
+
+/* Columna central V4 y su contenedor de mapa. El #mapwrap interno usa flex:1
+   para tomar altura; sin un padre flex-column colapsa a 0 y el mapa desaparece.
+   (En la vista Clásica #mapwrap es hijo directo de #center, que ya es flex.) */
+.v4-center-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.v4-map-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
 }
 
 .v4-panel {

@@ -78,7 +78,8 @@ export default function Home() {
       approx: false,
       bpoly: false,
       mpoly: false,
-      zpoly: false
+      zpoly: false,
+      sinNic: false
     },
     // Hierarchy selections
     jerBarrio: null,
@@ -1117,72 +1118,72 @@ export default function Home() {
   // V4 Enfoque Layout Implementation
   if (st.layout === "enfoque") {
     let rightPanelContent = null;
-    if (st.activeTab !== "mapa") {
-      if (st.activeTab === "triaje") {
-        rightPanelContent = (
-          <aside className="v4-panel triaje-panel" style={{ flex: "0 0 380px", minWidth: "380px", maxWidth: "46%", borderLeft: "1px solid var(--line2)", background: "var(--pan)", overflowY: "auto", position: "relative" }}>
-            <RiskSpine
-              ELIG={ELIG}
-              st={computedSt}
-              dim={data.dim}
-              onFilterChange={handleFilterChange}
-              onSelectBarrio={(b) => {
-                handleSelectBarrio(b);
+    let bottomPanelContent = null;
+
+    if (st.activeTab === "triaje") {
+      rightPanelContent = (
+        <aside className="v4-panel triaje-panel" style={{ flex: "0 0 380px", minWidth: "380px", maxWidth: "46%", borderLeft: "1px solid var(--line2)", background: "var(--pan)", overflowY: "auto", position: "relative" }}>
+          <RiskSpine
+            ELIG={ELIG}
+            st={computedSt}
+            dim={data.dim}
+            onFilterChange={handleFilterChange}
+            onSelectBarrio={(b) => {
+              handleSelectBarrio(b);
+              handleFilterChange("activeTab", "detalle");
+            }}
+          />
+        </aside>
+      );
+    } else if (st.activeTab === "detalle") {
+      rightPanelContent = (
+        <aside className="v4-panel details-panel" style={{ flex: "0 0 380px", minWidth: "380px", maxWidth: "46%", borderLeft: "1px solid var(--line2)", background: "var(--pan)", overflowY: "auto", position: "relative" }}>
+          <DetailsPanel
+            st={computedSt}
+            A={A}
+            ELIG={ELIG}
+            dim={data.dim}
+            geo={data.geo}
+            dayLabel={dayLabel}
+            recommend={recommend}
+            techRoute={techRoute}
+            zoneAvg={zoneAvg}
+            actionsFor={actionsFor}
+            onFilterChange={handleFilterChange}
+            onSelectBarrio={handleSelectBarrio}
+            onSelectNic={handleSelectNic}
+          />
+        </aside>
+      );
+    } else if (st.activeTab !== "mapa") {
+      // Must be a bottom tab: "tendencias", "causas", "ranking", "carga", "jerarquia"
+      // In the original dock, 'causas' key corresponds to 'motivos' tab
+      const dockTab = st.activeTab === "causas" ? "motivos" : st.activeTab;
+      bottomPanelContent = (
+        <div className="v4-bottom-dock" style={{ height: "340px", flex: "0 0 340px", borderTop: "1px solid var(--line2)", background: "var(--pan)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <Dock
+            A={A}
+            st={{ ...computedSt, dock: dockTab }}
+            dim={data.dim}
+            dayLabel={dayLabel}
+            onFilterChange={(key, value) => {
+              if (key === "dock") {
+                const mappedTab = value === "motivos" ? "causas" : value;
+                handleFilterChange("activeTab", mappedTab);
+              } else if (key === "selBarrio") {
+                handleSelectBarrio(value);
                 handleFilterChange("activeTab", "detalle");
-              }}
-            />
-          </aside>
-        );
-      } else if (st.activeTab === "detalle") {
-        rightPanelContent = (
-          <aside className="v4-panel details-panel" style={{ flex: "0 0 380px", minWidth: "380px", maxWidth: "46%", borderLeft: "1px solid var(--line2)", background: "var(--pan)", overflowY: "auto", position: "relative" }}>
-            <DetailsPanel
-              st={computedSt}
-              A={A}
-              ELIG={ELIG}
-              dim={data.dim}
-              geo={data.geo}
-              dayLabel={dayLabel}
-              recommend={recommend}
-              techRoute={techRoute}
-              zoneAvg={zoneAvg}
-              actionsFor={actionsFor}
-              onFilterChange={handleFilterChange}
-              onSelectBarrio={handleSelectBarrio}
-              onSelectNic={handleSelectNic}
-            />
-          </aside>
-        );
-      } else {
-        // One of the dock tabs: "tendencias", "causas", "ranking", "carga", "jerarquia"
-        // In the original dock, 'causas' key corresponds to 'motivos' tab
-        const dockTab = st.activeTab === "causas" ? "motivos" : st.activeTab;
-        rightPanelContent = (
-          <aside className="v4-panel dock-panel" style={{ flex: "0 0 380px", minWidth: "380px", maxWidth: "46%", borderLeft: "1px solid var(--line2)", background: "var(--pan)", overflowY: "auto", position: "relative" }}>
-            <Dock
-              A={A}
-              st={{ ...computedSt, dock: dockTab }}
-              dim={data.dim}
-              dayLabel={dayLabel}
-              onFilterChange={(key, value) => {
-                if (key === "dock") {
-                  const mappedTab = value === "motivos" ? "causas" : value;
-                  handleFilterChange("activeTab", mappedTab);
-                } else if (key === "selBarrio") {
-                  handleSelectBarrio(value);
-                  handleFilterChange("activeTab", "detalle");
-                } else {
-                  handleFilterChange(key, value);
-                }
-              }}
-              onSelectBarrio={(b) => {
-                handleSelectBarrio(b);
-                handleFilterChange("activeTab", "detalle");
-              }}
-            />
-          </aside>
-        );
-      }
+              } else {
+                handleFilterChange(key, value);
+              }
+            }}
+            onSelectBarrio={(b) => {
+              handleSelectBarrio(b);
+              handleFilterChange("activeTab", "detalle");
+            }}
+          />
+        </div>
+      );
     }
 
     return (
@@ -1245,242 +1246,266 @@ export default function Home() {
             })}
           </nav>
 
-          {/* Central Map Column */}
-          <section id="center" className="v4-center-map" style={{ flex: 1, minWidth: 0, position: "relative" }}>
-            <LeafletMap
-              A={A}
-              st={computedSt}
-              dim={data.dim}
-              geo={data.geo}
-              onSelectBarrio={(b) => {
-                handleSelectBarrio(b);
-                handleFilterChange("activeTab", "detalle");
-              }}
-              onSelectNic={(nic) => {
-                handleSelectNic(nic);
-                handleFilterChange("activeTab", "detalle");
-              }}
-              onFilterChange={handleFilterChange}
-              dayLabel={dayLabel}
-            />
-
-            {st.selBarrio != null && (
-              <button
-                type="button"
-                onClick={handleClearBarrio}
-                title="Mostrar todos los barrios y sus límites"
-                style={{
-                  position: "absolute",
-                  top: "12px",
-                  right: "12px",
-                  zIndex: 800,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "7px",
-                  padding: "7px 11px",
-                  background: "var(--overlay)",
-                  border: "1px solid var(--line2)",
-                  borderRadius: "var(--r)",
-                  color: "var(--cu2)",
-                  cursor: "pointer",
-                  font: "600 12px var(--ff)",
-                  letterSpacing: ".04em",
-                  backdropFilter: "blur(6px)",
-                  boxShadow: "var(--shadow)"
+          {/* Central Map & Bottom Dock Column */}
+          <section id="center" className="v4-center-column" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
+            <div className="v4-map-container" style={{ flex: 1, minHeight: 0, position: "relative" }}>
+              <LeafletMap
+                A={A}
+                st={computedSt}
+                dim={data.dim}
+                geo={data.geo}
+                onSelectBarrio={(b) => {
+                  handleSelectBarrio(b);
+                  handleFilterChange("activeTab", "detalle");
                 }}
-              >
-                <span style={{ fontSize: "14px", lineHeight: 1 }}>✕</span>
-                Ver todos los barrios
-              </button>
-            )}
+                onSelectNic={(nic) => {
+                  handleSelectNic(nic);
+                  handleFilterChange("activeTab", "detalle");
+                }}
+                onFilterChange={handleFilterChange}
+                dayLabel={dayLabel}
+              />
 
-            <div className="v4-layers-overlay" style={{ position: "absolute", top: "12px", left: "12px", zIndex: 800 }}>
-              <div id="layers" style={layersCollapsed ? { width: "auto", minWidth: 0 } : undefined}>
+              {st.selBarrio != null && (
                 <button
                   type="button"
-                  onClick={() => setLayersCollapsed((v) => !v)}
-                  title={layersCollapsed ? "Mostrar capas" : "Ocultar capas"}
-                  aria-expanded={!layersCollapsed}
+                  onClick={handleClearBarrio}
+                  title="Mostrar todos los barrios y sus límites"
                   style={{
+                    position: "absolute",
+                    top: "12px",
+                    right: "12px",
+                    zIndex: 800,
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "8px",
-                    width: "100%",
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    margin: layersCollapsed ? 0 : "0 0 8px",
+                    gap: "7px",
+                    padding: "7px 11px",
+                    background: "var(--overlay)",
+                    border: "1px solid var(--line2)",
+                    borderRadius: "var(--r)",
                     color: "var(--cu2)",
                     cursor: "pointer",
-                    font: "inherit",
-                    fontFamily: "var(--ff)",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    letterSpacing: ".14em",
-                    textTransform: "uppercase"
+                    font: "600 12px var(--ff)",
+                    letterSpacing: ".04em",
+                    backdropFilter: "blur(6px)",
+                    boxShadow: "var(--shadow)"
                   }}
                 >
-                  <span>Capas</span>
-                  <span
+                  <span style={{ fontSize: "14px", lineHeight: 1 }}>✕</span>
+                  Ver todos los barrios
+                </button>
+              )}
+
+              <div className="v4-layers-overlay" style={{ position: "absolute", top: "12px", left: "12px", zIndex: 800 }}>
+                <div id="layers" style={layersCollapsed ? { width: "auto", minWidth: 0 } : undefined}>
+                  <button
+                    type="button"
+                    onClick={() => setLayersCollapsed((v) => !v)}
+                    title={layersCollapsed ? "Mostrar capas" : "Ocultar capas"}
+                    aria-expanded={!layersCollapsed}
                     style={{
-                      fontSize: "11px",
-                      lineHeight: 1,
-                      transform: layersCollapsed ? "rotate(0deg)" : "rotate(90deg)",
-                      transition: "transform .15s ease"
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                      width: "100%",
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      margin: layersCollapsed ? 0 : "0 0 8px",
+                      color: "var(--cu2)",
+                      cursor: "pointer",
+                      font: "inherit",
+                      fontFamily: "var(--ff)",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      letterSpacing: ".14em",
+                      textTransform: "uppercase"
                     }}
                   >
-                    ▸
-                  </span>
-                </button>
+                    <span>Capas</span>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        lineHeight: 1,
+                        transform: layersCollapsed ? "rotate(0deg)" : "rotate(90deg)",
+                        transition: "transform .15s ease"
+                      }}
+                    >
+                      ▸
+                    </span>
+                  </button>
 
-                {!layersCollapsed && (
-                  <>
-                    <h4>Órdenes a mostrar</h4>
-                    <label className="lay">
-                      <input
-                        type="checkbox"
-                        checked={st.est[2]}
-                        onChange={(e) => {
-                          const est = [...st.est];
-                          est[2] = e.target.checked;
-                          handleFilterChange("est", est);
-                        }}
-                      />
-                      <span className="sw" style={{ background: P.st[2] }}></span>
-                      Perdidas
-                    </label>
-                    <label className="lay">
-                      <input
-                        type="checkbox"
-                        checked={st.est[1]}
-                        onChange={(e) => {
-                          const est = [...st.est];
-                          est[1] = e.target.checked;
-                          handleFilterChange("est", est);
-                        }}
-                      />
-                      <span className="sw" style={{ background: P.st[1] }}></span>
-                      Fallidas
-                    </label>
-                    <label className="lay">
-                      <input
-                        type="checkbox"
-                        checked={st.est[0]}
-                        onChange={(e) => {
-                          const est = [...st.est];
-                          est[0] = e.target.checked;
-                          handleFilterChange("est", est);
-                        }}
-                      />
-                      <span className="sw" style={{ background: P.st[0] }}></span>
-                      Efectivas
-                    </label>
+                  {!layersCollapsed && (
+                    <>
+                      <h4>Órdenes a mostrar</h4>
+                      <label className="lay">
+                        <input
+                          type="checkbox"
+                          checked={st.est[2]}
+                          onChange={(e) => {
+                            const est = [...st.est];
+                            est[2] = e.target.checked;
+                            handleFilterChange("est", est);
+                          }}
+                        />
+                        <span className="sw" style={{ background: P.st[2] }}></span>
+                        Perdidas
+                      </label>
+                      <label className="lay">
+                        <input
+                          type="checkbox"
+                          checked={st.est[1]}
+                          onChange={(e) => {
+                            const est = [...st.est];
+                            est[1] = e.target.checked;
+                            handleFilterChange("est", est);
+                          }}
+                        />
+                        <span className="sw" style={{ background: P.st[1] }}></span>
+                        Fallidas
+                      </label>
+                      <label className="lay">
+                        <input
+                          type="checkbox"
+                          checked={st.est[0]}
+                          onChange={(e) => {
+                            const est = [...st.est];
+                            est[0] = e.target.checked;
+                            handleFilterChange("est", est);
+                          }}
+                        />
+                        <span className="sw" style={{ background: P.st[0] }}></span>
+                        Efectivas
+                      </label>
 
-                    <div className="lgrp">
-                      <h4>Cómo dibujarlas</h4>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.markers}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, markers: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Marcadores por barrio
-                      </label>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.heat}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, heat: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Mapa de calor
-                      </label>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.gps}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, gps: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        GPS reales
-                      </label>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.approx}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, approx: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Ubicaciones aproximadas
-                      </label>
-                      <p className="lay-nota">
-                        Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los <b>puntos GPS</b> son órdenes sueltas (clic → detalle de la orden).
-                      </p>
-                    </div>
-
-                    <div className="lgrp">
-                      <h4>Límites oficiales</h4>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.zpoly}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, zpoly: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Zonas
-                      </label>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.bpoly}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, bpoly: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Barrios
-                      </label>
-                      <label className="lay">
-                        <input
-                          type="checkbox"
-                          checked={st.layers.mpoly}
-                          onChange={(e) => {
-                            const layers = { ...st.layers, mpoly: e.target.checked };
-                            handleFilterChange("layers", layers);
-                          }}
-                        />
-                        Municipios
-                      </label>
-                    </div>
-
-                    <div className="lgrp" id="legend">
-                      <h4>Índice de riesgo</h4>
-                      <div>
-                        <i style={{ background: P.st[0] }}></i> 0–30 &middot; Bajo
+                      <div className="lgrp">
+                        <h4>Cómo dibujarlas</h4>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.markers}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, markers: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Marcadores por barrio
+                        </label>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.heat}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, heat: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Mapa de calor
+                        </label>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.gps}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, gps: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          GPS reales
+                        </label>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.approx}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, approx: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Ubicaciones aproximadas
+                        </label>
+                        <p className="lay-nota">
+                          Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los <b>puntos GPS</b> son órdenes sueltas (clic → detalle de la orden).
+                        </p>
                       </div>
-                      <div>
-                        <i style={{ background: P.st[1] }}></i> 31–60 &middot; Medio
+
+                      <div className="lgrp">
+                        <h4>Límites oficiales</h4>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.zpoly}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, zpoly: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Zonas
+                        </label>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.bpoly}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, bpoly: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Barrios
+                        </label>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.mpoly}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, mpoly: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          Municipios
+                        </label>
                       </div>
-                      <div>
-                        <i style={{ background: P.st[2] }}></i> 61–100 &middot; Alto
+
+                      <div className="lgrp">
+                        <h4>Cobertura</h4>
+                        <label className="lay">
+                          <input
+                            type="checkbox"
+                            checked={st.layers.sinNic}
+                            onChange={(e) => {
+                              const layers = { ...st.layers, sinNic: e.target.checked };
+                              handleFilterChange("layers", layers);
+                            }}
+                          />
+                          <span className="sw" style={{ background: P.sinNic }}></span>
+                          Barrios sin visitar
+                        </label>
+                        <p className="lay-nota">
+                          Barrios (polígonos) sin ninguna orden registrada. Se resaltan en amarillo fuerte.
+                        </p>
                       </div>
-                    </div>
-                  </>
-                )}
+
+                      <div className="lgrp" id="legend">
+                        <h4>Índice de riesgo</h4>
+                        <div>
+                          <i style={{ background: P.st[0] }}></i> 0–30 &middot; Bajo
+                        </div>
+                        <div>
+                          <i style={{ background: P.st[1] }}></i> 31–60 &middot; Medio
+                        </div>
+                        <div>
+                          <i style={{ background: P.st[2] }}></i> 61–100 &middot; Alto
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Bottom Dock Content */}
+            {bottomPanelContent}
           </section>
 
           {/* Right Active Panel */}
@@ -1729,6 +1754,25 @@ export default function Home() {
                 />
                 Municipios
               </label>
+            </div>
+
+            <div className="lgrp">
+              <h4>Cobertura</h4>
+              <label className="lay">
+                <input
+                  type="checkbox"
+                  checked={st.layers.sinNic}
+                  onChange={(e) => {
+                    const layers = { ...st.layers, sinNic: e.target.checked };
+                    handleFilterChange("layers", layers);
+                  }}
+                />
+                <span className="sw" style={{ background: P.sinNic }}></span>
+                Barrios sin visitar
+              </label>
+              <p className="lay-nota">
+                Barrios (polígonos) sin ninguna orden registrada. Se resaltan en amarillo fuerte.
+              </p>
             </div>
 
             <div className="lgrp" id="legend">

@@ -520,8 +520,8 @@ export default function Dock({
         const tecs = [...porTec.entries()].sort((a, b) => b[1].tot - a[1].tot);
 
         cuerpo = tecs.map(([t, s]) => (
-          <div key={t} className="jer-tec">
-            <div className="jer-tec-h">
+          <div key={t} className="jer-tec" style={{ borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
+            <div className="jer-tec-h" style={{ borderBottom: "none", paddingBottom: 0 }}>
               <b>{dim.tecs[t]}</b>
               <span className="jer-tec-m">
                 {num(s.tot)} órdenes &middot;{" "}
@@ -530,33 +530,6 @@ export default function Dock({
                 <em className="bad">{s.pe} pe</em> &middot; {pct((s.ef / s.tot) * 100)}% efect.
               </span>
             </div>
-            <table className="mt jer-ords">
-              <thead>
-                <tr>
-                  <th>Orden</th>
-                  <th>Estado</th>
-                  <th>Causa</th>
-                  <th>Fecha</th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.ords.map((i) => (
-                  <tr key={i}>
-                    <td className="mono">{st.ORD_raw[i] || "—"}</td>
-                    <td style={{ color: ST_COLOR[st.E_raw[i]] }}>
-                      {dim.estados[st.E_raw[i]]}
-                    </td>
-                    <td>{dim.causas[st.C_raw[i]]}</td>
-                    <td className="dim">{dayLabel(st.DAY_raw[i])}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {s.tot > 40 && (
-              <p className="hint" style={{ padding: "6px" }}>
-                Mostrando 40 de {num(s.tot)} órdenes.
-              </p>
-            )}
           </div>
         ));
       }

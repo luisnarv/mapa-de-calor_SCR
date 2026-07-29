@@ -57,8 +57,8 @@ OUT_CSV = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/consolidad
 OUT_HTML = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/mapa_operativo.html"
 MAESTRO_PATH = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/Base_Maestra_Parametros.xlsx"
 PLANTILLA = "plantilla_mapa.html"          # se busca junto a este .py
-GEO_BARRIOS = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/Limetes/atlantico_barrios.geojson"      # limites reales (opcional)
-GEO_MUNICIPIOS = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/Limetes/atlantico_municipios.geojson"
+GEO_BARRIOS = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/dashboard/public/geojson/atlantico_barrios.geojson"      # limites reales (opcional)
+GEO_MUNICIPIOS = "C:/Users/P210/Documents/antigravity/Dashboar mapa de calor/dashboard/public/geojson/atlantico_municipios.geojson"
 
 # Caja del Atlantico: un GPS valido del planeta puede no ser un GPS del Atlantico.
 BBOX = (10.0, 11.35, -75.45, -74.35)
@@ -423,7 +423,7 @@ def construir_mapa(df, out_html, publico=False):
         print(f"  AVISO: no encuentro {GEO_BARRIOS}. Sin limites de barrio.")
 
     zpoly = []
-    pz = os.path.join(aqui, "dashboard", "zonas_atlantico.geojson")
+    pz = os.path.join(aqui, "dashboard", "public", "geojson", "zonas_atlantico.geojson")
     if os.path.exists(pz):
         gj = json.load(open(pz, encoding="utf-8"))
         for f in gj["features"]:
@@ -549,7 +549,8 @@ def construir_mapa(df, out_html, publico=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=BASE_DIR)
-    ap.add_argument("--csv", default=OUT_CSV)
+    ap.add_argument("--csv", default=None,
+                    help="Ruta del CSV consolidado. Por defecto NO se genera (solo JSON).")
     ap.add_argument("--html", default=OUT_HTML)
     ap.add_argument("--maestro", default=MAESTRO_PATH)
     ap.add_argument("--solo-csv", action="store_true", help="No genera el mapa")
@@ -734,7 +735,10 @@ def main():
     print(f"  Efectividad ajustada  {ef/max(den,1)*100:>7.1f} %   (excluye las causas no controlables)")
     print()
 
-    _guardar_csv(df, a.csv)
+    # CSV: solo si se pide explícitamente (--csv RUTA) o en modo --solo-csv.
+    # Por defecto el ETL produce ÚNICAMENTE el JSON que consume la app.
+    if a.csv or a.solo_csv:
+        _guardar_csv(df, a.csv or OUT_CSV)
     if not a.solo_csv:
         construir_mapa(df, a.html, publico=a.publico)
     print("\nETL - fin")
