@@ -122,23 +122,41 @@ export default function LeafletMap({
         const ctx = this._c.getContext("2d");
         ctx.clearRect(0, 0, this._c.width, this._c.height);
         if (!this._pts || !this._pts.length) return;
-        const b = map.getBounds();
+        
         const z = map.getZoom();
+        const b = map.getBounds();
         const r = z >= 15 ? 5 : z >= 13 ? 4 : 3;
         ctx.globalAlpha = z >= 14 ? 0.9 : 0.65;
+
+        const south = b.getSouth();
+        const north = b.getNorth();
+        const west = b.getWest();
+        const east = b.getEast();
+
+        const palette = paletteRef.current.st;
+        ctx.strokeStyle = paletteRef.current.pointStroke;
+        ctx.lineWidth = 1;
+
+        let drawn = 0;
+        const MAX_POINTS = 8000; // Cap de rendimiento para evitar colapso del hilo principal
 
         for (const i of this._pts) {
           const lat = st.lat(i);
           const lon = st.lon(i);
-          if (!b.contains([lat, lon])) continue;
+          if (isNaN(lat) || isNaN(lon)) continue;
+          if (lat < south || lat > north || lon < west || lon > east) continue;
+          
           const p = map.latLngToContainerPoint([lat, lon]);
-          ctx.fillStyle = paletteRef.current.st[st.E_raw[i]];
+          ctx.fillStyle = palette[st.E_raw[i]];
           ctx.beginPath();
           ctx.arc(p.x, p.y, r, 0, 6.283);
           ctx.fill();
-          ctx.strokeStyle = paletteRef.current.pointStroke;
-          ctx.lineWidth = 1;
           ctx.stroke();
+
+          drawn++;
+          if (drawn >= MAX_POINTS) {
+            break;
+          }
         }
         ctx.globalAlpha = 1.0;
       }
@@ -184,6 +202,7 @@ export default function LeafletMap({
       for (const i of ptLayerRef.current._pts) {
         const la = st.lat(i);
         const lo = st.lon(i);
+        if (isNaN(la) || isNaN(lo)) continue;
         if (!bounds.contains([la, lo])) continue;
         const p = map.latLngToContainerPoint([la, lo]);
         const dist = (p.x - clickPt.x) ** 2 + (p.y - clickPt.y) ** 2;
@@ -479,7 +498,11 @@ export default function LeafletMap({
         if (!vis[e]) continue;
         if (st.selBarrio !== null && st.B_raw[i] !== st.selBarrio) continue;
         if (st.layers.heat) {
-          sets[e].push([st.lat(i), st.lon(i), e === 0 ? 0.6 : 1.0]);
+          const lt = st.lat(i);
+          const ln = st.lon(i);
+          if (!isNaN(lt) && !isNaN(ln)) {
+            sets[e].push([lt, ln, e === 0 ? 0.6 : 1.0]);
+          }
         }
         if ((st.layers.gps && !st.APPROX_raw[i]) || (st.layers.approx && st.APPROX_raw[i])) {
           pts.push(i);
