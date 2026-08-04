@@ -611,7 +611,7 @@ def main():
 
         # Cargar Convertidor_Estados de dbanalitica.maestro_tarifas
         print("Cargando Convertidor_Estados desde dbanalitica.maestro_tarifas...")
-        cur.execute('SELECT DISTINCT "SUBACCION/SUBANOMALIA", estado FROM dbanalitica.maestro_tarifas WHERE "SUBACCION/SUBANOMALIA" IS NOT NULL AND estado IS NOT NULL')
+        cur.execute('SELECT DISTINCT "SubAccion", "Estado" FROM dbanalitica.maestro_tarifas WHERE "SubAccion" IS NOT NULL AND "Estado" IS NOT NULL')
         for sub, est in cur.fetchall():
             k = _norm_dato(sub)
             if k:

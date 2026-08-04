@@ -63,9 +63,9 @@ QUERY_HISTORICO: str = """
 
 # Cruce subacción -> estado (Efectiva/Fallida/Perdida).
 QUERY_ESTADOS: str = (
-    'SELECT DISTINCT "SUBACCION/SUBANOMALIA", estado '
+    'SELECT DISTINCT "SubAccion", "Estado" '
     "FROM dbanalitica.maestro_tarifas "
-    'WHERE "SUBACCION/SUBANOMALIA" IS NOT NULL AND estado IS NOT NULL'
+    'WHERE "SubAccion" IS NOT NULL AND "Estado" IS NOT NULL'
 )
 
 # Columnas que deben tratarse como texto (evita el ".0" que pandas pega a floats).
