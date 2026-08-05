@@ -40,6 +40,16 @@ export default function LeafletMap({
     paletteRef.current = P;
   }, [P]);
 
+  // El canvas de puntos GPS y el hit-test se definen UNA sola vez (en el effect
+  // de init) y viven fuera del render de React. Sin este ref usarían un `st`
+  // congelado del primer render: al cambiar de mes se hace lazy-load, rawArrays
+  // se reconstruye y los índices se corren, así que `st.lat(i)` daba NaN y los
+  // puntos no se actualizaban. Este ref siempre apunta al `st` vigente.
+  const stRef = useRef(st);
+  useEffect(() => {
+    stRef.current = st;
+  });
+
   const num = (val) => Math.round(val).toLocaleString("es-CO");
   const pct = (val) => val.toFixed(1).replace(".", ",");
   const riskColor = (r) => riskColorOf(P, r);
@@ -118,6 +128,7 @@ export default function LeafletMap({
       },
       _draw() {
         if (!this._c) return;
+        const st = stRef.current; // usa siempre el estado vigente, no el capturado en init
         this._reset();
         const ctx = this._c.getContext("2d");
         ctx.clearRect(0, 0, this._c.width, this._c.height);
@@ -166,6 +177,7 @@ export default function LeafletMap({
 
     // Map flyto click listener for popup buttons and individual GPS hit tests
     const handleMapClick = (domEv) => {
+      const st = stRef.current; // estado vigente para el hit-test y el popup
       // 1. Click on POPUP buttons
       const opBtn = domEv.target.closest(".op-b");
       if (opBtn) {

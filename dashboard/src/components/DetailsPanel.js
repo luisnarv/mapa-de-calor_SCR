@@ -402,7 +402,12 @@ export default function DetailsPanel({
           </>
         )}
 
-        <h3>Acciones recomendadas</h3>
+        <h3>
+          Acciones recomendadas{" "}
+          <span className="hint" title="Sugerencias automáticas derivadas de reglas operativas sobre los datos del barrio (causas, efectividad, tendencia). No usan IA.">
+            generadas por reglas operativas
+          </span>
+        </h3>
         <div className="acts">
           {acts.map((a, idx) => (
             <div key={idx} className={`act ${a.lvl}`}>
@@ -453,8 +458,12 @@ export default function DetailsPanel({
               <div key={i} className={`rec ${i === 0 ? "best" : ""}`}>
                 <div className="rec-h">
                   <b>{r.name}</b>
-                  <span className={`conf ${r.conf.toLowerCase()}`}>
-                    Confianza {r.conf}
+                  <span 
+                    className={`conf ${r.conf.toLowerCase()}`}
+                    title="La confianza estadística se calcula según la cantidad de órdenes comparables:&#10;• Alta: 30 o más órdenes&#10;• Media: 10 a 29 órdenes&#10;• Baja: menos de 10 órdenes"
+                    style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
+                  >
+                    Confianza {r.conf} <span style={{ fontSize: "10px", opacity: 0.8 }}>ⓘ</span>
                   </span>
                 </div>
                 <div className="rec-m">
@@ -785,8 +794,12 @@ export default function DetailsPanel({
               {i === 0 ? "★ " : ""}
               {r.name}
             </b>
-            <span className={`conf ${r.conf.toLowerCase()}`}>
-              Confianza {r.conf}
+            <span 
+              className={`conf ${r.conf.toLowerCase()}`}
+              title="La confianza estadística se calcula según la cantidad de órdenes comparables:&#10;• Alta: 30 o más órdenes&#10;• Media: 10 a 29 órdenes&#10;• Baja: menos de 10 órdenes"
+              style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
+            >
+              Confianza {r.conf} <span style={{ fontSize: "10px", opacity: 0.8 }}>ⓘ</span>
             </span>
           </div>
           <div className="rec-m">
