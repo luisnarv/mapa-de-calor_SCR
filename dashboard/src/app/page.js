@@ -55,8 +55,6 @@ export default function Home() {
     muni: "",
     brig: "",
     tipo: "",
-    d0: 0,
-    d1: 60,
     minOrders: 10,
     hotspot: 60,
     adjusted: true,
@@ -90,14 +88,6 @@ export default function Home() {
   const applyEntryData = (resData) => {
     setData(resData);
 
-    // Max day of the current month (day slider upper bound)
-    const M = resData.pts.m;
-    let maxD = 0;
-    for (let i = 0; i < M.length; i++) {
-      const d = Math.floor(M[i] / 1440);
-      if (d > maxD) maxD = d;
-    }
-
     // The recent month is the only one loaded; it is active by default.
     const manifest = (resData.meta && resData.meta.months) || [];
     const recent = manifest.find((m) => m.recent);
@@ -107,8 +97,6 @@ export default function Home() {
 
     setSt((prev) => ({
       ...prev,
-      d0: 0,
-      d1: maxD,
       selBarrio: null,
       months: recent ? [recent.label] : []
     }));
@@ -239,16 +227,7 @@ export default function Home() {
     };
   }, [data]);
 
-  const MAXDAY = useMemo(() => {
-    if (!rawArrays) return 0;
-    let max = 0;
-    const arr = rawArrays.DAY;
-    const N = arr.length;
-    for (let i = 0; i < N; i++) {
-      if (arr[i] > max) max = arr[i];
-    }
-    return max;
-  }, [rawArrays]);
+
 
   // Mes de cada orden como entero (se calcula UNA vez por dataset, no en cada
   // filtro). Evita crear un Date + toLocaleDateString por punto dentro de los
@@ -575,7 +554,13 @@ export default function Home() {
       if (o.tot >= st.minOrders) elig.push([b, o]);
     }
 
-    const half = Math.floor((st.d0 + st.d1) / 2);
+    // Calculate max day dynamically to split trend window in half
+    let maxDayVal = 0;
+    const dayArr = rawArrays.DAY;
+    for (let i = 0; i < dayArr.length; i++) {
+      if (dayArr[i] > maxDayVal) maxDayVal = dayArr[i];
+    }
+    const half = Math.floor(maxDayVal / 2);
     const pct = (a, b) => (b ? (a / b) * 100 : 0);
 
     for (const [, o] of elig) {
@@ -658,7 +643,7 @@ export default function Home() {
     }
 
     return elig;
-  }, [A, IDX, rawArrays, data, st.minOrders, st.hotspot, st.adjusted, st.d0, st.d1]);
+  }, [A, IDX, rawArrays, data, st.minOrders, st.hotspot, st.adjusted]);
 
   // Zone Average calculations helper
   const zoneAvg = (zonaIdx) => {
@@ -955,8 +940,6 @@ export default function Home() {
 
       if (key === "months") {
         const D0 = new Date((data ? data.meta.fecha_min : "2026-05-01") + "T00:00:00");
-        let minD = 99999;
-        let maxD = 0;
         const rawDayArr = rawArrays.DAY;
         const N = rawDayArr.length;
         for (let i = 0; i < N; i++) {
@@ -964,14 +947,6 @@ export default function Home() {
           const x = new Date(D0.getTime() + d * 86400000);
           const mKey = x.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
           const capitalized = mKey.charAt(0).toUpperCase() + mKey.slice(1);
-          if (value.includes(capitalized)) {
-            if (d < minD) minD = d;
-            if (d > maxD) maxD = d;
-          }
-        }
-        if (minD !== 99999) {
-          next.d0 = minD;
-          next.d1 = maxD;
         }
       }
 
@@ -1022,8 +997,6 @@ export default function Home() {
       muni: "",
       brig: "",
       tipo: "",
-      d0: 0,
-      d1: MAXDAY,
       minOrders: 10,
       hotspot: 60,
       adjusted: true,
@@ -1116,8 +1089,7 @@ export default function Home() {
   };
 
   // V4 Enfoque Layout Implementation
-  if (st.layout === "enfoque") {
-    let rightPanelContent = null;
+  let rightPanelContent = null;
     let bottomPanelContent = null;
 
     if (st.activeTab === "triaje") {
@@ -1194,7 +1166,6 @@ export default function Home() {
           avail={avail}
           onFilterChange={handleFilterChange}
           onReset={handleReset}
-          MAXDAY={MAXDAY}
           dayLabel={dayLabel}
           availableMonths={availableMonths}
           loadingMonths={loadingMonths}
@@ -1513,310 +1484,4 @@ export default function Home() {
         </main>
       </div>
     );
-  }
-
-  // Classic Layout fallback
-  return (
-    <div id="app">
-      <Topbar
-        st={computedSt}
-        dim={data.dim}
-        avail={avail}
-        onFilterChange={handleFilterChange}
-        onReset={handleReset}
-        MAXDAY={MAXDAY}
-        dayLabel={dayLabel}
-        availableMonths={availableMonths}
-        loadingMonths={loadingMonths}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
-      />
-
-      <KPIStrip A={A} />
-
-      <main id="main">
-        <RiskSpine
-          ELIG={ELIG}
-          st={computedSt}
-          dim={data.dim}
-          onFilterChange={handleFilterChange}
-          onSelectBarrio={handleSelectBarrio}
-        />
-
-        <section id="center">
-          <LeafletMap
-            A={A}
-            st={computedSt}
-            dim={data.dim}
-            geo={data.geo}
-            onSelectBarrio={handleSelectBarrio}
-            onSelectNic={handleSelectNic}
-            onFilterChange={handleFilterChange}
-            dayLabel={dayLabel}
-          />
-
-          {st.selBarrio != null && (
-            <button
-              type="button"
-              onClick={handleClearBarrio}
-              title="Mostrar todos los barrios y sus límites"
-              style={{
-                position: "absolute",
-                top: "12px",
-                right: "12px",
-                zIndex: 800,
-                display: "flex",
-                alignItems: "center",
-                gap: "7px",
-                padding: "7px 11px",
-                background: "var(--overlay)",
-                border: "1px solid var(--line2)",
-                borderRadius: "var(--r)",
-                color: "var(--cu2)",
-                cursor: "pointer",
-                font: "600 12px var(--ff)",
-                letterSpacing: ".04em",
-                backdropFilter: "blur(6px)",
-                boxShadow: "var(--shadow)"
-              }}
-            >
-              <span style={{ fontSize: "14px", lineHeight: 1 }}>✕</span>
-              Ver todos los barrios
-            </button>
-          )}
-
-          <div id="layers" style={layersCollapsed ? { width: "auto", minWidth: 0 } : undefined}>
-            <button
-              type="button"
-              onClick={() => setLayersCollapsed((v) => !v)}
-              title={layersCollapsed ? "Mostrar capas" : "Ocultar capas"}
-              aria-expanded={!layersCollapsed}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-                width: "100%",
-                background: "transparent",
-                border: "none",
-                padding: 0,
-                margin: layersCollapsed ? 0 : "0 0 8px",
-                color: "var(--cu2)",
-                cursor: "pointer",
-                font: "inherit",
-                fontFamily: "var(--ff)",
-                fontSize: "12px",
-                fontWeight: 700,
-                letterSpacing: ".14em",
-                textTransform: "uppercase"
-              }}
-            >
-              <span>Capas</span>
-              <span
-                style={{
-                  fontSize: "11px",
-                  lineHeight: 1,
-                  transform: layersCollapsed ? "rotate(0deg)" : "rotate(90deg)",
-                  transition: "transform .15s ease"
-                }}
-              >
-                ▸
-              </span>
-            </button>
-
-            {!layersCollapsed && (
-            <>
-            <h4>Órdenes a mostrar</h4>
-            <label className="lay">
-              <input
-                type="checkbox"
-                checked={st.est[2]}
-                onChange={(e) => {
-                  const est = [...st.est];
-                  est[2] = e.target.checked;
-                  handleFilterChange("est", est);
-                }}
-              />
-              <span className="sw" style={{ background: P.st[2] }}></span>
-              Perdidas
-            </label>
-            <label className="lay">
-              <input
-                type="checkbox"
-                checked={st.est[1]}
-                onChange={(e) => {
-                  const est = [...st.est];
-                  est[1] = e.target.checked;
-                  handleFilterChange("est", est);
-                }}
-              />
-              <span className="sw" style={{ background: P.st[1] }}></span>
-              Fallidas
-            </label>
-            <label className="lay">
-              <input
-                type="checkbox"
-                checked={st.est[0]}
-                onChange={(e) => {
-                  const est = [...st.est];
-                  est[0] = e.target.checked;
-                  handleFilterChange("est", est);
-                }}
-              />
-              <span className="sw" style={{ background: P.st[0] }}></span>
-              Efectivas
-            </label>
-
-            <div className="lgrp">
-              <h4>Cómo dibujarlas</h4>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.markers}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, markers: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Marcadores por barrio
-              </label>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.heat}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, heat: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Mapa de calor
-              </label>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.gps}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, gps: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                GPS reales
-              </label>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.approx}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, approx: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Ubicaciones aproximadas
-              </label>
-              <p className="lay-nota">
-                Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los{" "}
-                <b>puntos GPS</b> son órdenes sueltas (clic → detalle de la orden).
-              </p>
-            </div>
-
-            <div className="lgrp">
-              <h4>Límites oficiales</h4>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.zpoly}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, zpoly: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Zonas
-              </label>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.bpoly}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, bpoly: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Barrios
-              </label>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.mpoly}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, mpoly: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                Municipios
-              </label>
-            </div>
-
-            <div className="lgrp">
-              <h4>Cobertura</h4>
-              <label className="lay">
-                <input
-                  type="checkbox"
-                  checked={st.layers.sinNic}
-                  onChange={(e) => {
-                    const layers = { ...st.layers, sinNic: e.target.checked };
-                    handleFilterChange("layers", layers);
-                  }}
-                />
-                <span className="sw" style={{ background: P.sinNic }}></span>
-                Barrios sin visitar
-              </label>
-              <p className="lay-nota">
-                Barrios (polígonos) sin ninguna orden registrada. Se resaltan en amarillo fuerte.
-              </p>
-            </div>
-
-            <div className="lgrp" id="legend">
-              <h4>Índice de riesgo</h4>
-              <div>
-                <i style={{ background: P.st[0] }}></i> 0–30 &middot; Bajo
-              </div>
-              <div>
-                <i style={{ background: P.st[1] }}></i> 31–60 &middot; Medio
-              </div>
-              <div>
-                <i style={{ background: P.st[2] }}></i> 61–100 &middot; Alto
-              </div>
-            </div>
-            </>
-            )}
-          </div>
-
-          <Dock
-            A={A}
-            st={computedSt}
-            dim={data.dim}
-            dayLabel={dayLabel}
-            onFilterChange={handleFilterChange}
-            onSelectBarrio={handleSelectBarrio}
-          />
-        </section>
-
-        <DetailsPanel
-          st={computedSt}
-          A={A}
-          ELIG={ELIG}
-          dim={data.dim}
-          geo={data.geo}
-          dayLabel={dayLabel}
-          recommend={recommend}
-          techRoute={techRoute}
-          zoneAvg={zoneAvg}
-          actionsFor={actionsFor}
-          onFilterChange={handleFilterChange}
-          onSelectBarrio={handleSelectBarrio}
-          onSelectNic={handleSelectNic}
-        />
-      </main>
-    </div>
-  );
 }

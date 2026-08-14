@@ -988,82 +988,42 @@ export default function DetailsPanel({
     );
   };
 
-  const isEnfoque = st.layout === "enfoque";
-  const showRight = isEnfoque ? true : !collapsed;
-
   return (
-    <>
-      {!isEnfoque && (
+    <aside id="right">
+      <div className="ph">
         <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? "Mostrar panel de detalles" : "Ocultar panel de detalles"}
-          aria-expanded={!collapsed}
-          style={{
-            position: "fixed",
-            top: "50%",
-            right: 0,
-            transform: "translateY(-50%)",
-            zIndex: 1200,
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "12px 7px",
-            background: "var(--pan2)",
-            border: "1px solid var(--line)",
-            borderRight: "none",
-            borderRadius: "var(--r) 0 0 var(--r)",
-            color: "var(--cu2)",
-            cursor: "pointer",
-            font: "inherit",
-            fontFamily: "var(--ff)",
-            fontSize: "12px",
-            fontWeight: 600,
-            letterSpacing: ".16em",
-            textTransform: "uppercase",
-            writingMode: "vertical-rl"
-          }}
+          className={`ptab ${st.tab === "barrio" ? "on" : ""}`}
+          onClick={() => onFilterChange("tab", "barrio")}
         >
-          {collapsed ? "Detalles" : "Ocultar"}
+          Análisis de barrio
         </button>
-      )}
-
-      <aside id="right" style={!showRight ? { display: "none" } : undefined}>
-        <div className="ph">
+        <button
+          className={`ptab ${st.tab === "tecnico" ? "on" : ""}`}
+          onClick={() => onFilterChange("tab", "tecnico")}
+        >
+          Cobertura del técnico
+        </button>
+        <button
+          className={`ptab ${st.tab === "recomendador" ? "on" : ""}`}
+          onClick={() => onFilterChange("tab", "recomendador")}
+        >
+          Recomendador
+        </button>
+        {st.selNic && (
           <button
-            className={`ptab ${st.tab === "barrio" ? "on" : ""}`}
-            onClick={() => onFilterChange("tab", "barrio")}
+            className={`ptab ${st.tab === "nic" ? "on" : ""}`}
+            onClick={() => onFilterChange("tab", "nic")}
           >
-            Análisis de barrio
+            Historial del NIC
           </button>
-          <button
-            className={`ptab ${st.tab === "tecnico" ? "on" : ""}`}
-            onClick={() => onFilterChange("tab", "tecnico")}
-          >
-            Cobertura del técnico
-          </button>
-          <button
-            className={`ptab ${st.tab === "recomendador" ? "on" : ""}`}
-            onClick={() => onFilterChange("tab", "recomendador")}
-          >
-            Recomendador
-          </button>
-          {st.selNic && (
-            <button
-              className={`ptab ${st.tab === "nic" ? "on" : ""}`}
-              onClick={() => onFilterChange("tab", "nic")}
-            >
-              Historial del NIC
-            </button>
-          )}
-        </div>
-        <div id="panelBody">
-          {st.tab === "barrio" && renderBarrio()}
-          {st.tab === "tecnico" && renderTecnico()}
-          {st.tab === "recomendador" && renderRecomendador()}
-          {st.tab === "nic" && renderNic()}
-        </div>
-      </aside>
-    </>
+        )}
+      </div>
+      <div id="panelBody">
+        {st.tab === "barrio" && renderBarrio()}
+        {st.tab === "tecnico" && renderTecnico()}
+        {st.tab === "recomendador" && renderRecomendador()}
+        {st.tab === "nic" && renderNic()}
+      </div>
+    </aside>
   );
 }
