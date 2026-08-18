@@ -1022,12 +1022,15 @@ td.go>svg{display:block;margin-left:auto}
   overflow:hidden;clip-path:inset(50%);white-space:nowrap;opacity:0;pointer-events:none}
 
 /* El adjunto se anuncia sobre la caja de texto, no dentro: el nombre es largo. */
-.cb-adjunto{display:flex;align-items:center;gap:6px;margin-bottom:7px;
-  padding:5px 6px 5px 9px;border-radius:999px;font-size:11px;
+.cb-adjunto{display:flex;align-items:center;gap:7px;margin-bottom:7px;
+  padding:6px 7px 6px 10px;border-radius:12px;font-size:11px;
   background:var(--pan2);border:1px solid var(--line2);color:var(--tx)}
 .cb-adjunto>svg{flex:0 0 auto;color:var(--cu)}
-.cb-adjunto-n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cb-adjunto-p{flex:0 0 auto;color:var(--dim)}
+/* Dos líneas: el nombre del export es largo y el recuento es lo que de verdad
+   se lee —cuántas quedaron de cuántas—, así que no compiten por el mismo hueco. */
+.cb-adjunto-txt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.cb-adjunto-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cb-adjunto-d{color:var(--dim);font-size:10px}
 .cb-adjunto button{flex:0 0 auto;width:18px;height:18px;border-radius:50%;cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center;
   background:transparent;border:0;color:var(--mut)}

@@ -65,10 +65,12 @@ class OpenAIService:
         solo con lo que sabe.
         """
         model = request.model or self._default_model
-        mensajes = self._build_messages(request)
         if runner is not None:
-            # La vista llega en el cuerpo, así que no puede inyectarse por DI.
+            # La vista y el cargue llegan en el cuerpo: no se inyectan por DI.
             runner.vista = request.vista
+            runner.cargue_id = request.cargue
+        # Después de asignarlos: el prompt anuncia el archivo cargado, si lo hay.
+        mensajes = self._build_messages(request, runner)
 
         try:
             for ronda in range(MAX_RONDAS):
@@ -182,16 +184,61 @@ class OpenAIService:
             return {"error": "Los argumentos no eran JSON válido. Reintenta."}, None
         return await runner.run(llamada["name"], args)
 
-    def _build_messages(self, request: ChatRequest) -> list[dict]:
+    def _build_messages(self, request: ChatRequest, runner: Any = None) -> list[dict]:
         """Antepone el prompt de sistema. El cliente no puede sobrescribirlo."""
         turns = [m.model_dump() for m in request.messages if m.role != "system"]
-        sistema = self._prompt_de_sistema(request.vista)
+        sistema = self._prompt_de_sistema(request.vista, runner)
         return [{"role": "system", "content": sistema}, *turns]
 
-    def _prompt_de_sistema(self, vista: VistaTablero | None = None) -> str:
-        """El prompt configurado, más la fecha de hoy y lo que el usuario ve."""
-        bloques = [b for b in (self._system_prompt, self._fecha(), self._vista(vista)) if b]
+    def _prompt_de_sistema(self, vista: VistaTablero | None = None, runner: Any = None) -> str:
+        """El prompt configurado, la fecha, lo que el usuario ve y lo que subió."""
+        bloques = [
+            b
+            for b in (
+                self._system_prompt,
+                self._fecha(),
+                self._vista(vista),
+                self._cargue(runner),
+            )
+            if b
+        ]
         return "\n\n".join(bloques)
+
+    @staticmethod
+    def _cargue(runner: Any) -> str:
+        """El archivo de órdenes que subió el usuario, si hay alguno vigente.
+
+        Sin este bloque el modelo no sabe que existe y nunca llama a sus
+        herramientas: contestaría con el histórico a una pregunta sobre el
+        archivo, que es el peor error posible aquí porque las dos cifras son
+        igual de plausibles y nadie notaría el cambiazo.
+        """
+        guardado = runner.cargue_actual() if runner is not None else None
+        if guardado is None:
+            return ""
+        return (
+            f"ARCHIVO CARGADO — «{guardado.archivo}»: "
+            f"{len(guardado.cargue.ordenes)} órdenes POR EJECUTAR, ya asignadas a un técnico.\n"
+            "Están pendientes: no se han hecho, no tienen resultado y no aparecen en el "
+            "histórico ni en el mapa. Para hablar de ellas usa resumen_cargue y "
+            "ordenes_cargadas; para lo que ya pasó, las herramientas del histórico.\n"
+            "Nunca sumes ni promedies las dos cosas en una misma cifra. Cruzarlas sí "
+            "—qué efectividad tiene históricamente el barrio de una orden pendiente—, "
+            "siempre que digas cuál es cuál.\n"
+            # La regla «no tienes deuda, estrato ni NIC» es del histórico, y sin esta
+            # excepción el modelo la aplicaba también al archivo: declinaba con la
+            # frase de fuera de alcance preguntas cuyo dato tenía delante.
+            "TODA pregunta sobre este archivo está DENTRO de tu alcance, incluidas las "
+            "de deuda, tarifa o estrato, NIC, dirección y antigüedad: de estas órdenes "
+            "sí tienes esos datos. Nunca respondas a una pregunta sobre este archivo "
+            "con la frase de fuera de alcance.\n"
+            # Sin el «después de intentarlo», el modelo se acogía a esta salida sin
+            # llegar a llamar a ninguna herramienta y daba por imposible lo que sí
+            # estaba: una escapatoria fácil se usa siempre.
+            "Si después de intentarlo con las herramientas la cuenta que te piden no "
+            "sale, dilo así: «eso no lo puedo calcular con lo que tengo», y ofrece lo "
+            "más cercano que sí puedas. Nunca lo digas sin haberlo intentado."
+        )
 
     @staticmethod
     def _fecha() -> str:

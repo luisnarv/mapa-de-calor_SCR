@@ -14,6 +14,8 @@ from typing import Any
 from app.schemas.chat import VistaTablero
 from app.schemas.metrics import CandidatoBarrio, FiltroMapa
 from app.core.taxonomy import norm_dato
+from app.services.carga_ordenes import Orden
+from app.services.cargue_store import CargueGuardado, CargueStore
 from app.services.metrics_service import (
     BarrioAmbiguo,
     BarrioNoEncontrado,
@@ -21,6 +23,14 @@ from app.services.metrics_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Tope de órdenes que se le devuelven al modelo de una vez. Un cargue trae
+# cientos y volcarlas todas al prompt sale caro y no se lee mejor.
+MAX_ORDENES = 20
+
+# El resumen solo enseña la cabeza de cada reparto: la lista completa la da
+# agrupar_cargue cuando hace falta, y así no se paga en cada pregunta.
+TOPE_RESUMEN = 5
 
 _BARRIO = {
     "type": "string",
@@ -44,6 +54,15 @@ _BRIGADA = {
     ),
 }
 _TIPO_OS = {"type": "string", "description": "Tipo de orden de servicio."}
+_TARIFA = {
+    "type": "string",
+    "description": (
+        "Tarifa o estrato, completo o parcial ('estrato 2'). Cuidado: hay variantes "
+        "que se parecen ('ESTRATO 3' y 'ESTRATO 3 EXENTO' son distintas y ambas "
+        "contienen 'estrato 3'). Si la cifra tiene que ser exacta, mira primero los "
+        "valores con agrupar_cargue. El resultado dice siempre cuáles incluyó."
+    ),
+}
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -182,6 +201,131 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "resumen_cargue",
+            "description": (
+                "Totales del archivo de órdenes POR EJECUTAR que el usuario subió: "
+                "cuántas son, la deuda total y la media por orden, el rango de "
+                "antigüedad, y la cabeza del reparto por técnico, barrio, tipo de "
+                "orden y tipo de suspensión. Úsala como primer paso siempre que "
+                "pregunten por 'las órdenes cargadas', 'el archivo' o 'lo que subí', "
+                "y para cualquier total o promedio del conjunto. No son órdenes del "
+                "histórico: aún no se han hecho."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ordenes_cargadas",
+            "description": (
+                "Órdenes concretas del archivo cargado, con filtros, ordenadas por "
+                "deuda o antigüedad. Úsala cuando pidan el detalle ('¿cuáles le tocan "
+                "a Fulano?', 'las de estrato 2 con más de 5 facturas', 'las que llevan "
+                "más de 60 días'). Los filtros se combinan. Devuelve un tope de filas "
+                "y dice cuántas había en total."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tecnico": {
+                        "type": "string",
+                        "description": "Nombre del técnico, completo o parcial.",
+                    },
+                    "barrio": {
+                        "type": "string",
+                        "description": (
+                            "Barrio del archivo. Acepta el nombre suelto o la clave "
+                            "'MUNICIPIO | BARRIO'."
+                        ),
+                    },
+                    "tarifa": _TARIFA,
+                    "estado": {
+                        "type": "string",
+                        "description": "Estado de la orden: Pendiente, Asignada, Comprometida…",
+                    },
+                    "deuda_min": {
+                        "type": "number",
+                        "description": "Solo las que deben esa cantidad o más, en pesos.",
+                    },
+                    "facturas_min": {
+                        "type": "integer",
+                        "description": "Solo las que acumulan ese número de facturas vencidas o más.",
+                    },
+                    "antiguedad_min": {
+                        "type": "integer",
+                        "description": "Solo las que llevan ese número de días o más sin ejecutar.",
+                    },
+                    "ordenar_por": {
+                        "type": "string",
+                        "enum": ["deuda", "antiguedad"],
+                        "description": "Por defecto deuda, de mayor a menor.",
+                    },
+                    "limite": {
+                        "type": "integer",
+                        "description": f"Cuántas devolver. Por defecto y máximo {MAX_ORDENES}.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agrupar_cargue",
+            "description": (
+                "Reparte las órdenes cargadas por una dimensión y devuelve, de cada "
+                "grupo, cuántas son y cuánta deuda acumulan. Úsala para '¿cuántas son "
+                "de estrato 2?', '¿cómo se reparten por tipo de suspensión?' o '¿qué "
+                "barrio concentra más deuda?'. También sirve para ver qué valores "
+                "existen antes de filtrar con ordenes_cargadas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agrupar_por": {
+                        "type": "string",
+                        "enum": [
+                            "tecnico", "barrio", "tarifa", "tipo_os",
+                            "tipo_suspension", "estado",
+                        ],
+                        "description": "Por qué se agrupa.",
+                    },
+                    "ordenar_por": {
+                        "type": "string",
+                        "enum": ["ordenes", "deuda"],
+                        "description": "Por defecto ordenes, de mayor a menor.",
+                    },
+                    "limite": {
+                        "type": "integer",
+                        "description": f"Cuántos grupos devolver. Por defecto y máximo {MAX_ORDENES}.",
+                    },
+                },
+                "required": ["agrupar_por"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_orden",
+            "description": (
+                "Busca una orden concreta del archivo cargado por su número o por el "
+                "NIC del suministro. Úsala para '¿dónde queda la orden 160921481?' o "
+                "'¿a quién le tocó el NIC 8305993?'. Pasa al menos uno de los dos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "orden": {"type": "string", "description": "Número de la orden."},
+                    "nic": {"type": "string", "description": "NIC del suministro."},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -194,9 +338,32 @@ MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas
 class ToolRunner:
     """Ejecuta las herramientas contra la base y acumula el filtro para el mapa."""
 
-    def __init__(self, metrics: MetricsService, vista: VistaTablero | None = None) -> None:
+    def __init__(
+        self,
+        metrics: MetricsService,
+        vista: VistaTablero | None = None,
+        cargues: CargueStore | None = None,
+    ) -> None:
         self.metrics = metrics
         self.vista = vista
+        # El almacén y el id del archivo que subió el usuario. El id llega en el
+        # cuerpo de cada turno, igual que la vista, así que se asigna después.
+        self.cargues = cargues
+        self.cargue_id: str | None = None
+
+    def cargue_actual(self) -> CargueGuardado | None:
+        """El archivo cargado en esta conversación, o None si no hay ninguno.
+
+        Devuelve None también si el id caducó: para quien pregunta es lo mismo
+        que no haberlo subido, y así el prompt no anuncia un archivo perdido.
+        """
+        if not (self.cargues and self.cargue_id):
+            return None
+        return self.cargues.obtener(self.cargue_id)
+
+    def _ordenes(self) -> list[Orden] | None:
+        guardado = self.cargue_actual()
+        return guardado.cargue.ordenes if guardado else None
 
     def _pista_municipio(self) -> str | None:
         """Municipio de la pantalla, para desempatar barrios homónimos."""
@@ -435,3 +602,271 @@ class ToolRunner:
 
         filtro = FiltroMapa(**{k: v for k, v in kwargs.items() if k in FiltroMapa.model_fields})
         return {"aplicado": filtro.model_dump(exclude_none=True)}, filtro
+
+    # --- Herramientas sobre el archivo cargado --------------------------------
+
+    SIN_CARGUE = {
+        "error": "sin_cargue",
+        "sugerencia": (
+            "No hay ningún archivo de órdenes cargado en esta conversación. Pídele "
+            "al usuario que lo suba con el clip que hay junto a la caja de texto."
+        ),
+    }
+
+    async def _resumen_cargue(self) -> tuple[dict[str, Any], None]:
+        ordenes = self._ordenes()
+        if ordenes is None:
+            return self.SIN_CARGUE, None
+
+        deuda = sum(o.deuda or 0.0 for o in ordenes)
+        return {
+            "base": f"{len(ordenes)} órdenes por ejecutar del archivo cargado",
+            "total": len(ordenes),
+            "deuda_total": round(deuda),
+            "deuda_promedio": round(deuda / len(ordenes)) if ordenes else 0,
+            "antiguedad_dias": _rango(o.antiguedad for o in ordenes),
+            # Solo la cabeza de cada reparto: para la lista entera está
+            # agrupar_cargue, y volcarla aquí encarece todas las preguntas.
+            "top_tecnicos": _conteo(ordenes, lambda o: o.tecnico, TOPE_RESUMEN),
+            "top_barrios": _conteo(ordenes, lambda o: o.bkey, TOPE_RESUMEN),
+            "por_tipo_os": _conteo(ordenes, lambda o: o.tipo_os, TOPE_RESUMEN),
+            "por_tipo_suspension": _conteo(ordenes, lambda o: o.tipo_suspension, TOPE_RESUMEN),
+            "nota": (
+                "Son órdenes PENDIENTES: no se han ejecutado, no tienen resultado y "
+                "no están en el histórico ni en el mapa. No sumes estas cifras con "
+                "las del histórico. Los repartos vienen recortados; usa agrupar_cargue "
+                "si necesitas la lista completa."
+            ),
+        }, None
+
+    async def _ordenes_cargadas(
+        self,
+        tecnico: str | None = None,
+        barrio: str | None = None,
+        tarifa: str | None = None,
+        estado: str | None = None,
+        deuda_min: float | None = None,
+        facturas_min: int | None = None,
+        antiguedad_min: int | None = None,
+        ordenar_por: str = "deuda",
+        limite: int = MAX_ORDENES,
+    ) -> tuple[dict[str, Any], None]:
+        ordenes = self._ordenes()
+        if ordenes is None:
+            return self.SIN_CARGUE, None
+        if ordenar_por not in ("deuda", "antiguedad"):
+            raise ValueError("ordenar_por debe ser 'deuda' o 'antiguedad'")
+
+        filtradas, base = _filtrar(
+            ordenes, tecnico, barrio, tarifa, estado, deuda_min, facturas_min, antiguedad_min
+        )
+        if not filtradas:
+            return {
+                "base": base,
+                "total": 0,
+                "nota": "Ninguna orden del archivo cumple ese filtro.",
+            }, None
+
+        filtradas = sorted(
+            filtradas,
+            key=lambda o: (getattr(o, ordenar_por) or 0),
+            reverse=True,
+        )
+        tope = max(1, min(limite, MAX_ORDENES))
+        salida: dict[str, Any] = {
+            "base": base,
+            "total": len(filtradas),
+            "deuda_total": round(sum(o.deuda or 0.0 for o in filtradas)),
+            "orden": f"{ordenar_por}, de mayor a menor",
+            # Sin el nombre del cliente: es un dato personal y para decidir a
+            # quién se visita primero no aporta nada.
+            "ordenes": [_ficha(o) for o in filtradas[:tope]],
+        }
+        if tarifa:
+            # 'estrato 3' también casa con 'estrato 3 exento'. Decir qué se contó
+            # es lo único que impide dar una cifra equivocada con cara de exacta.
+            salida["tarifas_incluidas"] = sorted({o.tarifa for o in filtradas if o.tarifa})
+        if len(filtradas) > tope:
+            salida["nota"] = (
+                f"Son {len(filtradas)} en total; aquí van las {tope} primeras. Dilo."
+            )
+        return salida, None
+
+    async def _agrupar_cargue(
+        self,
+        agrupar_por: str,
+        ordenar_por: str = "ordenes",
+        limite: int = MAX_ORDENES,
+    ) -> tuple[dict[str, Any], None]:
+        ordenes = self._ordenes()
+        if ordenes is None:
+            return self.SIN_CARGUE, None
+
+        claves = {
+            "tecnico": lambda o: o.tecnico,
+            "barrio": lambda o: o.bkey,
+            "tarifa": lambda o: o.tarifa,
+            "tipo_os": lambda o: o.tipo_os,
+            "tipo_suspension": lambda o: o.tipo_suspension,
+            "estado": lambda o: o.estado,
+        }
+        if agrupar_por not in claves:
+            raise ValueError(f"agrupar_por debe ser uno de: {', '.join(claves)}")
+        if ordenar_por not in ("ordenes", "deuda"):
+            raise ValueError("ordenar_por debe ser 'ordenes' o 'deuda'")
+
+        tope = max(1, min(limite, MAX_ORDENES))
+        grupos = _conteo(ordenes, claves[agrupar_por], tope, ordenar_por)
+        total_grupos = len({claves[agrupar_por](o) for o in ordenes} - {None})
+
+        salida: dict[str, Any] = {
+            "base": f"las {len(ordenes)} órdenes del archivo cargado, por {agrupar_por}",
+            "dimension": agrupar_por,
+            "orden": f"{ordenar_por}, de mayor a menor",
+            "total_grupos": total_grupos,
+            "grupos": grupos,
+        }
+        sin_dato = sum(1 for o in ordenes if claves[agrupar_por](o) is None)
+        if sin_dato:
+            salida["sin_dato"] = sin_dato
+        if total_grupos > len(grupos):
+            salida["nota"] = (
+                f"Hay {total_grupos} valores distintos; aquí van los {len(grupos)} "
+                "primeros. Dilo si presentas la lista."
+            )
+        return salida, None
+
+    async def _buscar_orden(
+        self, orden: str | None = None, nic: str | None = None
+    ) -> tuple[dict[str, Any], None]:
+        ordenes = self._ordenes()
+        if ordenes is None:
+            return self.SIN_CARGUE, None
+        if not orden and not nic:
+            raise ValueError("Hay que pasar el número de orden o el NIC")
+
+        clave_orden, clave_nic = norm_dato(orden), norm_dato(nic)
+        halladas = [
+            o
+            for o in ordenes
+            if (clave_orden and norm_dato(o.orden) == clave_orden)
+            or (clave_nic and norm_dato(o.nic) == clave_nic)
+        ]
+        buscado = " o ".join(p for p in (f"orden {orden}" if orden else "", f"NIC {nic}" if nic else "") if p)
+
+        if not halladas:
+            return {
+                "base": buscado,
+                "encontradas": 0,
+                # Puede estar en el archivo original y haberse caído en la limpieza
+                # por no tener técnico; decirlo evita un "no existe" que es falso.
+                "nota": (
+                    f"No hay ninguna orden con {buscado} entre las cargadas. Puede que "
+                    "esté en el archivo pero sin técnico asignado: esas no se cargan."
+                ),
+            }, None
+        return {
+            "base": buscado,
+            "encontradas": len(halladas),
+            "ordenes": [_ficha(o) for o in halladas[:MAX_ORDENES]],
+        }, None
+
+
+def _ficha(orden: Orden) -> dict[str, Any]:
+    """Los campos de una orden que sí puede ver el modelo.
+
+    El nombre del cliente se queda fuera a propósito: es un dato personal y para
+    decidir a quién se visita primero no aporta nada.
+    """
+    return {
+        "orden": orden.orden, "nic": orden.nic, "tecnico": orden.tecnico,
+        "barrio": orden.bkey, "direccion": orden.direccion, "tipo_os": orden.tipo_os,
+        "tipo_suspension": orden.tipo_suspension, "tarifa": orden.tarifa,
+        "estado": orden.estado, "deuda": orden.deuda, "facturas": orden.facturas,
+        "antiguedad_dias": orden.antiguedad,
+    }
+
+
+def _filtrar(
+    ordenes: list[Orden],
+    tecnico: str | None = None,
+    barrio: str | None = None,
+    tarifa: str | None = None,
+    estado: str | None = None,
+    deuda_min: float | None = None,
+    facturas_min: int | None = None,
+    antiguedad_min: int | None = None,
+) -> tuple[list[Orden], str]:
+    """Aplica los filtros y devuelve (órdenes, descripción del recorte).
+
+    La descripción vuelve al modelo para que diga sobre qué contó, igual que el
+    `base` de las herramientas del histórico.
+    """
+    partes: list[str] = []
+
+    def texto(valor: str | None, campo, etiqueta: str) -> None:
+        nonlocal ordenes
+        if not valor:
+            return
+        clave = norm_dato(valor)
+        ordenes = [o for o in ordenes if campo(o) and clave in norm_dato(campo(o))]
+        partes.append(f"{etiqueta} {valor}")
+
+    def minimo(valor, campo, etiqueta: str) -> None:
+        nonlocal ordenes
+        if valor is None:
+            return
+        ordenes = [o for o in ordenes if campo(o) is not None and campo(o) >= valor]
+        partes.append(f"{etiqueta} {valor} o más")
+
+    texto(tecnico, lambda o: o.tecnico, "técnico")
+    texto(barrio, lambda o: o.bkey, "barrio")
+    texto(tarifa, lambda o: o.tarifa, "tarifa")
+    texto(estado, lambda o: o.estado, "estado")
+    minimo(deuda_min, lambda o: o.deuda, "deuda de")
+    minimo(facturas_min, lambda o: o.facturas, "facturas:")
+    minimo(antiguedad_min, lambda o: o.antiguedad, "antigüedad:")
+
+    return ordenes, " · ".join(partes) or "todo el cargue"
+
+
+def _conteo(
+    ordenes: list[Orden], clave, tope: int = MAX_ORDENES, ordenar_por: str = "ordenes"
+) -> list[dict[str, Any]]:
+    """Cuántas órdenes, cuánta deuda y cuánta de media por cada valor.
+
+    Se recorta a los primeros: un cargue puede tocar cien barrios y la lista
+    completa no cabe en el prompt ni le sirve a nadie.
+    """
+    acumulado: dict[str, list[float]] = {}
+    for orden in ordenes:
+        valor = clave(orden)
+        if valor is None:
+            continue
+        fila = acumulado.setdefault(valor, [0, 0.0])
+        fila[0] += 1
+        fila[1] += orden.deuda or 0.0
+
+    posicion = 1 if ordenar_por == "deuda" else 0
+    ordenado = sorted(acumulado.items(), key=lambda par: par[1][posicion], reverse=True)
+    return [
+        {
+            "valor": valor,
+            "ordenes": int(n),
+            "deuda": round(deuda),
+            "deuda_promedio": round(deuda / n),
+        }
+        for valor, (n, deuda) in ordenado[:tope]
+    ]
+
+
+def _rango(valores) -> dict[str, int] | None:
+    """Mínimo, mediana y máximo. None si no hay ni un dato."""
+    datos = sorted(v for v in valores if v is not None)
+    if not datos:
+        return None
+    return {
+        "min": datos[0],
+        "mediana": datos[len(datos) // 2],
+        "max": datos[-1],
+    }

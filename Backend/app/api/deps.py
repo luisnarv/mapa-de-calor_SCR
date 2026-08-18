@@ -1,5 +1,6 @@
 """Dependencias globales que se inyectan en los endpoints."""
 
+from functools import lru_cache
 from typing import Annotated, AsyncIterator
 
 from fastapi import Depends
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.services.cargue_store import CargueStore
 from app.services.metrics_service import MetricsService
 from app.services.openai_service import OpenAIService, get_openai_service
 from app.services.tools import ToolRunner
@@ -36,9 +38,18 @@ def get_metrics_service() -> MetricsService:
 MetricsDep = Annotated[MetricsService, Depends(get_metrics_service)]
 
 
-def get_tool_runner(metrics: MetricsDep) -> ToolRunner:
+@lru_cache
+def get_cargue_store() -> CargueStore:
+    """Uno por proceso: los cargues tienen que sobrevivir entre peticiones."""
+    return CargueStore(settings.CARGUE_TTL_MINUTOS, settings.CARGUE_MAXIMOS)
+
+
+CargueStoreDep = Annotated[CargueStore, Depends(get_cargue_store)]
+
+
+def get_tool_runner(metrics: MetricsDep, store: CargueStoreDep) -> ToolRunner:
     """Las herramientas que el modelo puede invocar, atadas a la sesión de esta petición."""
-    return ToolRunner(metrics)
+    return ToolRunner(metrics, cargues=store)
 
 
 ToolRunnerDep = Annotated[ToolRunner, Depends(get_tool_runner)]

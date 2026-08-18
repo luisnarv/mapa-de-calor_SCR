@@ -50,6 +50,13 @@ class ChatRequest(BaseModel):
     vista: VistaTablero | None = Field(
         default=None, description="Filtros activos en el tablero del usuario."
     )
+    cargue: str | None = Field(
+        default=None,
+        description=(
+            "Id del archivo de órdenes que el usuario subió. Se manda en cada turno "
+            "porque el backend no guarda la conversación."
+        ),
+    )
     model: str | None = Field(
         default=None, description="Si se omite, se usa OPENAI_MODEL del entorno."
     )

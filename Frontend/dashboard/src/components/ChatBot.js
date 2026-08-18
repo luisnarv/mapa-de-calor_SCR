@@ -28,6 +28,7 @@ const CLOSE_MS = 160;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const STREAM_ENDPOINT = `${API_URL}/api/v1/openai/chat/stream`;
+const CARGA_ENDPOINT = `${API_URL}/api/v1/ordenes/cargar`;
 
 // PENDIENTE: los votos solo viven en la pantalla. Falta el endpoint que los
 // guarde; hasta entonces se pierden al recargar.
@@ -46,13 +47,11 @@ const CHIPS = ["Barrios críticos", "Causas de pérdida", "Rendimiento por briga
 // Solo hojas de cálculo: el asistente trabaja sobre tablas de órdenes.
 // `accept` es una sugerencia del navegador, no una garantía —y el MIME de un
 // CSV cambia según el equipo—, así que lo que decide es la extensión.
-const ARCHIVO_EXT = [".xlsx", ".xls", ".csv"];
+const ARCHIVO_EXT = [".xlsx", ".csv"];
 const ARCHIVO_ACCEPT = [
   ".xlsx",
-  ".xls",
   ".csv",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
   "text/csv"
 ].join(",");
 const ARCHIVO_MAX_MB = 10;
@@ -191,12 +190,8 @@ function Calificar({ voto, onVotar }) {
   );
 }
 
-/** Tamaño legible: en el chip no cabe —ni sirve— la cifra en bytes. */
-function pesoLegible(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
-}
+/** Miles con punto, como se leen aquí. */
+const cifra = (n) => Number(n).toLocaleString("es-CO");
 
 /** Etiqueta de espera. Avanza por las frases y se queda en la última. */
 function Pensando() {
@@ -241,9 +236,11 @@ export default function ChatBot({ onAccion, vista }) {
   const [soportaVoz, setSoportaVoz] = useState(false);
   const [errorVoz, setErrorVoz] = useState(null);
 
-  // PENDIENTE: el adjunto todavía no sale de la pantalla. Falta el endpoint que
-  // lo reciba; por eso el chip se queda puesto aunque se envíe la consulta.
+  // El archivo sube apenas se adjunta, no al enviar: así el resultado del cargue
+  // —o su error— aparece de una vez y no después de escribir una pregunta.
   const [archivo, setArchivo] = useState(null);
+  const [cargue, setCargue] = useState(null);
+  const [subiendo, setSubiendo] = useState(false);
   const [errorArchivo, setErrorArchivo] = useState(null);
 
   const [panelPos, setPanelPos] = useState(null);
@@ -273,6 +270,7 @@ export default function ChatBot({ onAccion, vista }) {
   const vozRef = useRef(null);
   const previoRef = useRef("");
   const archivoRef = useRef(null);
+  const cargaRef = useRef(null);
 
   // En un ref para que `send` no se recree cada vez que cambie el callback.
   const accionRef = useRef(onAccion);
@@ -281,6 +279,11 @@ export default function ChatBot({ onAccion, vista }) {
     accionRef.current = onAccion;
     vistaRef.current = vista;
   }, [onAccion, vista]);
+
+  const cargueRef = useRef(null);
+  useEffect(() => {
+    cargueRef.current = cargue?.id ?? null;
+  }, [cargue]);
 
   // El reconocimiento de voz se crea una vez. En Firefox no existe y el botón
   // simplemente no se dibuja: un botón permanentemente inhabilitado no ayuda.
@@ -318,6 +321,41 @@ export default function ChatBot({ onAccion, vista }) {
     };
   }, []);
 
+  /** Sube el archivo y guarda el id del cargue, que viaja en cada turno. */
+  const subir = useCallback(async (f) => {
+    cargaRef.current?.abort();
+    const controller = new AbortController();
+    cargaRef.current = controller;
+
+    setCargue(null);
+    setSubiendo(true);
+    try {
+      const cuerpo = new FormData();
+      cuerpo.append("archivo", f);
+      const res = await fetch(CARGA_ENDPOINT, {
+        method: "POST",
+        body: cuerpo,
+        signal: controller.signal
+      });
+      const datos = await res.json().catch(() => null);
+      if (!res.ok) {
+        // El backend explica qué pasó (no es un export de órdenes, ninguna tiene
+        // técnico...). Ese texto es más útil que un "error 400".
+        throw new Error(datos?.detail || `El servidor respondió ${res.status}`);
+      }
+      setCargue(datos);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setArchivo(null);
+      setErrorArchivo(err.message);
+    } finally {
+      if (cargaRef.current === controller) {
+        cargaRef.current = null;
+        setSubiendo(false);
+      }
+    }
+  }, []);
+
   // El input de archivo va oculto: el que se ve es el clip. Su valor se limpia
   // siempre para que elegir dos veces el mismo archivo vuelva a disparar change.
   const onArchivo = useCallback((e) => {
@@ -329,7 +367,7 @@ export default function ChatBot({ onAccion, vista }) {
     const ext = punto < 0 ? "" : f.name.slice(punto).toLowerCase();
     if (!ARCHIVO_EXT.includes(ext)) {
       setArchivo(null);
-      setErrorArchivo("Solo se admiten archivos Excel (.xlsx, .xls) o CSV.");
+      setErrorArchivo("Solo se admiten archivos Excel (.xlsx) o CSV.");
       return;
     }
     if (f.size > ARCHIVO_MAX_MB * 1024 * 1024) {
@@ -340,10 +378,15 @@ export default function ChatBot({ onAccion, vista }) {
 
     setErrorArchivo(null);
     setArchivo(f);
-  }, []);
+    subir(f);
+  }, [subir]);
 
   const quitarArchivo = useCallback(() => {
+    cargaRef.current?.abort();
+    cargaRef.current = null;
     setArchivo(null);
+    setCargue(null);
+    setSubiendo(false);
     setErrorArchivo(null);
   }, []);
 
@@ -477,7 +520,8 @@ export default function ChatBot({ onAccion, vista }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages: historial.map(({ role, content }) => ({ role, content })),
-            vista: vistaRef.current?.() ?? null
+            vista: vistaRef.current?.() ?? null,
+            cargue: cargueRef.current
           }),
           signal: controller.signal
         });
@@ -806,12 +850,20 @@ export default function ChatBot({ onAccion, vista }) {
 
               <footer className="cb-foot">
                 {archivo && (
-                  <div className="cb-adjunto">
+                  <div className="cb-adjunto" aria-live="polite">
                     <FileSpreadsheet size={13} strokeWidth={2.2} aria-hidden="true" />
-                    <span className="cb-adjunto-n" title={archivo.name}>
-                      {archivo.name}
-                    </span>
-                    <span className="cb-adjunto-p">{pesoLegible(archivo.size)}</span>
+                    <div className="cb-adjunto-txt">
+                      <span className="cb-adjunto-n" title={archivo.name}>
+                        {archivo.name}
+                      </span>
+                      <span className="cb-adjunto-d">
+                        {subiendo
+                          ? "Leyendo el archivo…"
+                          : cargue
+                            ? `${cifra(cargue.cargadas)} órdenes con técnico, de ${cifra(cargue.leidas)}`
+                            : ""}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={quitarArchivo}
@@ -857,7 +909,7 @@ export default function ChatBot({ onAccion, vista }) {
                     type="button"
                     className="cb-clip"
                     onClick={() => archivoRef.current?.click()}
-                    disabled={busy}
+                    disabled={busy || subiendo}
                     aria-label="Adjuntar un archivo Excel o CSV"
                     title="Adjuntar Excel o CSV"
                   >

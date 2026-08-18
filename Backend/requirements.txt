@@ -9,6 +9,11 @@ pydantic-settings==2.7.0
 # OpenAI
 openai>=1.59,<2
 
+# Lectura del archivo de órdenes que sube el usuario (.xlsx)
+openpyxl==3.1.5
+# Necesario para recibir el archivo por multipart/form-data.
+python-multipart==0.0.20
+
 # Base de datos
 SQLAlchemy[asyncio]==2.0.36
 asyncpg==0.30.0
