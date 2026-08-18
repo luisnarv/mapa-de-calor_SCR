@@ -132,3 +132,57 @@ def test_filtrar_mapa_autoriza_el_resaltado_por_iniciativa_propia():
     assert "no la uses" in descripcion, "falta el caso en que NO debe resaltar"
     # Y el prompt de sistema tiene que pedir lo mismo, no lo contrario.
     assert "destaque UN resultado concreto" in settings.OPENAI_SYSTEM_PROMPT
+
+
+# --- Fallida no es perdida: la diferencia es que una se cobra ------------------
+
+@pytest.mark.asyncio
+async def test_mayor_perdida_ordena_por_ordenes_no_cobradas(runner):
+    """Antes respondía por efectividad y ponía primero un barrio con 0 perdidas."""
+    salida, _ = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "perdidas", "peores": True}
+    )
+
+    filas = salida["filas"]
+    assert filas[0]["nombre"] == "BARRANQUILLA | CIUDADELA 20 DE JULIO"
+    assert filas[0]["pe"] == 280
+    assert [f["pe"] for f in filas] == sorted((f["pe"] for f in filas), reverse=True)
+    assert salida["criterio"] == "perdidas"
+
+
+@pytest.mark.asyncio
+async def test_peores_se_invierte_segun_el_criterio(runner):
+    """Con efectividad el peor es el de menor valor; con pérdidas, el de mayor."""
+    por_perdidas, _ = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "perdidas", "peores": True}
+    )
+    por_efectividad, _ = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "ef_pct", "peores": True}
+    )
+
+    assert por_perdidas["filas"][0]["pe"] > 0
+    assert por_efectividad["filas"][0]["ef_pct"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_el_ranking_por_defecto_no_cambia(runner):
+    salida, _ = await runner.run("ranking", {"dimension": "brigada"})
+    assert salida["criterio"] == "ef_adj"
+
+
+@pytest.mark.asyncio
+async def test_un_criterio_inventado_no_pasa(runner):
+    salida, _ = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "lo_que_sea"}
+    )
+    assert "error" in salida
+
+
+def test_la_regla_de_negocio_esta_en_el_prompt():
+    """Sin ella el modelo lee «pérdida» como «mal desempeño»."""
+    from app.core.config import settings
+
+    prompt = settings.OPENAI_SYSTEM_PROMPT
+
+    assert "Fallida: la brigada fue y no pudo suspender, pero la orden SÍ se paga" in prompt
+    assert "Perdida: NO se paga" in prompt

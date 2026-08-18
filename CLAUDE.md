@@ -46,6 +46,11 @@ pedir que se lea.
 
 ## Reglas del dominio que no son obvias
 
+- **Fallida y perdida no son lo mismo, y la diferencia es plata.** Una orden
+  *fallida* es la que la brigada no pudo ejecutar pero **igual se cobra**. Una
+  *perdida* **no se cobra**: por eso se llama así. Cuando alguien pregunta "dónde
+  se pierde más", habla de las Perdidas, no de las no efectivas en general — un
+  barrio con efectividad pésima puede no tener ni una sola pérdida.
 - **Hay dos efectividades y no son intercambiables.** `ef_pct` es cruda
   (`efectivas / total`) y es la que muestra el mapa. `ef_adj` es ajustada
   (`efectivas / (total − no controlables)`) y es la que ordena los rankings.

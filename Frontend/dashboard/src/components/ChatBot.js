@@ -4,10 +4,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
   Crosshair,
+  FileSpreadsheet,
   Maximize2,
   MessageSquare,
   Mic,
   Minus,
+  Paperclip,
   Pin,
   PinOff,
   Send,
@@ -40,6 +42,20 @@ const MOTIVOS = [
 ];
 
 const CHIPS = ["Barrios críticos", "Causas de pérdida", "Rendimiento por brigada"];
+
+// Solo hojas de cálculo: el asistente trabaja sobre tablas de órdenes.
+// `accept` es una sugerencia del navegador, no una garantía —y el MIME de un
+// CSV cambia según el equipo—, así que lo que decide es la extensión.
+const ARCHIVO_EXT = [".xlsx", ".xls", ".csv"];
+const ARCHIVO_ACCEPT = [
+  ".xlsx",
+  ".xls",
+  ".csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv"
+].join(",");
+const ARCHIVO_MAX_MB = 10;
 
 const SALUDO = {
   role: "assistant",
@@ -175,6 +191,13 @@ function Calificar({ voto, onVotar }) {
   );
 }
 
+/** Tamaño legible: en el chip no cabe —ni sirve— la cifra en bytes. */
+function pesoLegible(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
 /** Etiqueta de espera. Avanza por las frases y se queda en la última. */
 function Pensando() {
   const [i, setI] = useState(0);
@@ -218,6 +241,11 @@ export default function ChatBot({ onAccion, vista }) {
   const [soportaVoz, setSoportaVoz] = useState(false);
   const [errorVoz, setErrorVoz] = useState(null);
 
+  // PENDIENTE: el adjunto todavía no sale de la pantalla. Falta el endpoint que
+  // lo reciba; por eso el chip se queda puesto aunque se envíe la consulta.
+  const [archivo, setArchivo] = useState(null);
+  const [errorArchivo, setErrorArchivo] = useState(null);
+
   const [panelPos, setPanelPos] = useState(null);
   const [panelDragging, setPanelDragging] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -244,6 +272,7 @@ export default function ChatBot({ onAccion, vista }) {
 
   const vozRef = useRef(null);
   const previoRef = useRef("");
+  const archivoRef = useRef(null);
 
   // En un ref para que `send` no se recree cada vez que cambie el callback.
   const accionRef = useRef(onAccion);
@@ -287,6 +316,35 @@ export default function ChatBot({ onAccion, vista }) {
       rec.onresult = rec.onerror = rec.onend = null;
       rec.abort();
     };
+  }, []);
+
+  // El input de archivo va oculto: el que se ve es el clip. Su valor se limpia
+  // siempre para que elegir dos veces el mismo archivo vuelva a disparar change.
+  const onArchivo = useCallback((e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+
+    const punto = f.name.lastIndexOf(".");
+    const ext = punto < 0 ? "" : f.name.slice(punto).toLowerCase();
+    if (!ARCHIVO_EXT.includes(ext)) {
+      setArchivo(null);
+      setErrorArchivo("Solo se admiten archivos Excel (.xlsx, .xls) o CSV.");
+      return;
+    }
+    if (f.size > ARCHIVO_MAX_MB * 1024 * 1024) {
+      setArchivo(null);
+      setErrorArchivo(`El archivo pesa más de ${ARCHIVO_MAX_MB} MB.`);
+      return;
+    }
+
+    setErrorArchivo(null);
+    setArchivo(f);
+  }, []);
+
+  const quitarArchivo = useCallback(() => {
+    setArchivo(null);
+    setErrorArchivo(null);
   }, []);
 
   const alternarVoz = useCallback(() => {
@@ -747,6 +805,23 @@ export default function ChatBot({ onAccion, vista }) {
               </div>
 
               <footer className="cb-foot">
+                {archivo && (
+                  <div className="cb-adjunto">
+                    <FileSpreadsheet size={13} strokeWidth={2.2} aria-hidden="true" />
+                    <span className="cb-adjunto-n" title={archivo.name}>
+                      {archivo.name}
+                    </span>
+                    <span className="cb-adjunto-p">{pesoLegible(archivo.size)}</span>
+                    <button
+                      type="button"
+                      onClick={quitarArchivo}
+                      aria-label={`Quitar ${archivo.name}`}
+                      title="Quitar el archivo"
+                    >
+                      <X size={12} strokeWidth={2.4} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
                 <form
                   className="cb-input"
                   onSubmit={(e) => {
@@ -768,6 +843,26 @@ export default function ChatBot({ onAccion, vista }) {
                     aria-label="Consulta para el asistente"
                     disabled={busy}
                   />
+
+                  <input
+                    ref={archivoRef}
+                    type="file"
+                    className="cb-file"
+                    accept={ARCHIVO_ACCEPT}
+                    onChange={onArchivo}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+                  <button
+                    type="button"
+                    className="cb-clip"
+                    onClick={() => archivoRef.current?.click()}
+                    disabled={busy}
+                    aria-label="Adjuntar un archivo Excel o CSV"
+                    title="Adjuntar Excel o CSV"
+                  >
+                    <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
+                  </button>
 
                   {soportaVoz && (
                     <button
@@ -792,8 +887,9 @@ export default function ChatBot({ onAccion, vista }) {
                     <Send size={15} strokeWidth={2.2} aria-hidden="true" />
                   </button>
                 </form>
-                <p className={`cb-legal ${errorVoz ? "err" : ""}`}>
+                <p className={`cb-legal ${errorVoz || errorArchivo ? "err" : ""}`}>
                   {errorVoz ||
+                    errorArchivo ||
                     "Las respuestas las genera un modelo de lenguaje. Verifica antes de operar."}
                 </p>
               </footer>

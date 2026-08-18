@@ -1000,13 +1000,14 @@ td.go>svg{display:block;margin-left:auto}
 .cb-send:hover:not(:disabled){filter:brightness(1.1)}
 .cb-send:disabled{opacity:.45;cursor:default}
 
-/* Dictado por voz: secundario frente a enviar, hasta que está escuchando. */
-.cb-mic{flex:0 0 auto;width:36px;height:36px;border-radius:50%;cursor:pointer;
+/* Dictado y adjunto: secundarios frente a enviar. Comparten reglas para que no
+   se separen con el tiempo; solo el micrófono añade el estado "escuchando". */
+.cb-mic,.cb-clip{flex:0 0 auto;width:36px;height:36px;border-radius:50%;cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center;
   background:var(--pan2);border:1px solid var(--line2);color:var(--mut);
   transition:background .15s ease,color .15s ease,border-color .15s ease}
-.cb-mic:hover:not(:disabled){border-color:var(--cu);color:var(--tx)}
-.cb-mic:disabled{opacity:.45;cursor:default}
+.cb-mic:hover:not(:disabled),.cb-clip:hover:not(:disabled){border-color:var(--cu);color:var(--tx)}
+.cb-mic:disabled,.cb-clip:disabled{opacity:.45;cursor:default}
 .cb-mic.on{background:var(--bad);border-color:var(--bad);color:#FFFFFF;
   animation:cb-escucha 1.5s ease-out infinite}
 /* El halo late hacia afuera: se ve que el micrófono está abierto sin leer nada. */
@@ -1014,6 +1015,23 @@ td.go>svg{display:block;margin-left:auto}
   0%{box-shadow:0 0 0 0 rgba(255,90,95,.5)}
   70%,100%{box-shadow:0 0 0 8px rgba(255,90,95,0)}
 }
+
+/* El control nativo dibuja su propio "Seleccionar archivo": se saca del flujo en
+   vez de ocultarlo con display, para que .click() lo siga abriendo. */
+.cb-file{position:absolute;width:1px;height:1px;padding:0;border:0;margin:-1px;
+  overflow:hidden;clip-path:inset(50%);white-space:nowrap;opacity:0;pointer-events:none}
+
+/* El adjunto se anuncia sobre la caja de texto, no dentro: el nombre es largo. */
+.cb-adjunto{display:flex;align-items:center;gap:6px;margin-bottom:7px;
+  padding:5px 6px 5px 9px;border-radius:999px;font-size:11px;
+  background:var(--pan2);border:1px solid var(--line2);color:var(--tx)}
+.cb-adjunto>svg{flex:0 0 auto;color:var(--cu)}
+.cb-adjunto-n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cb-adjunto-p{flex:0 0 auto;color:var(--dim)}
+.cb-adjunto button{flex:0 0 auto;width:18px;height:18px;border-radius:50%;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;border:0;color:var(--mut)}
+.cb-adjunto button:hover{background:var(--line2);color:var(--tx)}
 
 .cb-legal{margin-top:7px;font-size:10px;color:var(--dim);text-align:center;line-height:1.4}
 .cb-legal.err{color:var(--bad)}

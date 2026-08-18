@@ -64,6 +64,20 @@ def _pct(x: int, y: int) -> float:
     return round(x / y * 100, 1) if y else 0.0
 
 
+# Criterios por los que se puede ordenar un ranking. `perdidas` son las órdenes
+# que NO se pagan: son las que cuestan plata, a diferencia de las fallidas, que
+# no se ejecutaron pero sí se cobran.
+CRITERIOS = {
+    "ef_adj": lambda f: f.ef_adj,
+    "ef_pct": lambda f: f.ef_pct,
+    "perdidas": lambda f: f.pe,
+    "pct_perdidas": lambda f: f.pe / f.tot if f.tot else 0.0,
+    "fallidas": lambda f: f.fa,
+    "pct_fallidas": lambda f: f.fa / f.tot if f.tot else 0.0,
+    "volumen": lambda f: f.tot,
+}
+
+
 def _a_dto(conteo: Conteo, nombre: str, municipio: str | None = None) -> Efectividad:
     den = conteo.tot - conteo.noctrl
     return Efectividad(
@@ -197,15 +211,22 @@ class MetricsService:
         min_ordenes: int = 10,
         limite: int = 10,
         ascendente: bool = False,
+        ordenar_por: str = "ef_adj",
     ) -> list[Efectividad]:
-        """Ordena brigadas, técnicos o barrios por efectividad ajustada.
+        """Ordena brigadas, técnicos o barrios por el criterio pedido.
 
-        Se usa la ajustada porque es como el tablero ya ordena estos rankings
-        (Dock.js:295): comparar por la cruda castiga a quien recibe más órdenes
-        con causas fuera de su control.
+        Por defecto la efectividad ajustada, que es como el tablero ordena estos
+        rankings (Dock.js:295): comparar por la cruda castiga a quien recibe más
+        órdenes con causas fuera de su control.
+
+        Pero no toda pregunta se contesta con efectividad. «Dónde pierdo más» se
+        ordena por órdenes perdidas, que son las que no se cobran; responderla con
+        efectividad devuelve barrios sin una sola pérdida.
         """
         if dimension not in ("brigada", "tecnico", "barrio"):
             raise ValueError(f"Dimensión no soportada: {dimension}")
+        if ordenar_por not in CRITERIOS:
+            raise ValueError(f"Criterio no soportado: {ordenar_por}")
 
         p = self.datos
         conteos = self._agrupar(
@@ -216,7 +237,7 @@ class MetricsService:
         filas = [
             _a_dto(c, catalogo[i]) for i, c in conteos.items() if c.tot >= min_ordenes
         ]
-        filas.sort(key=lambda f: f.ef_adj, reverse=not ascendente)
+        filas.sort(key=CRITERIOS[ordenar_por], reverse=not ascendente)
         return filas[:limite]
 
     async def causas(

@@ -87,9 +87,26 @@ TOOLS: list[dict[str, Any]] = [
                     "municipio": _MUNICIPIO,
                     "mes": _MES,
                     "brigada": _BRIGADA,
+                    "ordenar_por": {
+                        "type": "string",
+                        "enum": [
+                            "ef_adj", "ef_pct", "perdidas", "pct_perdidas",
+                            "fallidas", "pct_fallidas", "volumen",
+                        ],
+                        "description": (
+                            "Criterio de orden. Por defecto ef_adj. Usa 'perdidas' "
+                            "cuando pregunten dónde se pierde más: son las órdenes "
+                            "que NO se cobran. 'fallidas' son las que no se "
+                            "ejecutaron pero sí se pagan, que es otra cosa."
+                        ),
+                    },
                     "peores": {
                         "type": "boolean",
-                        "description": "true para los de peor desempeño. Por defecto, los mejores.",
+                        "description": (
+                            "true para los peores. Con efectividad son los de menor "
+                            "valor; con perdidas o fallidas, los de mayor. Por "
+                            "defecto, los mejores."
+                        ),
                     },
                     "min_ordenes": {
                         "type": "integer",
@@ -170,15 +187,15 @@ TOOLS: list[dict[str, Any]] = [
 
 NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in TOOLS)
 
+# Criterios donde un valor alto es malo, no bueno.
+MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas"})
+
 
 class ToolRunner:
     """Ejecuta las herramientas contra la base y acumula el filtro para el mapa."""
 
     def __init__(self, metrics: MetricsService, vista: VistaTablero | None = None) -> None:
         self.metrics = metrics
-        # Lo que el usuario tiene en pantalla. Se usa solo para desempatar nombres
-        # repetidos: aplicarlo como filtro por defecto haría que una pregunta
-        # global respondiera en silencio sobre el recorte de su vista.
         self.vista = vista
 
     def _pista_municipio(self) -> str | None:
@@ -240,7 +257,10 @@ class ToolRunner:
                 "candidatos": [c.model_dump() for c in exc.candidatos],
                 "sugerencia": "Pregunta al usuario cuál de estos barrios quiso decir.",
             }, None
-        except TypeError as exc:  # argumentos que el modelo inventó
+        except (TypeError, ValueError) as exc:
+            # Argumentos que el modelo inventó: nombres de parámetro que no
+            # existen (TypeError) o valores fuera del enum (ValueError). Vuelven
+            # como dato para que reintente, no como excepción que corte el chat.
             logger.warning("Argumentos inválidos para %s: %s", nombre, exc)
             return {"error": f"Argumentos inválidos para {nombre}: {exc}"}, None
 
@@ -334,13 +354,19 @@ class ToolRunner:
         brigada: str | None = None,
         peores: bool = False,
         min_ordenes: int = 10,
+        ordenar_por: str = "ef_adj",
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+
+        # "Peor" se invierte según el criterio: con efectividad el peor es el de
+        # menor valor, pero con pérdidas o fallidas el peor es el que más tiene.
+        ascendente = not peores if ordenar_por in MAYOR_ES_PEOR else peores
 
         async def consultar(en_barrios, en_municipio, minimo):
             return await self.metrics.ranking(
                 dimension=dimension, bkeys=en_barrios, municipio=en_municipio,
-                mes=mes, brigada=brigada, min_ordenes=minimo, ascendente=peores,
+                mes=mes, brigada=brigada, min_ordenes=minimo,
+                ascendente=ascendente, ordenar_por=ordenar_por,
             )
 
         filas = await consultar(bkeys, None if bkeys else municipio, min_ordenes)
@@ -361,7 +387,7 @@ class ToolRunner:
             "base": base,
             "dimension": dimension,
             "orden": "peor a mejor" if peores else "mejor a peor",
-            "criterio": "efectividad ajustada (ef_adj)",
+            "criterio": ordenar_por,
             "min_ordenes": min_ordenes,
             "filas": [f.model_dump() for f in filas],
         }
