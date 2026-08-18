@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.schemas.metrics import FiltroMapa
+from app.schemas.chat import VistaTablero
+from app.schemas.metrics import CandidatoBarrio, FiltroMapa
+from app.core.taxonomy import norm_dato
 from app.services.metrics_service import (
     BarrioAmbiguo,
     BarrioNoEncontrado,
@@ -22,13 +24,26 @@ logger = logging.getLogger(__name__)
 
 _BARRIO = {
     "type": "string",
-    "description": "Nombre del barrio tal como lo escribió el usuario; se resuelve solo.",
+    "description": (
+        "Barrio a consultar. Si en los filtros activos de su pantalla hay uno, pasa "
+        "esa clave completa tal cual ('MUNICIPIO | BARRIO'): hay barrios homónimos "
+        "en varios municipios y la clave evita la ambigüedad. Si el usuario nombra "
+        "otro barrio, pasa su nombre y se resuelve solo."
+    ),
 }
 _MES = {
     "type": "string",
     "description": "Mes en formato YYYY-MM. Si se omite, se usa todo el histórico.",
 }
 _MUNICIPIO = {"type": "string", "description": "Nombre del municipio."}
+_BRIGADA = {
+    "type": "string",
+    "description": (
+        "Tipo de brigada, p. ej. 'Brigada Tipo Pesada' o 'Brigada Tipo Liviana'. "
+        "Pásalo siempre que el usuario nombre una: sin él la cifra sale de todas."
+    ),
+}
+_TIPO_OS = {"type": "string", "description": "Tipo de orden de servicio."}
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -38,11 +53,15 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Efectividad de un barrio, municipio o del total. Devuelve la cruda y "
                 "la ajustada, más el desglose de efectivas, fallidas y perdidas. "
-                "Úsala para '¿qué efectividad tiene X?'."
+                "Úsala para '¿qué efectividad tiene X?'. Devuelve además `base`: "
+                "el recorte exacto sobre el que se calculó, que debes citar."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES},
+                "properties": {
+                    "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
+                    "brigada": _BRIGADA, "tipo_os": _TIPO_OS,
+                },
             },
         },
     },
@@ -53,7 +72,8 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Ordena brigadas, técnicos o barrios por efectividad ajustada. "
                 "Úsala para '¿qué brigada funciona mejor en X?' o "
-                "'¿cuáles son los peores barrios?'."
+                "'¿cuáles son los peores barrios?'. Si en el barrio pedido no hay "
+                "muestra suficiente, amplía solo al municipio y lo avisa en `ampliado`."
             ),
             "parameters": {
                 "type": "object",
@@ -66,6 +86,7 @@ TOOLS: list[dict[str, Any]] = [
                     "barrio": _BARRIO,
                     "municipio": _MUNICIPIO,
                     "mes": _MES,
+                    "brigada": _BRIGADA,
                     "peores": {
                         "type": "boolean",
                         "description": "true para los de peor desempeño. Por defecto, los mejores.",
@@ -89,7 +110,10 @@ TOOLS: list[dict[str, Any]] = [
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES},
+                "properties": {
+                    "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
+                    "brigada": _BRIGADA,
+                },
             },
         },
     },
@@ -122,7 +146,11 @@ TOOLS: list[dict[str, Any]] = [
             "name": "filtrar_mapa",
             "description": (
                 "Aplica un filtro al tablero que el usuario está viendo. No consulta "
-                "datos. Úsala cuando pida ver, marcar o resaltar algo en el mapa."
+                "datos. Úsala en dos situaciones: cuando el usuario pida ver, marcar "
+                "o resaltar algo, Y por iniciativa propia cuando tu respuesta "
+                "destaque UN resultado concreto (el mejor barrio, la peor brigada), "
+                "para dejarlo señalado en el mapa. Si vas a dar una lista o hablar "
+                "en general, no la uses: mover la vista sin que lo pidan molesta."
             ),
             "parameters": {
                 "type": "object",
@@ -140,11 +168,52 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in TOOLS)
+
+
 class ToolRunner:
     """Ejecuta las herramientas contra la base y acumula el filtro para el mapa."""
 
-    def __init__(self, metrics: MetricsService) -> None:
+    def __init__(self, metrics: MetricsService, vista: VistaTablero | None = None) -> None:
         self.metrics = metrics
+        # Lo que el usuario tiene en pantalla. Se usa solo para desempatar nombres
+        # repetidos: aplicarlo como filtro por defecto haría que una pregunta
+        # global respondiera en silencio sobre el recorte de su vista.
+        self.vista = vista
+
+    def _pista_municipio(self) -> str | None:
+        """Municipio de la pantalla, para desempatar barrios homónimos."""
+        if not self.vista:
+            return None
+        if self.vista.municipio:
+            return self.vista.municipio
+        return self.vista.barrio.partition(" | ")[0] if self.vista.barrio else None
+
+    async def _resolver(self, barrio: str) -> CandidatoBarrio:
+        return await self.metrics.resolver_barrio(barrio, municipio=self._pista_municipio())
+
+    async def _grupo(self, barrio: str) -> list[CandidatoBarrio]:
+        """Los barrios que corresponden al texto: uno, o varios de un municipio.
+
+        «Los Robles de Soledad» son diez etapas distintas en el catálogo pero un
+        solo sitio para quien pregunta. Cuando todos los homónimos caen en el
+        mismo municipio se devuelven juntos y la métrica los suma; devolver un
+        menú de diez sería no responder.
+        """
+        try:
+            return [await self._resolver(barrio)]
+        except BarrioAmbiguo as ambiguo:
+            candidatos = ambiguo.candidatos
+            pista = self._pista_municipio()
+            if pista:
+                del_municipio = [
+                    c for c in candidatos if norm_dato(c.municipio) == norm_dato(pista)
+                ]
+                if del_municipio:
+                    return del_municipio
+            if len({c.municipio for c in candidatos}) == 1:
+                return candidatos
+            raise  # Municipios distintos: aquí sí hay que preguntar.
 
     async def run(self, nombre: str, args: dict[str, Any]) -> tuple[dict[str, Any], FiltroMapa | None]:
         """Devuelve (resultado para el modelo, filtro para el mapa o None).
@@ -152,11 +221,12 @@ class ToolRunner:
         Nunca lanza: los errores se devuelven como datos para que el modelo
         pueda explicarlos o repreguntar.
         """
+        # Se valida contra la lista publicada, no contra los atributos: si no, un
+        # nombre inventado por el modelo alcanzaría cualquier método privado.
+        if nombre not in NOMBRES_DE_HERRAMIENTAS:
+            return {"error": f"Herramienta desconocida: {nombre}"}, None
         try:
-            manejador = getattr(self, f"_{nombre}", None)
-            if manejador is None:
-                return {"error": f"Herramienta desconocida: {nombre}"}, None
-            return await manejador(**args)
+            return await getattr(self, f"_{nombre}")(**args)
         except BarrioNoEncontrado as exc:
             return {
                 "error": "barrio_no_encontrado",
@@ -176,28 +246,84 @@ class ToolRunner:
 
     # --- Herramientas ---------------------------------------------------------
 
-    async def _efectividad(
-        self, barrio: str | None = None, municipio: str | None = None, mes: str | None = None
-    ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkey = None
-        if barrio:
-            resuelto = await self.metrics.resolver_barrio(barrio)
-            bkey = resuelto.bkey
-            municipio = municipio or resuelto.municipio
+    async def _recorte(
+        self,
+        barrio: str | None,
+        municipio: str | None,
+        mes: str | None,
+        brigada: str | None = None,
+    ) -> tuple[list[str] | None, str | None, str, FiltroMapa]:
+        """Traduce los argumentos a un recorte concreto y a su descripción.
 
-        datos = await self.metrics.efectividad(bkey=bkey, municipio=municipio, mes=mes)
+        La descripción viaja de vuelta al modelo en cada respuesta: es lo que le
+        permite decir sobre qué calculó la cifra en vez de dar por hecho que le
+        hicieron caso.
+        """
+        bkeys = None
+        if barrio:
+            grupo = await self._grupo(barrio)
+            bkeys = [c.bkey for c in grupo]
+            municipio = municipio or grupo[0].municipio
+
+        if bkeys and len(bkeys) == 1:
+            donde = bkeys[0]
+        elif bkeys:
+            donde = f"{len(bkeys)} barrios de {municipio} con ese nombre"
+        else:
+            donde = municipio or "todo el Atlántico"
+
+        partes = [donde, mes or "todo el histórico"]
+        if brigada:
+            partes.append(f"brigada {brigada}")
+
         filtro = FiltroMapa(
-            barrio=bkey,
-            municipio=municipio if not bkey else None,
+            # El tablero solo marca un barrio a la vez; con varios se encuadra el
+            # municipio, que es lo más cercano que se puede mostrar.
+            barrio=bkeys[0] if bkeys and len(bkeys) == 1 else None,
+            municipio=None if bkeys and len(bkeys) == 1 else municipio,
+            brigada=brigada,
             meses=[mes] if mes else None,
         )
-        return {
+        return bkeys, municipio, " · ".join(partes), filtro
+
+    async def _efectividad(
+        self,
+        barrio: str | None = None,
+        municipio: str | None = None,
+        mes: str | None = None,
+        brigada: str | None = None,
+        tipo_os: str | None = None,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        datos = await self.metrics.efectividad(
+            bkeys=bkeys,
+            municipio=None if bkeys else municipio,
+            mes=mes,
+            brigada=brigada,
+            tipo_os=tipo_os,
+            etiqueta=base,
+        )
+
+        salida: dict[str, Any] = {
+            "base": base,
             "metricas": datos.model_dump(),
             "nota": (
                 "ef_pct es la efectividad cruda (la que muestra el mapa en su tooltip) "
-                "y ef_adj la ajustada. Di siempre cuál estás citando."
+                "y ef_adj la ajustada. Di cuál citas y sobre qué base."
             ),
-        }, filtro
+        }
+        if bkeys and len(bkeys) > 1:
+            # Una sola pasada agrupada, no una consulta por barrio.
+            detalle = await self.metrics.ranking(
+                dimension="barrio", bkeys=bkeys, mes=mes, brigada=brigada,
+                min_ordenes=0, limite=len(bkeys),
+            )
+            salida["detalle_por_barrio"] = [f.model_dump() for f in detalle]
+            salida["nota_agrupacion"] = (
+                f"El nombre corresponde a {len(bkeys)} barrios del catálogo y las "
+                "cifras están sumadas. Dilo, y ofrece el desglose."
+            )
+        return salida, filtro
 
     async def _ranking(
         self,
@@ -205,57 +331,73 @@ class ToolRunner:
         barrio: str | None = None,
         municipio: str | None = None,
         mes: str | None = None,
+        brigada: str | None = None,
         peores: bool = False,
         min_ordenes: int = 10,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkey = None
-        if barrio:
-            resuelto = await self.metrics.resolver_barrio(barrio)
-            bkey = resuelto.bkey
-            municipio = municipio or resuelto.municipio
+        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
 
-        filas = await self.metrics.ranking(
-            dimension=dimension,
-            bkey=bkey,
-            municipio=municipio if not bkey else None,
-            mes=mes,
-            min_ordenes=min_ordenes,
-            ascendente=peores,
-        )
-        filtro = FiltroMapa(
-            barrio=bkey,
-            municipio=municipio if not bkey else None,
-            meses=[mes] if mes else None,
-        )
-        return {
+        async def consultar(en_barrios, en_municipio, minimo):
+            return await self.metrics.ranking(
+                dimension=dimension, bkeys=en_barrios, municipio=en_municipio,
+                mes=mes, brigada=brigada, min_ordenes=minimo, ascendente=peores,
+            )
+
+        filas = await consultar(bkeys, None if bkeys else municipio, min_ordenes)
+
+        ampliado = None
+        if not filas and bkeys and municipio:
+            # Igual que el panel del tablero: si el barrio no da muestra, se sube
+            # al municipio. Rendirse sería inútil teniendo el dato al lado.
+            filas = await consultar(None, municipio, min_ordenes)
+            if filas:
+                ampliado = (
+                    f"En {base} no hay nadie con {min_ordenes} órdenes o más, "
+                    f"así que estos son de todo {municipio}."
+                )
+                base = f"{municipio} · {mes or 'todo el histórico'}"
+
+        salida = {
+            "base": base,
             "dimension": dimension,
             "orden": "peor a mejor" if peores else "mejor a peor",
             "criterio": "efectividad ajustada (ef_adj)",
+            "min_ordenes": min_ordenes,
             "filas": [f.model_dump() for f in filas],
-        }, filtro
+        }
+        if ampliado:
+            salida["ampliado"] = ampliado
+        elif not filas:
+            salida["nota"] = f"Sin resultados en {base} con el mínimo pedido."
+        return salida, filtro
 
     async def _causas_no_efectivas(
-        self, barrio: str | None = None, municipio: str | None = None, mes: str | None = None
+        self,
+        barrio: str | None = None,
+        municipio: str | None = None,
+        mes: str | None = None,
+        brigada: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkey = None
-        if barrio:
-            resuelto = await self.metrics.resolver_barrio(barrio)
-            bkey = resuelto.bkey
-            municipio = municipio or resuelto.municipio
-
+        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
         filas = await self.metrics.causas(
-            bkey=bkey, municipio=municipio if not bkey else None, mes=mes
+            bkeys=bkeys, municipio=None if bkeys else municipio, mes=mes, brigada=brigada
         )
-        filtro = FiltroMapa(
-            barrio=bkey,
-            municipio=municipio if not bkey else None,
-            meses=[mes] if mes else None,
-        )
-        return {"causas": [f.model_dump() for f in filas]}, filtro
+        return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
 
     async def _buscar_barrio(self, texto: str) -> tuple[dict[str, Any], None]:
         candidatos = await self.metrics.buscar_barrios(texto)
-        return {"candidatos": [c.model_dump() for c in candidatos]}, None
+        mostrados = candidatos[:12]
+        salida: dict[str, Any] = {
+            "total_encontrados": len(candidatos),
+            "candidatos": [c.model_dump() for c in mostrados],
+        }
+        if len(mostrados) < len(candidatos):
+            # Callar el recorte hacía que el usuario no viera su barrio en la lista.
+            salida["nota"] = (
+                f"Hay {len(candidatos)} en total; se muestran los {len(mostrados)} "
+                "de mayor volumen. Dilo si le presentas la lista."
+            )
+        return salida, None
 
     async def _meses_disponibles(self) -> tuple[dict[str, Any], None]:
         return {"meses": await self.metrics.meses_disponibles()}, None
@@ -263,7 +405,7 @@ class ToolRunner:
     async def _filtrar_mapa(self, **kwargs: Any) -> tuple[dict[str, Any], FiltroMapa]:
         barrio = kwargs.get("barrio")
         if barrio:
-            kwargs["barrio"] = (await self.metrics.resolver_barrio(barrio)).bkey
+            kwargs["barrio"] = (await self._resolver(barrio)).bkey
 
         filtro = FiltroMapa(**{k: v for k, v in kwargs.items() if k in FiltroMapa.model_fields})
         return {"aplicado": filtro.model_dump(exclude_none=True)}, filtro

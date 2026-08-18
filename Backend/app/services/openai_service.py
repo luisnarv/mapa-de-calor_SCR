@@ -23,7 +23,7 @@ from openai import (
 )
 
 from app.core.config import settings
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse, VistaTablero
 from app.services.tools import TOOLS, ToolRunner
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,9 @@ class OpenAIService:
         """
         model = request.model or self._default_model
         mensajes = self._build_messages(request)
+        if runner is not None:
+            # La vista llega en el cuerpo, así que no puede inyectarse por DI.
+            runner.vista = request.vista
 
         try:
             for ronda in range(MAX_RONDAS):
@@ -182,24 +185,51 @@ class OpenAIService:
     def _build_messages(self, request: ChatRequest) -> list[dict]:
         """Antepone el prompt de sistema. El cliente no puede sobrescribirlo."""
         turns = [m.model_dump() for m in request.messages if m.role != "system"]
-        return [{"role": "system", "content": self._prompt_de_sistema()}, *turns]
+        sistema = self._prompt_de_sistema(request.vista)
+        return [{"role": "system", "content": sistema}, *turns]
 
-    def _prompt_de_sistema(self) -> str:
-        """El prompt configurado más la fecha de hoy.
+    def _prompt_de_sistema(self, vista: VistaTablero | None = None) -> str:
+        """El prompt configurado, más la fecha de hoy y lo que el usuario ve."""
+        bloques = [b for b in (self._system_prompt, self._fecha(), self._vista(vista)) if b]
+        return "\n\n".join(bloques)
 
-        El modelo no tiene reloj: sin esto rellena el año con el de su
-        entrenamiento y responde «agosto de 2023» estando en 2026. Se calcula por
-        petición, no al arrancar, para que un servidor de días no se quede viejo.
+    @staticmethod
+    def _fecha() -> str:
+        """El modelo no tiene reloj.
+
+        Sin esto rellena el año con el de su entrenamiento y responde «agosto de
+        2023» estando en 2026. Se calcula por petición, no al arrancar, para que un
+        servidor de días no se quede viejo.
         """
         hoy = datetime.now(COLOMBIA).date()
-        fecha = (
+        return (
             f"Hoy es {hoy.isoformat()}. Si el usuario nombra un mes sin año, se "
             f"refiere al del año en curso ({hoy.year}); tradúcelo a YYYY-MM antes "
             f"de llamar a una herramienta. Nunca supongas otro año."
         )
-        if not self._system_prompt:
-            return fecha
-        return "\n\n".join((self._system_prompt, fecha))
+
+    @staticmethod
+    def _vista(vista: VistaTablero | None) -> str:
+        """Los filtros que el usuario tiene puestos.
+
+        Sin esto el chat responde sobre todo el histórico mientras la persona mira
+        un mes y una zona concretos: las dos cifras se contradicen y el chat pierde
+        credibilidad aunque los números estén bien.
+        """
+        resumen = vista.resumen() if vista else ""
+        if not resumen:
+            return (
+                "El usuario no tiene filtros puestos: está viendo todo el histórico.\n"
+                "Al dar una cifra, di siempre sobre qué recorte la calculaste."
+            )
+        return (
+            f"FILTROS ACTIVOS EN SU PANTALLA — {resumen}\n"
+            "Úsalos por defecto en cada herramienta, salvo que pida otra cosa "
+            "explícitamente. Si él dice «este barrio» o «aquí», se refiere a estos.\n"
+            "Al dar una cifra, di siempre sobre qué recorte la calculaste; si por "
+            "algún motivo respondes sobre un recorte distinto al de su pantalla, "
+            "adviértelo en la misma frase."
+        )
 
     @staticmethod
     def _translate(exc: Exception) -> OpenAIServiceError:

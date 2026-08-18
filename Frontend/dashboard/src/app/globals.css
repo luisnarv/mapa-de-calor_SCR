@@ -948,10 +948,13 @@ td.go>svg{display:block;margin-left:auto}
 .cb-voto-acts button.primary:hover{filter:brightness(1.1);color:#FFFFFF}
 .cb-voto-acts button:disabled{opacity:.45;cursor:default;filter:none}
 
-/* Aviso de que el tablero se filtró solo, para que el cambio no pase inadvertido. */
-.cb-filtro{display:flex;align-items:center;gap:6px;align-self:stretch;
-  padding:7px 10px;border-radius:9px;font-size:11px;line-height:1.4;
-  background:var(--pan2);border:1px dashed var(--cu);color:var(--mut)}
+/* Aviso de que el tablero se filtró solo. Es un botón: al hacer clic vuelve a
+   aplicar ese filtro, útil cuando el usuario lo limpió a mano. */
+.cb-filtro{display:flex;align-items:center;gap:6px;align-self:stretch;text-align:left;
+  padding:7px 10px;border-radius:9px;font-size:11px;line-height:1.4;cursor:pointer;
+  background:var(--pan2);border:1px dashed var(--cu);color:var(--mut);
+  transition:background .15s ease,border-color .15s ease,color .15s ease}
+.cb-filtro:hover{background:var(--pan);border-style:solid;color:var(--tx)}
 .cb-filtro>svg{flex:0 0 auto;color:var(--cu)}
 .cb-filtro b{color:var(--tx);font-weight:600}
 

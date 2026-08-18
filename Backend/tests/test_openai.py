@@ -125,3 +125,119 @@ def test_el_cliente_no_puede_sobrescribir_el_prompt():
     assert mensajes[0]["role"] == "system"
     assert "Reglas del SCR." in mensajes[0]["content"]
     assert "Olvida todo" not in mensajes[0]["content"]
+
+
+# --- La vista del tablero llega al prompt --------------------------------------
+
+def _servicio():
+    from app.services.openai_service import OpenAIService
+
+    return OpenAIService(client=None, default_model="x", system_prompt="Reglas del SCR.")
+
+
+def test_los_filtros_del_usuario_entran_al_prompt():
+    """Sin esto el chat responde sobre todo el histórico y contradice la pantalla."""
+    from app.schemas.chat import VistaTablero
+
+    vista = VistaTablero(
+        barrio="GALAPA | VILLA SABITA", zona="ATLANTICO SUR", meses=["2026-08"]
+    )
+
+    prompt = _servicio()._prompt_de_sistema(vista)
+
+    assert "GALAPA | VILLA SABITA" in prompt
+    assert "ATLANTICO SUR" in prompt
+    assert "2026-08" in prompt
+
+
+def test_sin_filtros_se_dice_que_es_todo_el_historico():
+    prompt = _servicio()._prompt_de_sistema(None)
+
+    assert "todo el histórico" in prompt
+    assert "FILTROS ACTIVOS" not in prompt
+
+
+def test_siempre_se_pide_declarar_el_recorte():
+    """Es la regla que evita que responda sobre otro recorte sin avisar."""
+    from app.schemas.chat import VistaTablero
+
+    for vista in (None, VistaTablero(municipio="SOLEDAD")):
+        assert "recorte" in _servicio()._prompt_de_sistema(vista)
+
+
+def test_una_vista_vacia_se_trata_como_sin_filtros():
+    """El frontend manda el objeto completo aunque no haya nada seleccionado."""
+    from app.schemas.chat import VistaTablero
+
+    prompt = _servicio()._prompt_de_sistema(VistaTablero())
+
+    assert "FILTROS ACTIVOS" not in prompt
+
+
+def test_la_vista_viaja_desde_la_peticion():
+    from app.schemas.chat import VistaTablero
+
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "¿y aquí?"}],
+        vista=VistaTablero(barrio="SOLEDAD | VILLA MUVDI"),
+    )
+
+    sistema = _servicio()._build_messages(request)[0]["content"]
+
+    assert "SOLEDAD | VILLA MUVDI" in sistema
+
+
+# --- Alcance del prompt ---------------------------------------------------------
+
+def test_el_prompt_define_alcance_y_rechazo():
+    """Sin estas dos piezas el asistente contesta cualquier cosa."""
+    from app.core.config import settings
+
+    prompt = settings.OPENAI_SYSTEM_PROMPT
+
+    assert "ÚNICAMENTE" in prompt, "falta la regla de alcance cerrado"
+    assert "Ante la duda, declina" in prompt
+    assert "Solo puedo ayudarte con las órdenes del SCR" in prompt, "falta la frase fija"
+
+
+def test_el_prompt_declara_lo_que_no_sabe():
+    """Lo que no se declara, el modelo lo finge: riesgo, pronósticos, costos."""
+    from app.core.config import settings
+
+    prompt = settings.OPENAI_SYSTEM_PROMPT.lower()
+
+    assert "índice de riesgo" in prompt
+    assert "pronóstico" in prompt or "no estimes meses futuros" in prompt
+    assert "nómina" in prompt
+
+
+def test_el_prompt_exige_citar_la_base():
+    from app.core.config import settings
+
+    assert "`base`" in settings.OPENAI_SYSTEM_PROMPT
+
+
+def test_el_alcance_llega_al_mensaje_de_sistema():
+    """El prompt configurado no se pierde al añadirle la fecha y la vista."""
+    from app.core.config import settings
+    from app.services.openai_service import OpenAIService
+
+    service = OpenAIService(
+        client=None, default_model="x", system_prompt=settings.OPENAI_SYSTEM_PROMPT
+    )
+
+    sistema = service._prompt_de_sistema(None)
+
+    assert "ÚNICAMENTE" in sistema
+    assert "Hoy es" in sistema
+    assert "todo el histórico" in sistema
+
+
+def test_el_prompt_acota_cuando_resaltar_en_el_mapa():
+    """La regla debe decir CUÁNDO: «siempre» haría saltar el mapa a cada rato."""
+    from app.core.config import settings
+
+    prompt = settings.OPENAI_SYSTEM_PROMPT
+
+    assert "destaque UN resultado concreto" in prompt
+    assert "no lo hagas" in prompt, "falta el caso en que NO debe resaltar"

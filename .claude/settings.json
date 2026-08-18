@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -v \"^\\\\.$\\\\|^\\\\.\\\\.$\")"
+      "Bash(grep -v \"^\\\\.$\\\\|^\\\\.\\\\.$\")",
+      "Bash(sed -i 's/^from app.schemas.chat import ChatRequest, ChatResponse$/from app.schemas.chat import ChatRequest, ChatResponse, VistaTablero/' app/services/openai_service.py)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(cd \"c:/Users/P745/OneDrive - ISES S.A.S/Documentos/AI/mapa-de-calor_SCR/Frontend/dashboard/src\" && sed -i 's|<ChatBot onAccion={handleAccionChat} />|<ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />|g' app/page.js && grep -n \"<ChatBot\" app/page.js)",
+      "Bash(cd \"c:/Users/P745/OneDrive - ISES S.A.S/Documentos/AI/mapa-de-calor_SCR/Backend\" && grep -n \"^from typing\\\\|^from collections\" app/services/metrics_service.py && sed -i 's/^from typing import Sequence$/from typing import Sequence/' app/services/metrics_service.py && grep -n \"Sequence\" app/services/metrics_service.py | head -3)",
+      "Bash(sed -i 's/await service.efectividad\\(bkey=\"BARRIO QUE NO EXISTE\"\\)/await service.efectividad\\(bkeys=[\"BARRIO QUE NO EXISTE\"]\\)/' tests/test_metrics_service.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest -q)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\P745\\OneDrive - ISES S.A.S\\Documentos\\AI\\mapa-de-calor_SCR\\Frontend\\dashboard\\src\\app",
+      "c:\\Users\\P745\\OneDrive - ISES S.A.S\\Documentos\\AI\\mapa-de-calor_SCR\\Backend\\app\\services"
     ]
   }
 }

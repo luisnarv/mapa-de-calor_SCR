@@ -195,10 +195,15 @@ function Pensando() {
 }
 
 /**
- * @param {{ onAccion?: (accion: object) => void }} props
+ * @param {{
+ *   onAccion?: (accion: object) => void,
+ *   vista?: () => object | null
+ * }} props
  *   `onAccion` recibe los filtros que el backend pide aplicar al tablero.
+ *   `vista` es una función —no un objeto— para leer los filtros en el momento de
+ *   enviar: si fuera un valor, el envío usaría el de la última renderización.
  */
-export default function ChatBot({ onAccion }) {
+export default function ChatBot({ onAccion, vista }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -242,9 +247,11 @@ export default function ChatBot({ onAccion }) {
 
   // En un ref para que `send` no se recree cada vez que cambie el callback.
   const accionRef = useRef(onAccion);
+  const vistaRef = useRef(vista);
   useEffect(() => {
     accionRef.current = onAccion;
-  }, [onAccion]);
+    vistaRef.current = vista;
+  }, [onAccion, vista]);
 
   // El reconocimiento de voz se crea una vez. En Firefox no existe y el botón
   // simplemente no se dibuja: un botón permanentemente inhabilitado no ayuda.
@@ -411,7 +418,8 @@ export default function ChatBot({ onAccion }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: historial.map(({ role, content }) => ({ role, content }))
+            messages: historial.map(({ role, content }) => ({ role, content })),
+            vista: vistaRef.current?.() ?? null
           }),
           signal: controller.signal
         });
@@ -446,7 +454,10 @@ export default function ChatBot({ onAccion }) {
             // El backend resolvió una consulta: que el tablero se filtre solo.
             if (payload.accion) {
               accionRef.current?.(payload.accion);
-              setFiltroAplicado(resumirFiltro(payload.accion));
+              // Se guarda la acción completa, no solo su resumen: el chip la
+              // vuelve a aplicar si el usuario limpió los filtros a mano.
+              const resumen = resumirFiltro(payload.accion);
+              if (resumen) setFiltroAplicado({ accion: payload.accion, resumen });
             }
           }
         }
@@ -720,10 +731,18 @@ export default function ChatBot({ onAccion }) {
                 })}
 
                 {filtroAplicado && (
-                  <p className="cb-filtro">
+                  <button
+                    type="button"
+                    className="cb-filtro"
+                    onClick={() => accionRef.current?.(filtroAplicado.accion)}
+                    title="Volver a aplicar este filtro en el mapa"
+                    aria-label={`Volver a aplicar el filtro: ${filtroAplicado.resumen}`}
+                  >
                     <Crosshair size={12} strokeWidth={2.2} aria-hidden="true" />
-                    Mapa filtrado: <b>{filtroAplicado}</b>
-                  </p>
+                    <span>
+                      Mapa filtrado: <b>{filtroAplicado.resumen}</b>
+                    </span>
+                  </button>
                 )}
               </div>
 

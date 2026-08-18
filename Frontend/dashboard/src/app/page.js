@@ -1017,6 +1017,27 @@ export default function Home() {
     setSt((prev) => ({ ...prev, selBarrio: null, jerBarrio: null }));
   };
 
+  // Lo que el usuario tiene filtrado, en nombres. Sin esto el chat responde sobre
+  // todo el histórico mientras la persona mira un mes y una zona concretos.
+  const vistaParaChat = () => {
+    if (!data) return null;
+    const dim = data.dim;
+    const nombre = (lista, valor) =>
+      valor === "" || valor == null ? null : lista[+valor] ?? null;
+
+    // st.months guarda etiquetas ("Agosto de 2026"); el backend espera YYYY-MM.
+    const porEtiqueta = new Map((data.meta.months || []).map((m) => [m.label, m.key]));
+
+    return {
+      barrio: st.selBarrio != null ? dim.barrios[st.selBarrio] ?? null : null,
+      municipio: nombre(dim.munis, st.muni),
+      zona: nombre(dim.zonas, st.zona),
+      brigada: nombre(dim.brigs, st.brig),
+      tipo_os: nombre(dim.tipos, st.tipo),
+      meses: (st.months || []).map((l) => porEtiqueta.get(l)).filter(Boolean)
+    };
+  };
+
   // El asistente responde con NOMBRES (no conoce el orden de las dimensiones del
   // payload); aquí se traducen a los índices que espera el estado del tablero.
   const handleAccionChat = (accion) => {
@@ -1562,7 +1583,7 @@ export default function Home() {
           {rightPanelContent}
         </main>
 
-        <ChatBot onAccion={handleAccionChat} />
+        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />
       </div>
     );
   }
@@ -1869,7 +1890,7 @@ export default function Home() {
         />
       </main>
 
-      <ChatBot onAccion={handleAccionChat} />
+      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />
     </div>
   );
 }

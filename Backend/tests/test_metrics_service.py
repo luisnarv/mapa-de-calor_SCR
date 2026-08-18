@@ -78,7 +78,7 @@ async def test_los_meses_suman_el_total(service, meta):
 @pytest.mark.asyncio
 async def test_un_filtro_que_no_existe_no_devuelve_el_total(service):
     """Devolver el global sería peor: el usuario lo leería como su barrio."""
-    r = await service.efectividad(bkey="BARRIO QUE NO EXISTE")
+    r = await service.efectividad(bkeys=["BARRIO QUE NO EXISTE"])
     assert r.tot == 0
 
 
