@@ -34,22 +34,26 @@ jobs:
           cache: pip
 
       - name: Instalar dependencias
+        working-directory: Etl
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Ejecutar ETL
+        working-directory: Etl
         env:
           # El secreto se configura en Settings → Secrets and variables → Actions.
           SCR_DATABASE_URL: ${{ secrets.SCR_DATABASE_URL }}
           ETL_LOG_LEVEL: INFO
         run: python run_etl.py
 
+      # PENDIENTE: el ETL deja los JSON en Etl/salida/. Repartirlos a
+      # Frontend/dashboard/public/ y a Backend/app/data/ sigue siendo manual.
       - name: Commitear el JSON regenerado (si cambió)
         run: |
           git config user.name  "etl-bot"
           git config user.email "etl-bot@users.noreply.github.com"
-          git add dashboard/public/data.json dashboard/public/data_*.json
+          git add Etl/salida/data.json Etl/salida/data_*.json
           if git diff --cached --quiet; then
             echo "Sin cambios en los datos; no se commitea."
           else
