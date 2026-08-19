@@ -1,0 +1,60 @@
+# ===== SECRETOS =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===== PYTHON =====
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# ===== DATOS TABULARES =====
+*.csv
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+
+# ===== NOTEBOOKS Y MODELOS (Modelos/) =====
+.ipynb_checkpoints/
+catboost_info/
+*.parquet
+
+# ===== NODE =====
+node_modules/
+.next/
+out/
+
+# ===== REGISTROS =====
+*.log
+logs/
+
+# ===== WINDOWS / ONEDRIVE =====
+Thumbs.db
+ehthumbs.db
+desktop.ini
+~$*
+*.tmp
+*.stackdump
+
+# ===== macOS / LINUX =====
+.DS_Store
+.DS_Store?
+._*
+*~
+
+# ===== EDITORES =====
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
