@@ -11,7 +11,6 @@ export default function Topbar({
   avail,
   onFilterChange,
   onReset,
-  MAXDAY,
   dayLabel,
   availableMonths,
   loadingMonths = [],
@@ -189,50 +188,12 @@ export default function Topbar({
               })}
             </div>
 
-            <div className="mm-days">
-              <div className="mm-days-h">
-                <span className="mm-title">Días</span>
-                <span className="mm-range">
-                  {dayLabel(st.d0)} – {dayLabel(st.d1)}
-                </span>
-              </div>
-              <div className="mm-sliders">
-                <input
-                  type="range"
-                  min={0}
-                  max={MAXDAY}
-                  value={st.d0}
-                  onChange={(e) => {
-                    const v = Math.min(+e.target.value, st.d1);
-                    onFilterChange("d0", v);
-                  }}
-                />
-                <input
-                  type="range"
-                  min={0}
-                  max={MAXDAY}
-                  value={st.d1}
-                  onChange={(e) => {
-                    const v = Math.max(+e.target.value, st.d0);
-                    onFilterChange("d1", v);
-                  }}
-                />
-              </div>
-            </div>
+
           </div>
         )}
       </div>
 
-      <div className="f">
-        <label>Diseño / Vista</label>
-        <select
-          value={st.layout || "enfoque"}
-          onChange={(e) => onFilterChange("layout", e.target.value)}
-        >
-          <option value="enfoque">V4 Enfoque</option>
-          <option value="classic">Clásico</option>
-        </select>
-      </div>
+
 
       <button className="btn" onClick={onReset}>
         Reiniciar filtros
