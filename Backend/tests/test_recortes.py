@@ -274,3 +274,75 @@ async def test_pedir_un_ano_agrega_todos_sus_meses():
     assert enero["metricas"]["tot"] == 0
     assert ano["metricas"]["tot"] > enero["metricas"]["tot"]
     assert ano["metricas"]["ef_pct"] > 0
+
+
+# --- Bug 5: el mapa y la respuesta hablaban de periodos distintos --------------
+#
+# El caso real: «mejor barrio de Barranquilla» devolvió El Romance con 17 órdenes
+# de todo el histórico y filtró el mapa, pero el mapa se quedó en agosto, donde
+# ese barrio no tiene ninguna. El usuario vio la pantalla vacía y preguntó si los
+# datos eran de agosto; el modelo dijo que sí.
+
+@pytest.mark.asyncio
+async def test_un_recorte_historico_lleva_los_meses_al_mapa(runner, metrics):
+    """Sin `meses`, el tablero conservaba los suyos y enseñaba otro periodo."""
+    _, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
+
+    assert filtro.meses == sorted(await metrics.meses_disponibles())
+
+
+@pytest.mark.asyncio
+async def test_un_recorte_con_mes_manda_solo_ese_mes(runner):
+    """Pedir un mes concreto sigue mandando ese mes, no el histórico entero."""
+    _, filtro = await runner.run("efectividad", {"barrio": "El Romance", "mes": "2026-01"})
+
+    assert filtro.meses == ["2026-01"]
+
+
+# --- Bug 6: el chat contestaba el histórico mientras el mapa mostraba un mes ----
+#
+# El caso real: con agosto en pantalla, «mejor barrio de Barranquilla» devolvió El
+# Romance con 17 órdenes de TODO el histórico —en agosto no tiene ninguna—, filtró
+# el mapa y lo dejó en blanco. Al preguntarle si eran de agosto, dijo que sí.
+
+@pytest.mark.asyncio
+async def test_sin_mes_se_hereda_el_periodo_de_la_pantalla(metrics):
+    """La cifra del chat tiene que salir del mismo periodo que el tablero."""
+    runner = ToolRunner(metrics, vista=VistaTablero(meses=["2026-01"]))
+    resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
+
+    assert resultado["metricas"]["tot"] == 5, "enero, no las 17 del histórico"
+    assert "2026-01" in resultado["base"]
+    assert filtro.meses == ["2026-01"]
+
+
+@pytest.mark.asyncio
+async def test_el_historico_completo_hay_que_pedirlo_por_su_nombre(metrics):
+    """Heredar la pantalla no puede dejar sin forma de mirar toda la historia."""
+    runner = ToolRunner(metrics, vista=VistaTablero(meses=["2026-01"]))
+    resultado, filtro = await runner.run(
+        "efectividad", {"barrio": "El Romance", "mes": "todo"}
+    )
+
+    assert resultado["metricas"]["tot"] == 17
+    assert filtro.meses == sorted(await metrics.meses_disponibles())
+
+
+@pytest.mark.asyncio
+async def test_un_mes_explicito_le_gana_a_la_pantalla(metrics):
+    """Si lo piden, manda lo pedido: heredar es solo el valor por defecto."""
+    runner = ToolRunner(metrics, vista=VistaTablero(meses=["2026-08"]))
+    resultado, _ = await runner.run(
+        "efectividad", {"barrio": "El Romance", "mes": "2026-01"}
+    )
+
+    assert resultado["metricas"]["tot"] == 5
+
+
+@pytest.mark.asyncio
+async def test_sin_vista_se_sigue_respondiendo_el_historico(runner, metrics):
+    """El chat también se usa sin tablero detrás; ahí no hay nada que heredar."""
+    resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
+
+    assert resultado["metricas"]["tot"] == 17
+    assert filtro.meses == sorted(await metrics.meses_disponibles())

@@ -46,7 +46,8 @@ _MES = {
     "description": (
         "Periodo: un mes 'YYYY-MM', un año entero 'YYYY' —que vale por todos sus "
         "meses con datos— o una lista para varios sueltos, p. ej. "
-        "['2026-07', '2026-08']. Si se omite, todo el histórico."
+        "['2026-07', '2026-08']. Para el histórico completo, 'todo'. Si se omite, "
+        "se usa el periodo que el usuario tiene en pantalla."
     ),
 }
 _MUNICIPIO = {"type": "string", "description": "Nombre del municipio."}
@@ -348,10 +349,16 @@ class PeriodoVacio(Exception):
         self.disponibles = disponibles
 
 
+# Omitir el mes ya no significa «todo»: se hereda el periodo de la pantalla. Para
+# el histórico completo el modelo tiene que pedirlo por su nombre.
+TODO_EL_HISTORICO = frozenset({"todo", "historico", "histórico"})
+
+
 def expandir_meses(mes: Any, disponibles: Sequence[str]) -> list[str] | None:
     """Traduce lo que pidió el modelo a meses concretos del payload.
 
-    Acepta 'YYYY-MM', 'YYYY' (todos los meses de ese año) o una lista de ambos.
+    Acepta 'YYYY-MM', 'YYYY' (todos los meses de ese año), 'todo' (el histórico
+    completo) o una lista de los tres.
     Existe porque antes el parámetro era UN mes: al pedir «todo 2026» el modelo
     no tenía forma de expresarlo y mandaba el primero, así que una pregunta por
     un año se contestaba con enero.
@@ -372,7 +379,9 @@ def expandir_meses(mes: Any, disponibles: Sequence[str]) -> list[str] | None:
     encontrados: list[str] = []
     for pedido in pedidos:
         pedido = pedido.strip()
-        if pedido in conjunto:
+        if pedido.lower() in TODO_EL_HISTORICO:
+            encontrados.extend(disponibles)
+        elif pedido in conjunto:
             encontrados.append(pedido)
         elif len(pedido) == 4 and pedido.isdigit():
             encontrados.extend(m for m in disponibles if m.startswith(f"{pedido}-"))
@@ -517,7 +526,16 @@ class ToolRunner:
         permite decir sobre qué calculó la cifra en vez de dar por hecho que le
         hicieron caso.
         """
-        meses = expandir_meses(mes, await self.metrics.meses_disponibles())
+        disponibles = await self.metrics.meses_disponibles()
+        meses = expandir_meses(mes, disponibles)
+        if meses is None and self.vista:
+            # Sin periodo pedido se hereda el de su pantalla. Antes se contestaba
+            # el histórico completo mientras él miraba un mes: las dos cifras no
+            # cuadraban, nadie sabía cuál creer, y el modelo acababa afirmando que
+            # su respuesta era del mes que tenía puesto. Para el histórico entero
+            # ahora hay que pedirlo con `mes: "todo"`.
+            en_pantalla = sorted(m for m in self.vista.meses if m in disponibles)
+            meses = en_pantalla or None
 
         bkeys = None
         if barrio:
@@ -544,6 +562,13 @@ class ToolRunner:
             brigada=brigada,
             meses=meses,
         )
+        # Para el cálculo, `meses=None` es todo el histórico; pero el tablero lo
+        # lee como «no toques el periodo» y se queda en el mes que tuviera puesto:
+        # la respuesta habla de un periodo y el mapa enseña otro. Se mandan
+        # explícitos. Solo si el filtro recorta algo más: sobre uno vacío harían
+        # que se emitiera, y eso le mueve la vista al usuario sin motivo.
+        if filtro.meses is None and filtro.model_dump(exclude_none=True):
+            filtro.meses = sorted(disponibles)  # como los deja expandir_meses
         return bkeys, municipio, meses, " · ".join(partes), filtro
 
     async def _efectividad(
