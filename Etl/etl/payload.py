@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from .config import LAT0, LON0, MESES_ES, Settings
+from .direcciones import construir as construir_direcciones
 from .geo import link_barrios, load_municipios, load_zonas
 from .logging_conf import get_logger
 
@@ -184,6 +185,16 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     data_path = settings.public_dir / "data.json"
     _escribir(data_path, data)
     log.info("JSON data -> %s (%.2f MB)", data_path.name, data_path.stat().st_size / 1e6)
+
+    # Va en su propio archivo y no dentro de data.json porque son ~5 MB que solo
+    # necesita el backend al ubicar un cargue: el tablero lo descargaría en cada
+    # visita para nada. Se construye sobre `df` y no sobre `d` a propósito: `d`
+    # ya está recortado a las filas con Estado y fecha válidos, y una dirección
+    # con GPS sirve para ubicar aunque su orden no cuente para las métricas.
+    indice = construir_direcciones(df)
+    dir_path = settings.public_dir / "direcciones.json"
+    _escribir(dir_path, indice)
+    log.info("JSON direcciones -> %s (%.2f MB)", dir_path.name, dir_path.stat().st_size / 1e6)
 
     return {"total_all": int(len(d)), "meses": resumen_meses}
 

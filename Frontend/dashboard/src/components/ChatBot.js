@@ -3,6 +3,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
+  Check,
+  Copy,
   Crosshair,
   FileSpreadsheet,
   Maximize2,
@@ -29,6 +31,19 @@ const CLOSE_MS = 160;
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const STREAM_ENDPOINT = `${API_URL}/api/v1/openai/chat/stream`;
 const CARGA_ENDPOINT = `${API_URL}/api/v1/ordenes/cargar`;
+const HEALTH_ENDPOINT = `${API_URL}/health`;
+
+// Cada cuánto se vuelve a comprobar el backend. También con el chat cerrado,
+// porque el globo muestra su propio punto de estado; ahí se espacía, que nadie
+// está leyendo la respuesta en ese momento.
+const PING_MS = 30000;
+const PING_CERRADO_MS = 120000;
+// Si el backend está caído, la petición muere por timeout de red y eso tarda.
+// Con un corte propio el aviso aparece rápido en vez de dejar "Conectando…".
+const PING_TIMEOUT_MS = 5000;
+
+// Lo que dura el «Gracias» tras calificar, antes de quitarse solo.
+const GRACIAS_MS = 3000;
 
 // PENDIENTE: los votos solo viven en la pantalla. Falta el endpoint que los
 // guarde; hasta entonces se pierden al recargar.
@@ -97,6 +112,25 @@ function conNegritas(texto) {
   return nodos;
 }
 
+/**
+ * Hora local de un mensaje, "HH:MM".
+ *
+ * Se guarda la marca de tiempo y se formatea al pintar, no al crear: así la hora
+ * sale en el huso y el formato de quien mira, y no en el de quien la escribió.
+ *
+ * El saludo inicial no lleva marca a propósito. El panel se renderiza también en
+ * el servidor, y una hora calculada durante el render no coincidiría con la del
+ * navegador: React lo cantaría como desajuste de hidratación.
+ */
+function horaDe(marca) {
+  if (!marca) return null;
+  return new Date(marca).toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
 /** Convierte el filtro del backend en una línea legible. Null si no filtra nada. */
 function resumirFiltro(accion) {
   const partes = [
@@ -111,80 +145,176 @@ function resumirFiltro(accion) {
 }
 
 /**
- * Pulgares bajo una respuesta. El pulgar abajo pregunta *por qué*: un voto
- * negativo suelto no dice si falló el dato, la comprensión o la redacción, y
- * cada una se corrige en un sitio distinto.
+ * Barra de acciones bajo una respuesta: copiar, buena y mala.
+ *
+ * La mala pregunta *por qué* en un modal. Sin ese motivo un «no sirvió» no dice
+ * si falló el dato, la comprensión o la redacción, y cada una se corrige en un
+ * sitio distinto.
  */
-function Calificar({ voto, onVotar }) {
-  const [abierto, setAbierto] = useState(false);
+function Acciones({ texto, voto, onVotar }) {
+  const [modal, setModal] = useState(false);
+  const [copiado, setCopiado] = useState(false);
+  // El "Gracias" es local y no se deduce de `voto`: atado al voto reaparecería
+  // en cada repintado de la lista, y lo que confirma es el clic, no el estado.
+  const [gracias, setGracias] = useState(false);
+  const graciasRef = useRef(null);
+
+  const agradecer = useCallback(() => {
+    clearTimeout(graciasRef.current);
+    setGracias(true);
+    graciasRef.current = setTimeout(() => setGracias(false), GRACIAS_MS);
+  }, []);
+
+  const callar = useCallback(() => {
+    clearTimeout(graciasRef.current);
+    setGracias(false);
+  }, []);
+
+  useEffect(() => () => clearTimeout(graciasRef.current), []);
+
+  const copiar = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 1600);
+    } catch {
+      // Sin permiso de portapapeles (o sin HTTPS) no hay nada que hacer aquí:
+      // el botón simplemente no confirma y el usuario puede seleccionar a mano.
+    }
+  }, [texto]);
+
+  return (
+    <>
+      <div className="cb-acts">
+        <button
+          type="button"
+          onClick={copiar}
+          title={copiado ? "Copiado" : "Copiar respuesta"}
+          aria-label="Copiar la respuesta"
+        >
+          {copiado ? (
+            <Check size={13} strokeWidth={2.2} aria-hidden="true" />
+          ) : (
+            <Copy size={13} strokeWidth={2.2} aria-hidden="true" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          className={voto === "util" ? "votado" : ""}
+          aria-pressed={voto === "util"}
+          onClick={() => {
+            // Segundo clic sobre el mismo pulgar: se retira el voto.
+            if (voto === "util") {
+              callar();
+              onVotar(null);
+              return;
+            }
+            onVotar("util");
+            agradecer();
+          }}
+          title={voto === "util" ? "Quitar la calificación" : "Buena respuesta"}
+          aria-label={voto === "util" ? "Quitar la calificación" : "Buena respuesta"}
+        >
+          <ThumbsUp size={13} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+
+        <button
+          type="button"
+          className={voto === "inutil" ? "votado" : ""}
+          aria-pressed={voto === "inutil"}
+          onClick={() => setModal(true)}
+          title="Mala respuesta"
+          aria-label="Mala respuesta"
+        >
+          <ThumbsDown size={13} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+
+        {gracias && <span className="cb-acts-ok">Gracias</span>}
+      </div>
+
+      {modal && (
+        <ModalComentarios
+          onCerrar={() => setModal(false)}
+          onEnviar={(motivo, comentario) => {
+            setModal(false);
+            onVotar("inutil", motivo, comentario);
+            agradecer();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** Modal de «qué falló». Los motivos no son genéricos: cada uno se arregla en un
+ *  sitio distinto (el dato es la taxonomía del ETL; el resto, el agente). */
+function ModalComentarios({ onCerrar, onEnviar }) {
   const [motivo, setMotivo] = useState(null);
   const [comentario, setComentario] = useState("");
 
-  if (voto) {
-    return (
-      <p className="cb-voto-ok">
-        {voto === "util" ? "Gracias." : "Gracias, queda registrado para revisión."}
-      </p>
-    );
-  }
-
-  if (!abierto) {
-    return (
-      <div className="cb-voto">
-        <button type="button" onClick={() => onVotar("util")} title="Respuesta útil"
-          aria-label="Marcar la respuesta como útil">
-          <ThumbsUp size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-        <button type="button" onClick={() => setAbierto(true)} title="Respuesta inútil"
-          aria-label="Reportar un problema con la respuesta">
-          <ThumbsDown size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const esc = (e) => e.key === "Escape" && onCerrar();
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [onCerrar]);
 
   return (
-    <div className="cb-voto-form">
-      <span className="cb-voto-t">¿Qué falló?</span>
-
-      <div className="cb-voto-chips">
-        {MOTIVOS.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            className={motivo === m.id ? "on" : ""}
-            aria-pressed={motivo === m.id}
-            onClick={() => setMotivo(m.id)}
-          >
-            {m.txt}
+    <div className="cb-modal-bg" onPointerDown={onCerrar}>
+      <div
+        className="cb-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Compartir comentarios"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="cb-modal-h">
+          <b>Compartir comentarios</b>
+          <button type="button" onClick={onCerrar} aria-label="Cerrar">
+            <X size={14} strokeWidth={2.2} aria-hidden="true" />
           </button>
-        ))}
-      </div>
+        </div>
 
-      <input
-        type="text"
-        value={comentario}
-        onChange={(e) => setComentario(e.target.value)}
-        aria-label="Detalle del problema"
-        placeholder={
-          motivo === "dato_incorrecto"
-            ? "¿Qué debería decir?"
-            : "Detalle (opcional)"
-        }
-      />
+        <div className="cb-modal-chips">
+          {MOTIVOS.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={motivo === m.id ? "on" : ""}
+              aria-pressed={motivo === m.id}
+              onClick={() => setMotivo(motivo === m.id ? null : m.id)}
+            >
+              {m.txt}
+            </button>
+          ))}
+        </div>
 
-      <div className="cb-voto-acts">
-        <button type="button" onClick={() => setAbierto(false)}>
-          Cancelar
-        </button>
-        <button
-          type="button"
-          className="primary"
-          disabled={!motivo}
-          onClick={() => onVotar("inutil", motivo, comentario)}
-        >
-          Enviar
-        </button>
+        <textarea
+          value={comentario}
+          onChange={(e) => setComentario(e.target.value)}
+          aria-label="Detalle del problema"
+          rows={3}
+          placeholder={
+            motivo === "dato_incorrecto"
+              ? "¿Qué debería decir?"
+              : "Compartir detalles (opcional)"
+          }
+        />
+
+        <p className="cb-modal-nota">
+          Por ahora esto no sale de tu pantalla: queda sin guardar al recargar.
+        </p>
+
+        <div className="cb-modal-acts">
+          <button
+            type="button"
+            className="primary"
+            disabled={!motivo}
+            onClick={() => onEnviar(motivo, comentario)}
+          >
+            Enviar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -221,7 +351,7 @@ function Pensando() {
  *   `vista` es una función —no un objeto— para leer los filtros en el momento de
  *   enviar: si fuera un valor, el envío usaría el de la última renderización.
  */
-export default function ChatBot({ onAccion, vista }) {
+export default function ChatBot({ onAccion, vista, onCargue }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -229,7 +359,9 @@ export default function ChatBot({ onAccion, vista }) {
 
   const [messages, setMessages] = useState([SALUDO]);
   const [busy, setBusy] = useState(false);
-  const [offline, setOffline] = useState(false);
+  // "probando" mientras no se sabe: antes decía "En línea" desde el primer
+  // render, con lo cual afirmaba algo que nadie había comprobado.
+  const [conexion, setConexion] = useState("probando");
   const [filtroAplicado, setFiltroAplicado] = useState(null);
 
   const [escuchando, setEscuchando] = useState(false);
@@ -284,6 +416,61 @@ export default function ChatBot({ onAccion, vista }) {
   useEffect(() => {
     cargueRef.current = cargue?.id ?? null;
   }, [cargue]);
+
+  // El tablero necesita el cargue para pintar sus órdenes en el mapa. Se avisa
+  // desde un efecto y no desde cada `setCargue` porque son tres sitios (subida,
+  // éxito y quitar el archivo) y era cuestión de tiempo que uno se olvidara.
+  const onCargueRef = useRef(onCargue);
+  useEffect(() => {
+    onCargueRef.current = onCargue;
+  }, [onCargue]);
+  useEffect(() => {
+    onCargueRef.current?.(cargue);
+  }, [cargue]);
+
+  // El texto y el color del punto salen del mismo sitio para que no puedan
+  // contradecirse: antes el punto era blanco fijo y decía "en línea" siempre.
+  const estadoConexion =
+    conexion === "caido"
+      ? { clase: "off", texto: "Sin conexión con el servidor" }
+      : busy
+        ? { clase: "on", texto: "Escribiendo…" }
+        : conexion === "probando"
+          ? { clase: "wait", texto: "Conectando…" }
+          : { clase: "on", texto: "En línea" };
+
+  // Comprueba el backend periódicamente, abierto o cerrado. Sin esto el
+  // indicador solo se enteraba de una caída cuando un envío fallaba, así que con
+  // el servidor apagado seguía diciendo "En línea".
+  // Depende de `open` para reajustar el ritmo, y de paso vuelve a comprobar al
+  // abrir, que es justo cuando alguien va a mirar el estado.
+  useEffect(() => {
+    let cancelado = false;
+    let timer = null;
+
+    const comprobar = async () => {
+      const controller = new AbortController();
+      const corte = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
+      try {
+        const res = await fetch(HEALTH_ENDPOINT, {
+          signal: controller.signal,
+          cache: "no-store"
+        });
+        if (!cancelado) setConexion(res.ok ? "ok" : "caido");
+      } catch {
+        if (!cancelado) setConexion("caido");
+      } finally {
+        clearTimeout(corte);
+        if (!cancelado) timer = setTimeout(comprobar, open ? PING_MS : PING_CERRADO_MS);
+      }
+    };
+
+    comprobar();
+    return () => {
+      cancelado = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [open]);
 
   // El reconocimiento de voz se crea una vez. En Firefox no existe y el botón
   // simplemente no se dibuja: un botón permanentemente inhabilitado no ayuda.
@@ -505,11 +692,11 @@ export default function ChatBot({ onAccion, vista }) {
       if (!pregunta || busy) return;
 
       // Lo que viaja al backend: el historial más la pregunta nueva.
-      const historial = [...messages, { role: "user", content: pregunta }];
-      setMessages([...historial, { role: "assistant", content: "" }]);
+      const marca = Date.now();
+      const historial = [...messages, { role: "user", content: pregunta, hora: marca }];
+      setMessages([...historial, { role: "assistant", content: "", hora: marca }]);
       setDraft("");
       setBusy(true);
-      setOffline(false);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -529,6 +716,10 @@ export default function ChatBot({ onAccion, vista }) {
         if (!res.ok || !res.body) {
           throw new Error(`El servidor respondió ${res.status}`);
         }
+
+        // Un envío que sale bien es la mejor prueba de que el backend responde,
+        // y llega antes que el siguiente sondeo.
+        setConexion("ok");
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -565,7 +756,7 @@ export default function ChatBot({ onAccion, vista }) {
         }
       } catch (err) {
         if (err.name === "AbortError") return;
-        setOffline(true);
+        setConexion("caido");
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -713,10 +904,13 @@ export default function ChatBot({ onAccion, vista }) {
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
           aria-label="Abrir el asistente SCR"
-          title="Asistente SCR · arrástrame donde quieras"
+          title="Asistente SCR"
         >
           <MessageSquare size={22} strokeWidth={2} aria-hidden="true" />
-          <span className="cb-launcher-dot" aria-hidden="true"></span>
+          <span
+            className={`cb-launcher-dot cb-dot-${estadoConexion.clase}`}
+            aria-hidden="true"
+          ></span>
         </button>
       )}
 
@@ -743,9 +937,11 @@ export default function ChatBot({ onAccion, vista }) {
             </span>
             <div className="cb-head-t">
               <b>Asistente SCR</b>
-              <span>
-                <i className="cb-live" aria-hidden="true"></i>
-                {offline ? "Sin conexión con el servidor" : busy ? "Escribiendo…" : "En línea"}
+              {/* El estado es el del backend, no el del navegador: "Escribiendo…"
+                  solo se muestra si además hay conexión comprobada. */}
+              <span role="status">
+                <i className={`cb-live cb-live-${estadoConexion.clase}`} aria-hidden="true"></i>
+                {estadoConexion.texto}
               </span>
             </div>
 
@@ -822,8 +1018,17 @@ export default function ChatBot({ onAccion, vista }) {
                       <div className={`cb-msg ${m.role === "user" ? "me" : "bot"}`}>
                         {conNegritas(m.content)}
                       </div>
+                      {m.hora && (
+                        <time
+                          className={`cb-hora ${m.role === "user" ? "me" : "bot"}`}
+                          dateTime={new Date(m.hora).toISOString()}
+                        >
+                          {horaDe(m.hora)}
+                        </time>
+                      )}
                       {calificable && (
-                        <Calificar
+                        <Acciones
+                          texto={m.content}
                           voto={m.voto}
                           onVotar={(v, mo, co) => votar(i, v, mo, co)}
                         />

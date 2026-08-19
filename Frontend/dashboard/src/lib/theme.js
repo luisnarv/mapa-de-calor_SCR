@@ -86,6 +86,12 @@ export const PALETTES = {
     none: BRAND.grisMedio,
     /* barrios sin ninguna orden (NIC) enlazada — amarillo fuerte */
     sinNic: "#FFD500",
+    /* órdenes POR EJECUTAR del archivo cargado. Ámbar y no amarillo puro: el
+       #FFD500 es «barrios sin visitar», y las dos cosas significan trabajo
+       pendiente, así que en el mismo mapa se confundirían. */
+    cargue: "#F5A300",
+    /* el ámbar de relleno no alcanza AA como texto sobre el overlay claro */
+    cargueText: "#8A5A00",
 
     /* Efectivas · Fallidas · Perdidas */
     st: [BRAND.verdeMedio, BRAND.lima, "#C0392B"],
@@ -144,6 +150,11 @@ export const PALETTES = {
     none: DARK.text3,
     /* barrios sin ninguna orden (NIC) enlazada — amarillo fuerte */
     sinNic: "#FFD500",
+    /* órdenes por ejecutar. En oscuro sube a naranja: el ámbar de aquí (#F0C040)
+       ya es «fallida», y el del modo claro se confundiría con ella. */
+    cargue: "#FF9A1F",
+    /* sobre navy el naranja de relleno ya contrasta; se aclara un punto */
+    cargueText: "#FFB454",
 
     st: [DARK.ok, DARK.alerta, DARK.critico],
     stText: [DARK.ok, DARK.alerta, DARK.perdida],

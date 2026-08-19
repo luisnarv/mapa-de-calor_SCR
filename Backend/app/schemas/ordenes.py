@@ -1,5 +1,7 @@
 """Esquemas del cargue de órdenes por ejecutar."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -20,3 +22,61 @@ class ResumenCargue(BaseModel):
     tecnicos: int
     barrios: int
     deuda_total: float
+
+
+class PuntoOrden(BaseModel):
+    """Una orden ubicada en el mapa.
+
+    No lleva el nombre del cliente: es dato personal y este endpoint no pide
+    autenticación.
+    """
+
+    orden: str
+    nic: str
+    lat: float
+    lon: float
+    origen: Literal["nic", "exacta", "cuadra", "via"] = Field(
+        description=(
+            "De dónde salió la coordenada, de más a menos precisa: 'nic' y "
+            "'exacta' son GPS tomado en esa misma puerta; 'cuadra' es otra placa "
+            "de la misma cuadra (~32 m); 'via' es la calle correcta (~41 m)."
+        )
+    )
+    tecnico: str
+    direccion: str | None = None
+    barrio: str | None = None
+    municipio: str | None = None
+    tipo_os: str | None = None
+
+
+class OrdenSinUbicar(BaseModel):
+    """Una orden que no se pudo situar, para revisarla a mano.
+
+    No lleva coordenada a propósito: antes caía al centro de su barrio, a 357 m
+    de mediana de las órdenes reales de allí. Un punto a tres cuadras con
+    aspecto de dirección hace que alguien mande una brigada al sitio equivocado.
+    """
+
+    orden: str
+    nic: str
+    tecnico: str
+    direccion: str | None = None
+    barrio: str | None = None
+    municipio: str | None = None
+
+
+class PuntosCargue(BaseModel):
+    """Las órdenes del cargue situadas en el mapa.
+
+    Se resuelve entero en la misma petición: todo sale del índice que genera el
+    ETL, sin salir a la red.
+    """
+
+    id: str
+    total: int = Field(description="Órdenes del cargue.")
+    ubicadas: int
+    por_origen: dict[str, int]
+    puntos: list[PuntoOrden]
+    no_ubicadas: list[OrdenSinUbicar] = Field(
+        description="Las que no cruzaron con el histórico. Sin punto en el mapa."
+    )

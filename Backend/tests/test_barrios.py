@@ -80,3 +80,35 @@ async def test_una_herramienta_inventada_no_alcanza_metodos_privados(metrics):
 
     assert "desconocida" in resultado["error"]
     assert filtro is None
+
+
+# --- Clave completa con el municipio equivocado -------------------------------
+#
+# El chat ve "BARRANQUILLA | OLAYA" en los filtros activos, copia el formato y
+# pide "BARRANQUILLA | EL CONCORD" aunque El Concord sea de Malambo. Antes eso
+# devolvía "barrio no encontrado" y el mapa no se movía.
+
+
+@pytest.mark.asyncio
+async def test_una_clave_con_municipio_equivocado_igual_resuelve(metrics):
+    c = await metrics.resolver_barrio("BARRANQUILLA | EL CONCORD")
+    assert c.bkey == "MALAMBO | EL CONCORD"
+
+
+@pytest.mark.asyncio
+async def test_una_clave_con_el_nombre_incompleto_igual_resuelve(metrics):
+    """El catálogo lo llama 'URB CARIBE VERDE'; el chat manda 'CARIBE VERDE'."""
+    c = await metrics.resolver_barrio("BARRANQUILLA | CARIBE VERDE")
+    assert c.bkey == "BARRANQUILLA | URB CARIBE VERDE"
+
+
+@pytest.mark.asyncio
+async def test_la_clave_exacta_sigue_ganando(metrics):
+    c = await metrics.resolver_barrio("BARRANQUILLA | OLAYA")
+    assert c.bkey == "BARRANQUILLA | OLAYA"
+
+
+@pytest.mark.asyncio
+async def test_un_barrio_que_no_existe_sigue_fallando(metrics):
+    with pytest.raises(BarrioNoEncontrado):
+        await metrics.resolver_barrio("BARRANQUILLA | ESTE BARRIO NO EXISTE")

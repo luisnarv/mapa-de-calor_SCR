@@ -348,6 +348,16 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
 .mk-hot{animation:mkp 1.8s infinite}
 @keyframes mkp{0%,100%{opacity:1}50%{opacity:.55}}
 
+/* órdenes por ejecutar del archivo cargado: foco ámbar. El color va en línea
+   desde la paleta JS; aquí solo la forma, que no depende del tema.
+   El selector lleva `.leaflet-div-icon` para ganarle al fondo blanco y al borde
+   que Leaflet le pone por defecto a todo divIcon. */
+.leaflet-div-icon.cargue-foco{background:none;border:0}
+.cargue-foco>span{display:flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.45);
+  transition:transform .12s ease}
+.cargue-foco:hover>span{transform:scale(1.25)}
+
 /* capas */
 #layers{position:absolute;top:12px;left:12px;z-index:800;background:var(--overlay);
   border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;backdrop-filter:blur(6px);
@@ -827,8 +837,13 @@ td.go>svg{display:block;margin-left:auto}
 :root[data-theme="dark"] .cb-launcher{background:var(--cu-deep)}
 .cb-launcher:hover{filter:brightness(1.08)}
 .cb-launcher>svg{pointer-events:none}
+/* El punto del globo cerrado dice lo mismo que el del encabezado: verde solo si
+   el backend contestó. El sondeo sigue corriendo con el chat cerrado, si no este
+   punto se quedaría en verde para siempre. */
 .cb-launcher-dot{position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;
   background:var(--ok);border:2px solid var(--bg);pointer-events:none}
+.cb-launcher-dot.cb-dot-off{background:var(--bad)}
+.cb-launcher-dot.cb-dot-wait{background:var(--warn);animation:cb-live-p 1.2s ease-in-out infinite}
 
 .cb-launcher:hover:not(.dragging){transform:scale(1.06)}
 .cb-launcher.dragging{cursor:grabbing;transform:none;transition:none;
@@ -879,8 +894,14 @@ td.go>svg{display:block;margin-left:auto}
   color:#FFFFFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cb-head-t span{display:flex;align-items:center;gap:6px;font-size:10.5px;
   color:rgba(255,255,255,.92);font-variant-numeric:tabular-nums}
+/* Punto de estado del asistente. El blanco es el estado sano: el encabezado es
+   un degradado verde y un punto verde encima no se distinguiría. */
 .cb-live{width:7px;height:7px;border-radius:50%;background:#FFFFFF;
   box-shadow:0 0 0 3px rgba(255,255,255,.28)}
+.cb-live-off{background:#FF5A5F;box-shadow:0 0 0 3px rgba(255,90,95,.38)}
+.cb-live-wait{background:#FFD500;box-shadow:0 0 0 3px rgba(255,213,0,.32);
+  animation:cb-live-p 1.2s ease-in-out infinite}
+@keyframes cb-live-p{0%,100%{opacity:1}50%{opacity:.35}}
 .cb-x{flex:0 0 auto;width:26px;height:26px;border-radius:50%;cursor:pointer;
   background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);
   color:#FFFFFF;font-size:12px;line-height:1}
@@ -918,35 +939,59 @@ td.go>svg{display:block;margin-left:auto}
 @keyframes cb-fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @keyframes cb-latido{0%,100%{opacity:.5}50%{opacity:1}}
 
-/* ---------- calificación de respuestas ---------- */
-/* Discreta a propósito: acompaña la respuesta, no compite con ella. */
-.cb-voto{display:flex;gap:4px;align-self:flex-start;margin:-4px 0 2px 4px}
-.cb-voto button{width:24px;height:24px;border-radius:6px;cursor:pointer;
+/* Hora de cada mensaje. Discreta y pegada a su burbuja: es dato de apoyo, no
+   contenido, así que no debe competir con el texto. */
+.cb-hora{font-size:9.5px;color:var(--dim);font-variant-numeric:tabular-nums;
+  margin:-6px 2px 0;letter-spacing:.04em}
+.cb-hora.me{align-self:flex-end}
+.cb-hora.bot{align-self:flex-start;margin-left:6px}
+
+/* ---------- acciones de una respuesta: copiar y calificar ---------- */
+/* Discretas a propósito: acompañan la respuesta, no compiten con ella. */
+/* El margen negativo se come el `gap:10px` de .cb-body: la hora y los iconos
+   son apoyo del MISMO mensaje y deben leerse como un bloque, no como dos
+   cosas sueltas a media distancia entre dos burbujas. */
+.cb-acts{display:flex;align-items:center;gap:2px;
+  align-self:flex-start;margin:-11px 0 2px 4px}
+.cb-acts>button{width:24px;height:24px;border-radius:6px;cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center;
   background:transparent;border:1px solid transparent;color:var(--dim);
   transition:color .15s ease,background .15s ease,border-color .15s ease}
-.cb-voto button:hover{background:var(--pan2);border-color:var(--line2);color:var(--tx)}
+.cb-acts>button:hover{background:var(--pan2);border-color:var(--line2);color:var(--tx)}
+.cb-acts>button.votado{color:var(--cu)}
+.cb-acts-ok{margin-left:4px;font-size:10.5px;color:var(--dim)}
 
-.cb-voto-ok{align-self:flex-start;margin:-2px 0 2px 6px;font-size:10.5px;color:var(--dim)}
-
-.cb-voto-form{align-self:stretch;display:flex;flex-direction:column;gap:7px;
-  padding:9px 10px;border-radius:10px;
-  background:var(--pan2);border:1px solid var(--line2)}
-.cb-voto-t{font:700 9.5px var(--ff);letter-spacing:.12em;text-transform:uppercase;
-  color:var(--ttl)}
-.cb-voto-chips{display:flex;flex-wrap:wrap;gap:5px}
-.cb-voto-chips button{cursor:pointer;padding:4px 8px;border-radius:999px;font-size:11px;
-  background:var(--pan);border:1px solid var(--line2);color:var(--mut)}
-.cb-voto-chips button:hover{border-color:var(--cu);color:var(--tx)}
-.cb-voto-chips button.on{background:var(--cu);border-color:var(--cu);color:#FFFFFF}
-.cb-voto-form input{width:100%;border-radius:8px;padding:6px 9px;font-size:11.5px}
-.cb-voto-acts{display:flex;justify-content:flex-end;gap:6px}
-.cb-voto-acts button{cursor:pointer;padding:5px 11px;border-radius:var(--r);font-size:11px;
+/* Modal de comentarios. Va sobre el panel del chat (z-index 1201), no dentro:
+   el panel mide 380px y el formulario no cabe sin apretujarlo.
+   Depende de que .cb-panel NO tenga un transform permanente: hoy se mueve con
+   left/top y su animación termina en `transform:none`. Si alguien lo pasa a
+   transform, este `position:fixed` se anclaría al panel y el modal saldría
+   descolocado. */
+.cb-modal-bg{position:fixed;inset:0;z-index:1300;display:flex;
+  align-items:center;justify-content:center;padding:16px;
+  background:rgba(0,0,0,.42);backdrop-filter:blur(2px)}
+.cb-modal{width:min(430px,100%);display:flex;flex-direction:column;gap:11px;
+  padding:15px 16px;border-radius:14px;
+  background:var(--pan);border:1px solid var(--line2);box-shadow:var(--shadow)}
+.cb-modal-h{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cb-modal-h b{font-size:13.5px;color:var(--ttl)}
+.cb-modal-h button{width:26px;height:26px;border-radius:50%;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;border:0;color:var(--dim)}
+.cb-modal-h button:hover{background:var(--pan2);color:var(--tx)}
+.cb-modal-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cb-modal-chips button{cursor:pointer;padding:5px 11px;border-radius:999px;font-size:11.5px;
   background:transparent;border:1px solid var(--line2);color:var(--mut)}
-.cb-voto-acts button:hover{border-color:var(--cu);color:var(--tx)}
-.cb-voto-acts button.primary{background:var(--cu);border-color:var(--cu);color:#FFFFFF}
-.cb-voto-acts button.primary:hover{filter:brightness(1.1);color:#FFFFFF}
-.cb-voto-acts button:disabled{opacity:.45;cursor:default;filter:none}
+.cb-modal-chips button:hover{border-color:var(--cu);color:var(--tx)}
+.cb-modal-chips button.on{background:var(--cu);border-color:var(--cu);color:#FFFFFF}
+.cb-modal textarea{width:100%;border-radius:9px;padding:8px 10px;font-size:11.5px;
+  font-family:var(--ff);resize:vertical;min-height:62px}
+.cb-modal-nota{font-size:10.5px;color:var(--dim);margin:0}
+.cb-modal-acts{display:flex;justify-content:flex-end}
+.cb-modal-acts button.primary{cursor:pointer;padding:6px 16px;border-radius:var(--r);
+  font-size:11.5px;background:var(--cu);border:1px solid var(--cu);color:#FFFFFF}
+.cb-modal-acts button.primary:hover{filter:brightness(1.1)}
+.cb-modal-acts button:disabled{opacity:.45;cursor:default;filter:none}
 
 /* Aviso de que el tablero se filtró solo. Es un botón: al hacer clic vuelve a
    aplicar ese filtro, útil cuando el usuario lo limpió a mano. */
@@ -975,15 +1020,6 @@ td.go>svg{display:block;margin-left:auto}
 .cb-rank-os{flex:0 0 auto;font-size:11px;color:var(--dim)}
 .cb-rank b{flex:0 0 auto;font-size:14px;font-weight:700;min-width:24px;text-align:right}
 
-.cb-acts{display:flex;gap:7px;margin-top:10px}
-.cb-act{flex:1 1 auto;border-radius:var(--r);cursor:pointer;padding:8px 10px;
-  font:600 11.5px var(--ff);background:transparent;border:1px solid var(--line2);color:var(--mut)}
-.cb-act:hover{border-color:var(--cu);color:var(--tx)}
-.cb-act.primary{flex:1 1 62%;display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  background:var(--ises-oscuro);border-color:var(--ises-oscuro);color:#FFFFFF}
-:root[data-theme="dark"] .cb-act.primary{background:var(--cu);border-color:var(--cu);color:var(--ink-soft)}
-.cb-act.primary:hover{filter:brightness(1.1);color:#FFFFFF}
-:root[data-theme="dark"] .cb-act.primary:hover{color:var(--ink-soft)}
 
 .cb-src{display:flex;align-items:center;gap:5px;margin-top:9px;
   font-size:10.5px;color:var(--dim);line-height:1.4}

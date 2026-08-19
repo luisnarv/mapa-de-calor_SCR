@@ -103,6 +103,31 @@ uvicorn app.main:app --reload
 |---|---|---|
 | POST | `/api/v1/openai/chat` | Respuesta completa del modelo |
 | POST | `/api/v1/openai/chat/stream` | Igual, por trozos vía SSE (`data: {"delta": …}`, cierra con `data: [DONE]`) |
+| POST | `/api/v1/ordenes/cargar` | Sube el Excel/CSV de órdenes por ejecutar y devuelve su id |
+| GET | `/api/v1/ordenes/{id}/puntos` | Ubica esas órdenes en el mapa (ver abajo) |
+
+### Cómo se ubican las órdenes cargadas
+
+El archivo trae direcciones, no coordenadas. Se resuelven en tres pasos, y cada
+punto viaja con el `origen` que le tocó para que el mapa no mezcle precisiones:
+
+1. **NIC contra el histórico** — GPS real de una visita anterior. Exacto y gratis.
+2. **Geocodificar la dirección** contra HERE, solo lo que no cruzó por NIC.
+3. **Centroide del barrio** para lo que no resuelva. Va marcado como aproximado.
+
+El paso 2 necesita `HERE_API_KEY` en el `.env`. Sin ella el cargue funciona
+igual, pero todo lo que no cruce por NIC se queda en el centro de su barrio y la
+respuesta lo avisa.
+
+Se eligió HERE tras medir Nominatim sobre un archivo real: iba a una petición por
+segundo y solo resolvía una de cada tres direcciones. Las alternativas gratuitas
+(Geoapify, LocationIQ, Photon) usan los mismos datos de OSM, que es lo que falla
+aquí: no tiene cartografiadas vías como «Carrera 16ASUR».
+
+**No se cachean direcciones entre cargues.** Los términos de HERE permiten
+guardar resultados 30 días como mucho y prohíben usarlos para construir un
+repositorio o servir a varios usuarios. La reutilización se limita a lo que dura
+un cargue.
 
 Ejemplo:
 
@@ -130,6 +155,6 @@ Sustituyen el servicio de OpenAI por un doble: no consumen créditos ni tocan la
 - **El endpoint está abierto.** Cualquiera que alcance la API puede gastar los
   créditos de OpenAI. Antes de exponerlo hay que ponerle autenticación y un límite
   de peticiones.
-- **Secretos:** `OPENAI_API_KEY` y `DATABASE_URL` están en `.env` (ignorado por git).
+- **Secretos:** `OPENAI_API_KEY`, `DATABASE_URL` y `HERE_API_KEY` están en `.env` (ignorado por git).
   En despliegue van como secretos del entorno.
 - **Migraciones:** falta Alembic; aún no hay tablas propias.

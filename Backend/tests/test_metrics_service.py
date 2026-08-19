@@ -71,7 +71,7 @@ async def test_los_meses_suman_el_total(service, meta):
     meses = await service.meses_disponibles()
     suma = 0
     for mes in meses:
-        suma += (await service.efectividad(mes=mes)).tot
+        suma += (await service.efectividad(meses=[mes])).tot
     assert suma == meta["total_all"]
 
 

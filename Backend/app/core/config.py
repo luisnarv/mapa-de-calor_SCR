@@ -6,10 +6,6 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-
-# Los prompts viven en Markdown, no aquí: se editan mucho más que el resto de la
-# configuración y en una cadena de Python eran ilegibles. El contenido llega tal
-# cual al modelo, así que no se escriben notas de mantenimiento dentro.
 PROMPTS_DIR = BACKEND_ROOT / "app" / "prompts"
 
 
@@ -51,7 +47,6 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_TIMEOUT_SECONDS: float = 60.0
     OPENAI_MAX_RETRIES: int = 2
-    # Se puede sobrescribir por entorno, pero lo normal es editar el .md.
     OPENAI_SYSTEM_PROMPT: str = leer_prompt("sistema.md")
 
     CARGUE_MAX_MB: int = 10

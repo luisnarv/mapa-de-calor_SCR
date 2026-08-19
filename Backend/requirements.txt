@@ -14,6 +14,9 @@ openpyxl==3.1.5
 # Necesario para recibir el archivo por multipart/form-data.
 python-multipart==0.0.20
 
+# Cliente HTTP de las pruebas de FastAPI.
+httpx==0.28.1
+
 # Base de datos
 SQLAlchemy[asyncio]==2.0.36
 asyncpg==0.30.0
@@ -21,4 +24,3 @@ asyncpg==0.30.0
 # Pruebas
 pytest==8.3.4
 pytest-asyncio==0.25.0
-httpx==0.28.1

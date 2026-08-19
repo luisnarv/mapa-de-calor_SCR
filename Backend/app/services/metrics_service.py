@@ -151,6 +151,17 @@ class MetricsService:
                 if norm_dato(bkey) == objetivo:
                     return self._candidato(i)
 
+            # La clave no existe tal cual. Pasa siempre por lo mismo: el chat ve
+            # "BARRANQUILLA | OLAYA" en los filtros activos, copia ese formato y
+            # pide "BARRANQUILLA | EL CONCORD" aunque El Concord sea de Malambo.
+            # Se reintenta con las dos mitades por separado, porque seguir de
+            # largo buscaba la clave ENTERA entre los nombres de barrio —donde el
+            # municipio nunca aparece— y siempre daba "no encontrado".
+            muni_texto, _, barrio_texto = texto.partition(" | ")
+            return await self.resolver_barrio(
+                barrio_texto, municipio=municipio or muni_texto
+            )
+
         candidatos = await self.buscar_barrios(texto)
         if not candidatos:
             raise BarrioNoEncontrado(texto)
@@ -183,7 +194,7 @@ class MetricsService:
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
         zona: str | None = None,
-        mes: str | None = None,
+        meses: Sequence[str] | None = None,
         tipo_os: str | None = None,
         brigada: str | None = None,
         etiqueta: str | None = None,
@@ -194,7 +205,7 @@ class MetricsService:
         corresponder a diez etapas que son un mismo sitio para quien pregunta.
         """
         conteos = self._agrupar(
-            bkeys=bkeys, municipio=municipio, zona=zona, mes=mes,
+            bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
             tipo_os=tipo_os, brigada=brigada,
         )
         nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
@@ -206,7 +217,7 @@ class MetricsService:
         dimension: str = "brigada",
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
-        mes: str | None = None,
+        meses: Sequence[str] | None = None,
         brigada: str | None = None,
         min_ordenes: int = 10,
         limite: int = 10,
@@ -230,7 +241,7 @@ class MetricsService:
 
         p = self.datos
         conteos = self._agrupar(
-            bkeys=bkeys, municipio=municipio, mes=mes, brigada=brigada, por=dimension
+            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada, por=dimension
         )
         catalogo = {"brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios}[dimension]
 
@@ -245,14 +256,14 @@ class MetricsService:
         *,
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
-        mes: str | None = None,
+        meses: Sequence[str] | None = None,
         brigada: str | None = None,
         limite: int = 6,
     ) -> list[FilaCausa]:
         """Causas de las órdenes NO efectivas, de mayor a menor."""
         p = self.datos
         conteo = self._agrupar(
-            bkeys=bkeys, municipio=municipio, mes=mes, brigada=brigada
+            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada
         ).get(0, Conteo())
 
         total = sum(conteo.causas.values())
@@ -331,7 +342,7 @@ class MetricsService:
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
         zona: str | None = None,
-        mes: str | None = None,
+        meses: Sequence[str] | None = None,
         tipo_os: str | None = None,
         brigada: str | None = None,
         por: str | None = None,
@@ -348,13 +359,16 @@ class MetricsService:
         f_zona = self._indice(p.zonas, zona)
         f_tipo = self._indice(p.tipos, tipo_os)
         f_brig = self._indice(p.brigs, brigada)
-        f_mes = p.meses.index(mes) if mes in p.meses else None
+        # Conjunto y no índice: «todo 2026» son varios meses, no uno. Queda en
+        # None si no se pidió ninguno, y vacío si ninguno de los pedidos existe
+        # —que no es lo mismo y abajo se distinguen.
+        f_meses = {p.meses.index(m) for m in meses if m in p.meses} if meses else None
 
         # Un filtro que no resuelve a nada devolvería el total sin filtrar, que es
         # peor que devolver vacío: el usuario creería que la cifra es de su barrio.
         for pedido, resuelto in (
             (bkeys, f_barrios), (municipio, f_muni), (zona, f_zona),
-            (tipo_os, f_tipo), (brigada, f_brig), (mes, f_mes),
+            (tipo_os, f_tipo), (brigada, f_brig), (meses, f_meses or None),
         ):
             if pedido is not None and resuelto is None:
                 logger.info("Filtro sin coincidencia: %r", pedido)
@@ -373,7 +387,7 @@ class MetricsService:
                 continue
             if f_zona is not None and b_zona[bi] != f_zona:
                 continue
-            if f_mes is not None and MES[i] != f_mes:
+            if f_meses is not None and MES[i] not in f_meses:
                 continue
             if f_tipo is not None and O[i] != f_tipo:
                 continue

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { ChevronRight, X } from "lucide-react";
@@ -35,6 +35,56 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   )
 });
 
+/**
+ * Cuántas órdenes del cargue están bien ubicadas y cuántas solo aproximadas.
+ *
+ * Existe porque los tres orígenes NO son igual de fiables y mezclarlos sin
+ * decirlo sería engañoso: un GPS real está en la puerta del predio y una
+ * coincidencia por vía solo garantiza la calle.
+ */
+function LeyendaCargue({ ordenes, P }) {
+  const n = ordenes.por_origen || {};
+  // Los cuatro orígenes se distinguen por relleno, no por color: la capa debe
+  // leerse como una sola cosa con precisiones distintas. El orden es el mismo
+  // de la escalera del backend, de la puerta exacta a la calle.
+  const filas = [
+    { k: "nic", txt: "GPS real del suministro", relleno: true, op: 1 },
+    { k: "exacta", txt: "GPS real de esa misma dirección", relleno: true, op: 1 },
+    { k: "cuadra", txt: "otra placa de la misma cuadra (~32 m)", relleno: true, op: 0.68 },
+    { k: "via", txt: "sobre la misma vía (~41 m)", relleno: false, op: 0.85 }
+  ].filter((f) => n[f.k] > 0);
+
+  const sinUbicar = ordenes.no_ubicadas?.length || 0;
+
+  return (
+    <div className="lay-nota">
+      {filas.map((f) => (
+        <div key={f.k} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span
+            className="sw"
+            style={{
+              background: f.relleno ? P.cargue : "transparent",
+              border: f.relleno ? undefined : `1.5px dashed ${P.cargue}`,
+              borderRadius: "50%",
+              opacity: f.op,
+              flex: "0 0 auto"
+            }}
+          />
+          <b>{(n[f.k] || 0).toLocaleString("es-CO")}</b> {f.txt}
+        </div>
+      ))}
+      {sinUbicar > 0 && (
+        <div style={{ marginTop: "4px" }}>
+          <b>{sinUbicar.toLocaleString("es-CO")}</b> sin ubicar: su dirección no cruza
+          con el histórico. No se pintan — un punto aproximado a varias cuadras haría
+          que alguien fuera al sitio equivocado.
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function Home() {
   // Paleta corporativa para los swatches de capas y la leyenda de riesgo
   const { palette: P } = useTheme();
@@ -43,6 +93,18 @@ export default function Home() {
 
   // Controla si el panel de capas está desplegado u oculto
   const [layersCollapsed, setLayersCollapsed] = useState(false);
+
+  // Órdenes POR EJECUTAR del archivo que se sube en el chat. Son otra cosa que
+  // el histórico: no tienen estado ni causa, solo dónde hay que ir.
+  const [cargue, setCargue] = useState(null);
+  const [ordenes, setOrdenes] = useState(null);
+
+  // Los puntos del cargue anterior se botan aquí y no en el efecto que los pide:
+  // quitar el archivo tiene que vaciar el mapa aunque no haya nada que pedir.
+  const handleCargue = useCallback((resumen) => {
+    setCargue(resumen);
+    setOrdenes(null);
+  }, []);
 
   // Carga perezosa por mes: solo el mes en curso se descarga al inicio; los
   // demás llegan cuando el usuario los selecciona en el filtro.
@@ -81,7 +143,8 @@ export default function Home() {
       bpoly: false,
       mpoly: false,
       zpoly: false,
-      sinNic: false
+      sinNic: false,
+      cargue: true
     },
     // Hierarchy selections
     jerBarrio: null,
@@ -1038,6 +1101,41 @@ export default function Home() {
     };
   };
 
+
+  // El archivo llega sin coordenadas: el backend las resuelve cruzando NIC y
+  // dirección contra el histórico que indexa el ETL. Es una sola petición y
+  // responde completo — antes esto sondeaba cada 5 s porque geocodificaba
+  // contra un servicio externo a una dirección por segundo.
+  useEffect(() => {
+    if (!cargue?.id) return;
+
+    const api = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+    const controller = new AbortController();
+    let cancelado = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${api}/api/v1/ordenes/${cargue.id}/puntos`, {
+          signal: controller.signal
+        });
+        if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+        const datos = await res.json();
+        if (!cancelado) setOrdenes(datos);
+      } catch (err) {
+        if (err.name === "AbortError" || cancelado) return;
+        // Sin puntos el mapa simplemente no dibuja la capa; el chat sigue
+        // funcionando, así que no se interrumpe nada más por esto.
+        console.warn("No se pudieron ubicar las órdenes del cargue:", err.message);
+        setOrdenes(null);
+      }
+    })();
+
+    return () => {
+      cancelado = true;
+      controller.abort();
+    };
+  }, [cargue?.id]);
+
   // El asistente responde con NOMBRES (no conoce el orden de las dimensiones del
   // payload); aquí se traducen a los índices que espera el estado del tablero.
   const handleAccionChat = (accion) => {
@@ -1336,6 +1434,7 @@ export default function Home() {
                 }}
                 onFilterChange={handleFilterChange}
                 dayLabel={dayLabel}
+                ordenes={ordenes}
               />
 
               {st.selBarrio != null && (
@@ -1450,6 +1549,25 @@ export default function Home() {
                         Efectivas
                       </label>
 
+                      {ordenes && (
+                        <div className="lgrp">
+                          <h4>Órdenes por ejecutar</h4>
+                          <label className="lay">
+                            <input
+                              type="checkbox"
+                              checked={st.layers.cargue}
+                              onChange={(e) => {
+                                const layers = { ...st.layers, cargue: e.target.checked };
+                                handleFilterChange("layers", layers);
+                              }}
+                            />
+                            <span className="sw" style={{ background: P.cargue }}></span>
+                            Del archivo cargado
+                          </label>
+                          <LeyendaCargue ordenes={ordenes} P={P} />
+                        </div>
+                      )}
+
                       <div className="lgrp">
                         <h4>Cómo dibujarlas</h4>
                         <label className="lay">
@@ -1557,6 +1675,7 @@ export default function Home() {
                         </p>
                       </div>
 
+
                       <div className="lgrp" id="legend">
                         <h4>Índice de riesgo</h4>
                         <div>
@@ -1583,7 +1702,7 @@ export default function Home() {
           {rightPanelContent}
         </main>
 
-        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />
+        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} />
       </div>
     );
   }
@@ -1626,6 +1745,7 @@ export default function Home() {
             onSelectNic={handleSelectNic}
             onFilterChange={handleFilterChange}
             dayLabel={dayLabel}
+            ordenes={ordenes}
           />
 
           {st.selBarrio != null && (
@@ -1739,6 +1859,25 @@ export default function Home() {
               Efectivas
             </label>
 
+            {ordenes && (
+              <div className="lgrp">
+                <h4>Órdenes por ejecutar</h4>
+                <label className="lay">
+                  <input
+                    type="checkbox"
+                    checked={st.layers.cargue}
+                    onChange={(e) => {
+                      const layers = { ...st.layers, cargue: e.target.checked };
+                      handleFilterChange("layers", layers);
+                    }}
+                  />
+                  <span className="sw" style={{ background: P.cargue }}></span>
+                  Del archivo cargado
+                </label>
+                <LeyendaCargue ordenes={ordenes} P={P} />
+              </div>
+            )}
+
             <div className="lgrp">
               <h4>Cómo dibujarlas</h4>
               <label className="lay">
@@ -1847,6 +1986,7 @@ export default function Home() {
               </p>
             </div>
 
+
             <div className="lgrp" id="legend">
               <h4>Índice de riesgo</h4>
               <div>
@@ -1890,7 +2030,7 @@ export default function Home() {
         />
       </main>
 
-      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />
+      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} />
     </div>
   );
 }

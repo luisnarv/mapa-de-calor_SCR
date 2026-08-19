@@ -36,6 +36,9 @@ COLOMBIA = timezone(timedelta(hours=-5))
 # confundido puede quedarse pidiendo datos en bucle y consumir la cuota.
 MAX_RONDAS = 4
 
+# Solo se usa si tras el cierre forzado el modelo sigue sin redactar nada.
+AVISO_SIN_CIERRE = "\n\n(No pude cerrar la consulta; intenta con una pregunta mas concreta.)"
+
 
 class OpenAIServiceError(Exception):
     """Falla al hablar con OpenAI, ya traducida a un estado HTTP."""
@@ -103,7 +106,12 @@ class OpenAIService:
                 mensajes.append(self._mensaje_asistente(texto, llamadas))
                 for llamada in llamadas.values():
                     resultado, filtro = await self._ejecutar(runner, llamada)
-                    if filtro is not None:
+                    # `_recorte` arma un FiltroMapa aunque no haya recorte, así que
+                    # un ranking de todo el Atlántico devolvía uno con todos los
+                    # campos vacíos. Al llegar al tablero no filtraba nada pero sí
+                    # le cambiaba la pestaña al usuario, que es peor que no hacer
+                    # nada: parece que respondió moviéndole la vista porque sí.
+                    if filtro is not None and filtro.model_dump(exclude_none=True):
                         yield {"accion": {"tipo": "filtrar_mapa", **filtro.model_dump()}}
                     mensajes.append(
                         {
@@ -116,7 +124,15 @@ class OpenAIService:
                     "Ronda %s: %s herramienta(s) ejecutada(s).", ronda + 1, len(llamadas)
                 )
 
-            yield {"delta": "\n\n(No pude cerrar la consulta; intenta con una pregunta más concreta.)"}
+            # Agotadas las rondas, se pide una ultima respuesta SIN herramientas.
+            #
+            # Antes se cortaba aqui con «no pude cerrar la consulta» aunque el
+            # modelo tuviera ya todos los datos delante: habia consultado cuatro
+            # veces y se le negaba la oportunidad de redactar con lo reunido. La
+            # misma pregunta contestaba o no segun cuantas consultas se le
+            # antojara hacer, que es lo ultimo que el usuario puede adivinar.
+            async for evento in self._cerrar(model, mensajes, request, bool(runner)):
+                yield evento
         except OpenAIServiceError:
             raise
         except Exception as exc:
@@ -146,6 +162,38 @@ class OpenAIService:
         await self._client.close()
 
     # --- Interno -------------------------------------------------------------
+
+    async def _cerrar(
+        self, model: str, mensajes: list[dict], request: ChatRequest, con_tools: bool
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Ultima pasada, con tool_choice a none: obliga a responder con texto.
+
+        Se le pasan las herramientas igualmente porque el historial ya contiene
+        `tool_calls`; sin declararlas, la API rechaza la conversacion.
+        """
+        extra = {"tools": TOOLS, "tool_choice": "none"} if con_tools else {}
+        texto = ""
+        try:
+            stream = await self._client.chat.completions.create(
+                model=model,
+                messages=mensajes,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                stream=True,
+                **extra,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                if contenido := chunk.choices[0].delta.content:
+                    texto += contenido
+                    yield {"delta": contenido}
+        except Exception:
+            logger.exception("Fallo el cierre tras agotar las rondas.")
+
+        if not texto.strip():
+            # Aqui si no hay nada que hacer: ni con los datos delante redacto.
+            yield {"delta": AVISO_SIN_CIERRE}
 
     @staticmethod
     def _acumular(llamadas: dict[int, dict[str, str]], parcial: Any) -> None:

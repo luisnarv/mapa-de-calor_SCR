@@ -7,7 +7,18 @@
       "Bash(cd \"c:/Users/P745/OneDrive - ISES S.A.S/Documentos/AI/mapa-de-calor_SCR/Frontend/dashboard/src\" && sed -i 's|<ChatBot onAccion={handleAccionChat} />|<ChatBot onAccion={handleAccionChat} vista={vistaParaChat} />|g' app/page.js && grep -n \"<ChatBot\" app/page.js)",
       "Bash(cd \"c:/Users/P745/OneDrive - ISES S.A.S/Documentos/AI/mapa-de-calor_SCR/Backend\" && grep -n \"^from typing\\\\|^from collections\" app/services/metrics_service.py && sed -i 's/^from typing import Sequence$/from typing import Sequence/' app/services/metrics_service.py && grep -n \"Sequence\" app/services/metrics_service.py | head -3)",
       "Bash(sed -i 's/await service.efectividad\\(bkey=\"BARRIO QUE NO EXISTE\"\\)/await service.efectividad\\(bkeys=[\"BARRIO QUE NO EXISTE\"]\\)/' tests/test_metrics_service.py)",
-      "Bash(.venv/Scripts/python.exe -m pytest -q)"
+      "Bash(.venv/Scripts/python.exe -m pytest -q)",
+      "Bash(python -c ' *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts\\)\\)\")",
+      "Bash(npx next *)",
+      "Bash(npx eslint *)",
+      "Bash(sed -i 's/import React, { useState, useEffect, useMemo, useRef } from \"react\";/import React, { useState, useEffect, useMemo, useRef, useCallback } from \"react\";/' src/app/page.js)",
+      "Bash(sed -i 's/onCargue={setCargue}/onCargue={handleCargue}/g' src/app/page.js)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, StartTime, @{n='cmd';e={\\(Get-CimInstance Win32_Process -Filter \"ProcessId=$\\($_.Id\\)\"\\).CommandLine}} | Format-List)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(rm -f .cache/geocodificacion.json)",
+      "Bash(rmdir .cache)",
+      "Bash(python -)"
     ],
     "additionalDirectories": [
       "c:\\Users\\P745\\OneDrive - ISES S.A.S\\Documentos\\AI\\mapa-de-calor_SCR\\Frontend\\dashboard\\src\\app",

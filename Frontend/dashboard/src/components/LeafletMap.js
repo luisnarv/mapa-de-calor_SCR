@@ -10,6 +10,16 @@ import "leaflet.heat";
 
 import { useTheme, riskColor as riskColorOf } from "@/lib/theme";
 
+// Foco (Lightbulb de lucide) para las órdenes por ejecutar. Va como SVG suelto y
+// no como componente de React porque Leaflet arma sus marcadores con HTML plano,
+// fuera del árbol de React.
+const FOCO_SVG =
+  '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M9 18h6"/><path d="M10 22h4"/>' +
+  '<path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8' +
+  'c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>';
+
 export default function LeafletMap({
   A,
   st,
@@ -18,7 +28,8 @@ export default function LeafletMap({
   onSelectBarrio,
   onSelectNic,
   onFilterChange,
-  dayLabel
+  dayLabel,
+  ordenes
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -27,6 +38,7 @@ export default function LeafletMap({
   const hullLayerRef = useRef(null);
   const markerLayerRef = useRef(null);
   const ptLayerRef = useRef(null);
+  const cargueLayerRef = useRef(null);
   const heatLayersRef = useRef({ 0: null, 1: null, 2: null });
   const tileRefs = useRef({ base: null, labels: null });
 
@@ -91,10 +103,15 @@ export default function LeafletMap({
     map.getPane("pts").style.zIndex = 420;
     map.createPane("vec");
     map.getPane("vec").style.zIndex = 430;
+    // Las órdenes por ejecutar van encima de todo: son el trabajo de hoy, y si
+    // el histórico las tapara habría que apagar capas para verlas.
+    map.createPane("cargue");
+    map.getPane("cargue").style.zIndex = 440;
 
     // Groups
     hullLayerRef.current = L.layerGroup().addTo(map);
     markerLayerRef.current = L.layerGroup().addTo(map);
+    cargueLayerRef.current = L.layerGroup().addTo(map);
 
     // Canvas Point Layer
     const vecRenderer = L.canvas({ pane: "vec", padding: 0.3 });
@@ -626,6 +643,85 @@ export default function LeafletMap({
     }
   }, [A, st.layers, st.est, st.hotspot, st.selBarrio, theme]);
 
+  // 2 bis. Órdenes POR EJECUTAR del archivo cargado en el chat.
+  //
+  // Capa aparte del histórico y con su propio color: estas órdenes no tienen
+  // estado ni causa —todavía no se han ejecutado—, así que pintarlas con el
+  // semáforo de efectiva/fallida/perdida diría algo que no se sabe.
+  //
+  // Los tres orígenes se distinguen por relleno y no por color, para que la capa
+  // se lea como una sola cosa con precisiones distintas: una coincidencia por
+  // vía no puede parecer un GPS tomado en la puerta.
+  useEffect(() => {
+    const map = mapRef.current;
+    const capa = cargueLayerRef.current;
+    if (!map || !capa) return;
+
+    capa.clearLayers();
+    if (!ordenes?.puntos?.length || !st.layers.cargue) return;
+
+    const color = P.cargue;
+    // Tinta oscura sobre el relleno ámbar: a 18 px un foco de trazo claro
+    // desaparece.
+    const tinta = P.inkSoft;
+    // Relleno sólido = GPS tomado en esa misma puerta. Translúcido = cerca.
+    // Punteado = solo la calle correcta.
+    const solido = { fondo: color, borde: `1.5px solid ${color}`, opacidad: 1 };
+    const estilo = {
+      nic: solido,
+      exacta: solido,
+      cuadra: { fondo: color, borde: `1.5px solid ${color}`, opacidad: 0.68 },
+      via: { fondo: "transparent", borde: `1.5px dashed ${color}`, opacidad: 0.85 }
+    };
+    const precision = {
+      nic: "GPS real de este suministro",
+      exacta: "GPS real de esta misma dirección",
+      cuadra: "otra placa de la misma cuadra (~32 m)",
+      via: "sobre la misma vía (~41 m)"
+    };
+
+    for (const o of ordenes.puntos) {
+      const s = estilo[o.origen] || estilo.via;
+      // Los colores van en línea y no en una clase de CSS porque salen de la
+      // paleta en JS, que es la única que conoce el tema vigente.
+      const icono = L.divIcon({
+        className: "cargue-foco",
+        html:
+          `<span style="background:${s.fondo};border:${s.borde};` +
+          `color:${s.fondo === "transparent" ? color : tinta};opacity:${s.opacidad}">` +
+          FOCO_SVG +
+          `</span>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -9]
+      });
+
+      L.marker([o.lat, o.lon], { icon: icono, pane: "cargue", riseOnHover: true })
+        .bindPopup(
+          `
+          <div class="op-h" style="border-color:${color}">
+            <b>Orden ${o.orden}</b>
+            <span class="op-e" style="color:${P.cargueText}">Por ejecutar</span>
+          </div>
+          <table class="op-t">
+            <tbody>
+              <tr><td>NIC</td><td class="mono">${o.nic || "—"}</td></tr>
+              <tr><td>Dirección</td><td>${o.direccion || "—"}</td></tr>
+              <tr><td>Barrio</td><td>${o.barrio || "—"}${
+                o.municipio ? ` · ${o.municipio}` : ""
+              }</td></tr>
+              <tr><td>Técnico</td><td>${o.tecnico || "—"}</td></tr>
+              <tr><td>Tipo OS</td><td>${o.tipo_os || "—"}</td></tr>
+              <tr><td>Ubicación</td><td>${precision[o.origen] || "—"}</td></tr>
+            </tbody>
+          </table>
+        `,
+          { className: "ord-pop", maxWidth: 300 }
+        )
+        .addTo(capa);
+    }
+  }, [ordenes, st.layers.cargue, theme]);
+
   // 3. Cambio de tema: se intercambian los mosaicos y se repintan los puntos
   useEffect(() => {
     const map = mapRef.current;
@@ -645,10 +741,15 @@ export default function LeafletMap({
     }
   }, [st.selBarrio]);
 
+  // Con las órdenes del archivo dibujadas el mapa NO está vacío, aunque el
+  // histórico esté todo apagado: el aviso contradecía lo que se veía en pantalla.
+  const dibujandoCargue = st.layers.cargue && ordenes?.puntos?.length > 0;
+  const mapaVacio = !st.est.some(Boolean) && !dibujandoCargue;
+
   return (
     <div id="mapwrap">
       <div ref={mapContainerRef} id="map" style={{ height: "100%", width: "100%" }} />
-      <div id="mapEmpty" style={{ display: st.est.some(Boolean) ? "none" : "block" }}>
+      <div id="mapEmpty" style={{ display: mapaVacio ? "block" : "none" }}>
         <b>Ninguna orden seleccionada</b>
         <p>Marca al menos un tipo de orden — perdidas, fallidas o efectivas — para dibujarlas en el mapa.</p>
       </div>

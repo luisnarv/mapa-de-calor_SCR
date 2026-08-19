@@ -9,7 +9,7 @@ redacte la respuesta. Además de datos, una herramienta puede devolver una
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Sequence
 
 from app.schemas.chat import VistaTablero
 from app.schemas.metrics import CandidatoBarrio, FiltroMapa
@@ -42,8 +42,12 @@ _BARRIO = {
     ),
 }
 _MES = {
-    "type": "string",
-    "description": "Mes en formato YYYY-MM. Si se omite, se usa todo el histórico.",
+    "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+    "description": (
+        "Periodo: un mes 'YYYY-MM', un año entero 'YYYY' —que vale por todos sus "
+        "meses con datos— o una lista para varios sueltos, p. ej. "
+        "['2026-07', '2026-08']. Si se omite, todo el histórico."
+    ),
 }
 _MUNICIPIO = {"type": "string", "description": "Nombre del municipio."}
 _BRIGADA = {
@@ -70,8 +74,8 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "efectividad",
             "description": (
-                "Efectividad de un barrio, municipio o del total. Devuelve la cruda y "
-                "la ajustada, más el desglose de efectivas, fallidas y perdidas. "
+                "Efectividad de un barrio, municipio o del total. Devuelve la efectividad "
+                "y la ajustada, más el desglose de efectivas, fallidas y perdidas. "
                 "Úsala para '¿qué efectividad tiene X?'. Devuelve además `base`: "
                 "el recorte exacto sobre el que se calculó, que debes citar."
             ),
@@ -335,6 +339,61 @@ NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in TOOLS)
 MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas"})
 
 
+class PeriodoVacio(Exception):
+    """El periodo pedido no tiene ni un mes con datos."""
+
+    def __init__(self, pedido: str, disponibles: list[str]) -> None:
+        super().__init__(pedido)
+        self.pedido = pedido
+        self.disponibles = disponibles
+
+
+def expandir_meses(mes: Any, disponibles: Sequence[str]) -> list[str] | None:
+    """Traduce lo que pidió el modelo a meses concretos del payload.
+
+    Acepta 'YYYY-MM', 'YYYY' (todos los meses de ese año) o una lista de ambos.
+    Existe porque antes el parámetro era UN mes: al pedir «todo 2026» el modelo
+    no tenía forma de expresarlo y mandaba el primero, así que una pregunta por
+    un año se contestaba con enero.
+
+    Returns:
+        Los meses pedidos que existen, ordenados; o None si no se pidió periodo.
+
+    Raises:
+        PeriodoVacio: si se pidió un periodo y ninguno de sus meses tiene datos.
+            Devolver el histórico entero sería peor: la cifra saldría de un
+            recorte que nadie pidió y nadie lo notaría.
+    """
+    if mes is None or mes == "" or mes == []:
+        return None
+
+    pedidos = [mes] if isinstance(mes, str) else [str(m) for m in mes]
+    conjunto = set(disponibles)
+    encontrados: list[str] = []
+    for pedido in pedidos:
+        pedido = pedido.strip()
+        if pedido in conjunto:
+            encontrados.append(pedido)
+        elif len(pedido) == 4 and pedido.isdigit():
+            encontrados.extend(m for m in disponibles if m.startswith(f"{pedido}-"))
+
+    if not encontrados:
+        raise PeriodoVacio(", ".join(str(m) for m in pedidos), list(disponibles))
+    return sorted(set(encontrados))
+
+
+def etiqueta_periodo(meses: list[str] | None) -> str:
+    """Cómo se nombra el periodo en la `base` que lee el modelo."""
+    if not meses:
+        return "todo el histórico"
+    if len(meses) == 1:
+        return meses[0]
+    anios = {m[:4] for m in meses}
+    if len(anios) == 1 and len(meses) > 2:
+        return f"{meses[0]} a {meses[-1]}"
+    return ", ".join(meses)
+
+
 class ToolRunner:
     """Ejecuta las herramientas contra la base y acumula el filtro para el mapa."""
 
@@ -417,6 +476,18 @@ class ToolRunner:
                 "texto_buscado": exc.texto,
                 "sugerencia": "Pide al usuario que confirme el nombre del barrio.",
             }, None
+        except PeriodoVacio as exc:
+            # Sin esto la consulta seguía sin filtro de fecha y devolvía la cifra
+            # de todo el histórico como si fuera la del año pedido.
+            return {
+                "error": "periodo_sin_datos",
+                "periodo_pedido": exc.pedido,
+                "meses_con_datos": exc.disponibles,
+                "sugerencia": (
+                    "No hay órdenes en ese periodo. Dilo tal cual —no es 0% de "
+                    "efectividad, es que no hay datos— y ofrece los meses que sí hay."
+                ),
+            }, None
         except BarrioAmbiguo as exc:
             return {
                 "error": "barrio_ambiguo",
@@ -439,13 +510,15 @@ class ToolRunner:
         municipio: str | None,
         mes: str | None,
         brigada: str | None = None,
-    ) -> tuple[list[str] | None, str | None, str, FiltroMapa]:
+    ) -> tuple[list[str] | None, str | None, list[str] | None, str, FiltroMapa]:
         """Traduce los argumentos a un recorte concreto y a su descripción.
 
         La descripción viaja de vuelta al modelo en cada respuesta: es lo que le
         permite decir sobre qué calculó la cifra en vez de dar por hecho que le
         hicieron caso.
         """
+        meses = expandir_meses(mes, await self.metrics.meses_disponibles())
+
         bkeys = None
         if barrio:
             grupo = await self._grupo(barrio)
@@ -459,7 +532,7 @@ class ToolRunner:
         else:
             donde = municipio or "todo el Atlántico"
 
-        partes = [donde, mes or "todo el histórico"]
+        partes = [donde, etiqueta_periodo(meses)]
         if brigada:
             partes.append(f"brigada {brigada}")
 
@@ -469,9 +542,9 @@ class ToolRunner:
             barrio=bkeys[0] if bkeys and len(bkeys) == 1 else None,
             municipio=None if bkeys and len(bkeys) == 1 else municipio,
             brigada=brigada,
-            meses=[mes] if mes else None,
+            meses=meses,
         )
-        return bkeys, municipio, " · ".join(partes), filtro
+        return bkeys, municipio, meses, " · ".join(partes), filtro
 
     async def _efectividad(
         self,
@@ -481,11 +554,11 @@ class ToolRunner:
         brigada: str | None = None,
         tipo_os: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
         datos = await self.metrics.efectividad(
             bkeys=bkeys,
             municipio=None if bkeys else municipio,
-            mes=mes,
+            meses=meses,
             brigada=brigada,
             tipo_os=tipo_os,
             etiqueta=base,
@@ -495,14 +568,19 @@ class ToolRunner:
             "base": base,
             "metricas": datos.model_dump(),
             "nota": (
-                "ef_pct es la efectividad cruda (la que muestra el mapa en su tooltip) "
-                "y ef_adj la ajustada. Di cuál citas y sobre qué base."
+                # El modelo copia esta nota casi literal, así que aquí van ya los
+                # nombres que debe usar: escribir «ef_pct» le hacía soltar el
+                # nombre del campo en la respuesta.
+                "Da SIEMPRE las dos cifras, aunque solo te pidan «la efectividad»: "
+                "`ef_pct` es «efectividad» y `ef_adj` «efectividad ajustada». No "
+                "escribas los nombres de los campos ni la palabra «cruda». Di sobre "
+                "qué base están calculadas."
             ),
         }
         if bkeys and len(bkeys) > 1:
             # Una sola pasada agrupada, no una consulta por barrio.
             detalle = await self.metrics.ranking(
-                dimension="barrio", bkeys=bkeys, mes=mes, brigada=brigada,
+                dimension="barrio", bkeys=bkeys, meses=meses, brigada=brigada,
                 min_ordenes=0, limite=len(bkeys),
             )
             salida["detalle_por_barrio"] = [f.model_dump() for f in detalle]
@@ -523,7 +601,7 @@ class ToolRunner:
         min_ordenes: int = 10,
         ordenar_por: str = "ef_adj",
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
 
         # "Peor" se invierte según el criterio: con efectividad el peor es el de
         # menor valor, pero con pérdidas o fallidas el peor es el que más tiene.
@@ -532,7 +610,7 @@ class ToolRunner:
         async def consultar(en_barrios, en_municipio, minimo):
             return await self.metrics.ranking(
                 dimension=dimension, bkeys=en_barrios, municipio=en_municipio,
-                mes=mes, brigada=brigada, min_ordenes=minimo,
+                meses=meses, brigada=brigada, min_ordenes=minimo,
                 ascendente=ascendente, ordenar_por=ordenar_por,
             )
 
@@ -571,9 +649,9 @@ class ToolRunner:
         mes: str | None = None,
         brigada: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
         filas = await self.metrics.causas(
-            bkeys=bkeys, municipio=None if bkeys else municipio, mes=mes, brigada=brigada
+            bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses, brigada=brigada
         )
         return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
 
@@ -601,7 +679,20 @@ class ToolRunner:
             kwargs["barrio"] = (await self._resolver(barrio)).bkey
 
         filtro = FiltroMapa(**{k: v for k, v in kwargs.items() if k in FiltroMapa.model_fields})
-        return {"aplicado": filtro.model_dump(exclude_none=True)}, filtro
+        aplicado = filtro.model_dump(exclude_none=True)
+        if not aplicado:
+            # Un filtro sin un solo campo no filtra nada, pero al llegar al
+            # tablero igual le cambiaba la pestaña al usuario. El modelo la llama
+            # así al terminar un ranking; se ignora y se le dice por qué.
+            return {
+                "error": "filtro_vacio",
+                "sugerencia": (
+                    "No mandaste ningún campo, así que no hay nada que filtrar. "
+                    "Llama a filtrar_mapa solo con un barrio, municipio, zona, "
+                    "brigada, tipo de orden o meses concretos."
+                ),
+            }, None
+        return {"aplicado": aplicado}, filtro
 
     # --- Herramientas sobre el archivo cargado --------------------------------
 

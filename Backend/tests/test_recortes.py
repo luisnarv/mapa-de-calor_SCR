@@ -186,3 +186,91 @@ def test_la_regla_de_negocio_esta_en_el_prompt():
 
     assert "Fallida: la brigada fue y no pudo suspender, pero la orden SÍ se paga" in prompt
     assert "Perdida: NO se paga" in prompt
+
+
+@pytest.mark.asyncio
+async def test_filtrar_mapa_sin_campos_no_mueve_el_tablero():
+    """El modelo la llama vacía al cerrar un ranking; eso cambiaba de pestaña."""
+    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    resultado, filtro = await runner.run("filtrar_mapa", {})
+
+    assert filtro is None, "un filtro vacío no debe llegar al tablero"
+    assert resultado["error"] == "filtro_vacio"
+
+
+@pytest.mark.asyncio
+async def test_un_ranking_sin_recorte_no_emite_accion(monkeypatch):
+    """`_recorte` arma un filtro vacío; emitirlo le cambiaba la pestaña al usuario."""
+    from app.services.openai_service import OpenAIService
+
+    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    _resultado, filtro = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "ef_adj", "peores": True}
+    )
+
+    # La herramienta sigue devolviendo su filtro; quien decide no emitirlo es el
+    # servicio, y esto fija que ese filtro está vacío.
+    assert filtro is not None
+    assert filtro.model_dump(exclude_none=True) == {}
+
+
+# --- Periodos: un año, varios meses o uno solo --------------------------------
+#
+# Antes `mes` era UNA cadena "YYYY-MM". Al pedir «todo 2026» el modelo no tenía
+# forma de expresarlo, mandaba el primer mes y un año se contestaba con enero.
+
+
+def test_un_ano_vale_por_todos_sus_meses():
+    from app.services.tools import expandir_meses
+
+    disponibles = ["2026-01", "2026-02", "2026-03", "2025-11", "2025-12"]
+    assert expandir_meses("2026", disponibles) == ["2026-01", "2026-02", "2026-03"]
+    assert expandir_meses("2025", disponibles) == ["2025-11", "2025-12"]
+
+
+def test_se_pueden_pedir_varios_meses_sueltos():
+    from app.services.tools import expandir_meses
+
+    disponibles = ["2026-06", "2026-07", "2026-08"]
+    assert expandir_meses(["2026-07", "2026-08"], disponibles) == ["2026-07", "2026-08"]
+    # Mezclar año y mes suelto no duplica ni desordena.
+    assert expandir_meses(["2026", "2026-07"], disponibles) == ["2026-06", "2026-07", "2026-08"]
+
+
+def test_un_mes_solo_sigue_funcionando_igual():
+    from app.services.tools import expandir_meses
+
+    assert expandir_meses("2026-07", ["2026-06", "2026-07"]) == ["2026-07"]
+    assert expandir_meses(None, ["2026-07"]) is None
+
+
+def test_un_periodo_sin_datos_no_se_confunde_con_todo_el_historico():
+    """Devolver el histórico entero daría la cifra de un recorte que nadie pidió."""
+    from app.services.tools import PeriodoVacio, expandir_meses
+
+    with pytest.raises(PeriodoVacio):
+        expandir_meses("2019", ["2026-07", "2026-08"])
+
+
+@pytest.mark.asyncio
+async def test_pedir_un_ano_sin_datos_avisa_en_vez_de_dar_cero():
+    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    resultado, filtro = await runner.run("efectividad", {"mes": "2019"})
+
+    assert resultado["error"] == "periodo_sin_datos"
+    assert filtro is None
+    # 0% de efectividad y «no hay datos» no pueden parecerse en la respuesta.
+    assert "0" not in str(resultado.get("ef_pct", ""))
+
+
+@pytest.mark.asyncio
+async def test_pedir_un_ano_agrega_todos_sus_meses():
+    """El caso real: Rebolo no tiene órdenes en enero, pero sí en el año."""
+    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+
+    enero, _ = await runner.run("efectividad", {"barrio": "Rebolo", "mes": "2026-01"})
+    ano, _ = await runner.run("efectividad", {"barrio": "Rebolo", "mes": "2026"})
+
+    assert enero["metricas"]["tot"] == 0
+    assert ano["metricas"]["tot"] > enero["metricas"]["tot"]
+    assert ano["metricas"]["ef_pct"] > 0

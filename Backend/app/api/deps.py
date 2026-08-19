@@ -1,5 +1,6 @@
 """Dependencias globales que se inyectan en los endpoints."""
 
+import logging
 from functools import lru_cache
 from typing import Annotated, AsyncIterator
 
@@ -9,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.cargue_store import CargueStore
+from app.services.geolocalizacion import Geolocalizador
 from app.services.metrics_service import MetricsService
 from app.services.openai_service import OpenAIService, get_openai_service
 from app.services.tools import ToolRunner
+
+logger = logging.getLogger(__name__)
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
@@ -45,6 +49,15 @@ def get_cargue_store() -> CargueStore:
 
 
 CargueStoreDep = Annotated[CargueStore, Depends(get_cargue_store)]
+
+
+@lru_cache
+def get_geolocalizador() -> Geolocalizador:
+    """Uno por proceso: conserva el avance de la geolocalización entre peticiones."""
+    return Geolocalizador(settings.DATA_DIR)
+
+
+GeolocalizadorDep = Annotated[Geolocalizador, Depends(get_geolocalizador)]
 
 
 def get_tool_runner(metrics: MetricsDep, store: CargueStoreDep) -> ToolRunner:

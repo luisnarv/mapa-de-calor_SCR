@@ -241,3 +241,105 @@ def test_el_prompt_acota_cuando_resaltar_en_el_mapa():
 
     assert "destaque UN resultado concreto" in prompt
     assert "no lo hagas" in prompt, "falta el caso en que NO debe resaltar"
+
+
+# --- Agotar las rondas de herramientas ----------------------------------------
+#
+# El bucle ejecutaba las herramientas de la última ronda y terminaba sin pedirle
+# al modelo que redactara: con los datos ya delante, el usuario recibía «no pude
+# cerrar la consulta». La misma pregunta contestaba o no según cuántas consultas
+# se le antojara hacer al modelo, que es lo último que nadie puede adivinar.
+
+from types import SimpleNamespace
+
+from app.services import openai_service as mod
+from app.services.openai_service import OpenAIService
+
+
+def _chunk(content=None, tool_calls=None):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=tool_calls))]
+    )
+
+
+def _parcial(nombre, args):
+    return SimpleNamespace(
+        index=0, id="c1", function=SimpleNamespace(name=nombre, arguments=args)
+    )
+
+
+class ClienteFalso:
+    """Pide una herramienta en la primera vuelta y redacta en el cierre."""
+
+    def __init__(self, texto_de_cierre="La efectividad ajustada es del 92,9%."):
+        self.texto_de_cierre = texto_de_cierre
+        self.tool_choices = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        self.tool_choices.append(kwargs.get("tool_choice"))
+        primera = len(self.tool_choices) == 1
+        texto = self.texto_de_cierre
+
+        async def gen():
+            if primera:
+                yield _chunk(tool_calls=[_parcial("efectividad", "{}")])
+            elif texto:
+                yield _chunk(content=texto)
+
+        return gen()
+
+
+class RunnerFalso:
+    """Mismo contrato que ToolRunner en lo que usa el servicio."""
+
+    vista = None
+    cargue_id = None
+
+    def cargue_actual(self):
+        return None
+
+    async def run(self, nombre, args):
+        return {"base": "prueba", "metricas": {"tot": 10}}, None
+
+
+async def _texto_de(cliente, runner=None):
+    svc = OpenAIService(cliente, "gpt-4o-mini", "prompt de prueba")
+    partes = []
+    async for evento in svc.stream_chat(ChatRequest(**PREGUNTA), runner or RunnerFalso()):
+        if "delta" in evento:
+            partes.append(evento["delta"])
+    return "".join(partes)
+
+
+@pytest.mark.asyncio
+async def test_agotar_las_rondas_igual_devuelve_una_respuesta(monkeypatch):
+    monkeypatch.setattr(mod, "MAX_RONDAS", 1)  # con una ronda se agota seguro
+    cliente = ClienteFalso()
+
+    texto = await _texto_de(cliente)
+
+    assert "92,9%" in texto
+    assert "No pude cerrar" not in texto
+
+
+@pytest.mark.asyncio
+async def test_el_cierre_se_pide_sin_herramientas(monkeypatch):
+    """Con tool_choice libre volvería a consultar y no cerraría nunca."""
+    monkeypatch.setattr(mod, "MAX_RONDAS", 1)
+    cliente = ClienteFalso()
+
+    await _texto_de(cliente)
+
+    assert cliente.tool_choices == ["auto", "none"]
+
+
+@pytest.mark.asyncio
+async def test_si_ni_con_el_cierre_redacta_se_avisa(monkeypatch):
+    """El aviso sigue existiendo, pero como último recurso y no como norma."""
+    monkeypatch.setattr(mod, "MAX_RONDAS", 1)
+    cliente = ClienteFalso(texto_de_cierre="")
+
+    texto = await _texto_de(cliente)
+
+    assert "No pude cerrar" in texto
