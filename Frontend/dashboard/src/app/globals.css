@@ -380,8 +380,11 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
    El selector lleva `.leaflet-div-icon` para ganarle al fondo blanco y al borde
    que Leaflet le pone por defecto a todo divIcon. */
 .leaflet-div-icon.cargue-foco{background:none;border:0}
+/* El alto tiene que coincidir con el `iconSize` del divIcon: si el círculo es
+   más grande que su caja, se dibuja descentrado respecto al punto real y la
+   zona sensible al clic queda más pequeña que lo que se ve. */
 .cargue-foco>span{display:flex;align-items:center;justify-content:center;
-  width:18px;height:18px;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.45);
+  width:14px;height:14px;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.45);
   transition:transform .12s ease}
 .cargue-foco:hover>span{transform:scale(1.25)}
 
