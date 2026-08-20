@@ -8,7 +8,6 @@ import { ChevronRight, X } from "lucide-react";
 import isesSymbol from "../../public/ises-symbol.png";
 
 import Topbar from "@/components/Topbar";
-import KPIStrip from "@/components/KPIStrip";
 import RiskSpine from "@/components/RiskSpine";
 import DetailsPanel from "@/components/DetailsPanel";
 import Dock from "@/components/Dock";
@@ -96,6 +95,7 @@ export default function Home() {
   const inflightKeysRef = useRef(new Set()); // YYYY-MM descargándose ahora
   const [loadingMonths, setLoadingMonths] = useState([]); // labels en descarga (UI)
   const [refreshing, setRefreshing] = useState(false); // botón "Actualizar información"
+  const [refreshResult, setRefreshResult] = useState(null); // null | "ok" | "error"
 
   // App global state
   const [st, setSt] = useState({
@@ -1205,6 +1205,7 @@ export default function Home() {
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
+    setRefreshResult(null);
     try {
       await cacheClear();
       setLoadingMonths([]);
@@ -1213,8 +1214,10 @@ export default function Home() {
       }).then((r) => r.json());
       cachePut("data.json", resData);
       applyEntryData(resData);
+      setRefreshResult("ok");
     } catch (err) {
       console.error("No se pudo actualizar la información", err);
+      setRefreshResult("error");
     } finally {
       setRefreshing(false);
     }
@@ -1248,6 +1251,7 @@ export default function Home() {
     totalLoaded: rawArrays ? rawArrays.E.length : data.meta.total,
     fechaMin: data.meta.fecha_min,
     fechaMax: data.meta.fecha_max,
+    generated: data.meta.generated,
     lat,
     lon,
     // Add raw properties needed by Dock hierarchy
@@ -1354,12 +1358,11 @@ export default function Home() {
           avail={avail}
           onFilterChange={handleFilterChange}
           onReset={handleReset}
-          MAXDAY={MAXDAY}
-          dayLabel={dayLabel}
           availableMonths={availableMonths}
           loadingMonths={loadingMonths}
           onRefresh={handleRefresh}
           refreshing={refreshing}
+          refreshResult={refreshResult}
         />
 
         <main id="main" className="v4-main" style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -1694,15 +1697,13 @@ export default function Home() {
         avail={avail}
         onFilterChange={handleFilterChange}
         onReset={handleReset}
-        MAXDAY={MAXDAY}
-        dayLabel={dayLabel}
         availableMonths={availableMonths}
         loadingMonths={loadingMonths}
         onRefresh={handleRefresh}
         refreshing={refreshing}
+        refreshResult={refreshResult}
       />
 
-      <KPIStrip A={A} />
 
       <main id="main">
         <RiskSpine

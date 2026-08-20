@@ -18,7 +18,8 @@
       "Bash(echo \"exit=$?\")",
       "Bash(rm -f .cache/geocodificacion.json)",
       "Bash(rmdir .cache)",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(rm src/components/KPIStrip.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\P745\\OneDrive - ISES S.A.S\\Documentos\\AI\\mapa-de-calor_SCR\\Frontend\\dashboard\\src\\app",
