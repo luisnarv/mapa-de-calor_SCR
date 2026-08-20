@@ -212,8 +212,12 @@ h2,h3,h4{font-family:var(--ff);font-weight:700;letter-spacing:.01em;color:var(--
   border:1px solid var(--line2);border-radius:var(--r);box-shadow:var(--shadow);
   padding:5px;display:flex;flex-direction:column;gap:1px}
 .hd-pop:focus{outline:none}
-.hd-op{text-align:left;background:transparent;border:0;border-radius:var(--r-sm);
-  padding:6px 9px;font:400 12.5px var(--ff);color:var(--mut);cursor:pointer;
+/* `flex:0 0 auto` no es opcional: en una columna flex con altura máxima los
+   hijos se encogen por debajo de su contenido y las opciones se solapan unas
+   sobre otras en cuanto la lista es larga (22 municipios). */
+.hd-op{flex:0 0 auto;text-align:left;background:transparent;border:0;
+  border-radius:var(--r-sm);padding:6px 9px;font:400 12.5px var(--ff);
+  line-height:1.35;color:var(--mut);cursor:pointer;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hd-op:hover,.hd-op.mk{background:var(--elev);color:var(--tx)}
 .hd-op.sel{color:var(--cu2);font-weight:600}
