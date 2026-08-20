@@ -216,7 +216,6 @@ def _buscar_cabecera(filas: list[list[Any]]) -> tuple[int, dict[int, str]]:
     )
     raise ArchivoInvalido(
         f"El archivo no parece un export de órdenes. {detalle} "
-        f"Se revisaron las primeras {MAX_FILAS_CABECERA} filas."
     )
 
 

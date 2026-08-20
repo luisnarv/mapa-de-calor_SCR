@@ -90,6 +90,10 @@ export const PALETTES = {
        #FFD500 es «barrios sin visitar», y las dos cosas significan trabajo
        pendiente, así que en el mismo mapa se confundirían. */
     cargue: "#F5A300",
+    /* Los puntos sueltos del cargue van en blanco. Sobre el mosaico claro
+       el relleno solo no se ve, así que el contorno lo saca del fondo. */
+    carguePunto: "#FFFFFF",
+    carguePuntoLinea: "#14201A",
     /* el ámbar de relleno no alcanza AA como texto sobre el overlay claro */
     cargueText: "#8A5A00",
 
@@ -118,7 +122,10 @@ export const PALETTES = {
       { 0.35: "#CFE3B4", 0.65: BRAND.verde, 1.0: BRAND.verdeOscuro },
       { 0.35: "#E8EAA8", 0.65: BRAND.lima, 1.0: "#7E8400" },
       { 0.35: "#F0BDB5", 0.65: "#D9584A", 1.0: "#8E2418" }
-    ]
+    ],
+    /* Una sola rampa, en el ámbar del cargue: estas órdenes no tienen estado
+       todavía, así que partirla en tres diría algo que no se sabe. */
+    heatCargue: { 0.35: "#FCE0A8", 0.65: "#F5A300", 1.0: "#B87400" }
   },
 
   /* Modo oscuro — Identidad Navy (SIP): superficies azul medianoche, marca en
@@ -153,6 +160,8 @@ export const PALETTES = {
     /* órdenes por ejecutar. En oscuro sube a naranja: el ámbar de aquí (#F0C040)
        ya es «fallida», y el del modo claro se confundiría con ella. */
     cargue: "#FF9A1F",
+    carguePunto: "#FFFFFF",
+    carguePuntoLinea: "#FFFFFF",
     /* sobre navy el naranja de relleno ya contrasta; se aclara un punto */
     cargueText: "#FFB454",
 
@@ -182,7 +191,8 @@ export const PALETTES = {
       { 0.35: "#0E3A2C", 0.65: "#1E8A64", 1.0: "#2BD98C" },
       { 0.35: "#5C4712", 0.65: "#C09526", 1.0: "#F0C040" },
       { 0.35: "#7A1A1E", 0.65: "#C93B41", 1.0: "#FF5A5F" }
-    ]
+    ],
+    heatCargue: { 0.35: "#5C3A00", 0.65: "#D97E10", 1.0: "#FF9A1F" }
   }
 };
 

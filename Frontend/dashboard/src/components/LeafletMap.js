@@ -10,16 +10,6 @@ import "leaflet.heat";
 
 import { useTheme, riskColor as riskColorOf } from "@/lib/theme";
 
-// Foco (Lightbulb de lucide) para las órdenes por ejecutar. Va como SVG suelto y
-// no como componente de React porque Leaflet arma sus marcadores con HTML plano,
-// fuera del árbol de React.
-const FOCO_SVG =
-  '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" ' +
-  'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M9 18h6"/><path d="M10 22h4"/>' +
-  '<path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8' +
-  'c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>';
-
 export default function LeafletMap({
   A,
   st,
@@ -40,6 +30,7 @@ export default function LeafletMap({
   const ptLayerRef = useRef(null);
   const cargueLayerRef = useRef(null);
   const heatLayersRef = useRef({ 0: null, 1: null, 2: null });
+  const cargueHeatRef = useRef(null);
   const tileRefs = useRef({ base: null, labels: null });
 
   // Paleta corporativa: el mapa pinta en canvas/Leaflet, donde var(--x) no se
@@ -658,20 +649,101 @@ export default function LeafletMap({
     if (!map || !capa) return;
 
     capa.clearLayers();
-    if (!ordenes?.puntos?.length || !st.layers.cargue) return;
+    // El calor no es un Layer del grupo: se quita del mapa aparte.
+    if (cargueHeatRef.current) {
+      map.removeLayer(cargueHeatRef.current);
+      cargueHeatRef.current = null;
+    }
+    // Sin ningún modo activo no hay capa que dibujar.
+    const dibuja =
+      st.layers.cargueMarkers ||
+      st.layers.cargueHeat ||
+      st.layers.cargueGps ||
+      st.layers.cargueApprox;
+    if (!ordenes?.puntos?.length || !dibuja) return;
 
     const color = P.cargue;
-    // Tinta oscura sobre el relleno ámbar: a 18 px un foco de trazo claro
-    // desaparece.
-    const tinta = P.inkSoft;
+
+    // GPS real = tomado en el suministro o en esa misma dirección; lo demás es
+    // una aproximación por cuadra o por vía. Es la división que el histórico
+    // hace con APPROX_raw, solo que aquí la precisión viene en cuatro escalones.
+    const esReal = (o) => o.origen === "nic" || o.origen === "exacta";
+
+    // Igual que en el histórico, GPS/aproximadas solo mandan sobre los puntos
+    // sueltos: el calor y los marcadores resumen todo lo que hay.
+    const sueltos = ordenes.puntos.filter(
+      (o) => (st.layers.cargueGps && esReal(o)) || (st.layers.cargueApprox && !esReal(o))
+    );
+
+    if (st.layers.cargueHeat && L.heatLayer) {
+      cargueHeatRef.current = L.heatLayer(
+        ordenes.puntos.map((o) => [o.lat, o.lon, 1.0]),
+        {
+          radius: 14,
+          blur: 20,
+          // Mismo techo que las fallidas del histórico: son volúmenes parecidos
+          // y así las dos capas se leen a la misma escala.
+          max: 14,
+          minOpacity: 0.42,
+          maxZoom: 13,
+          gradient: P.heatCargue,
+          pane: "heat"
+        }
+      ).addTo(map);
+    }
+
+    if (st.layers.cargueMarkers) {
+      // Se agrupa por el nombre del barrio que trae cada orden y el centro sale
+      // del promedio de sus propios puntos: los centroides del histórico están
+      // indexados por posición, y cruzarlos por nombre fallaría justo en los
+      // barrios con etapas, que son los que más órdenes traen.
+      const porBarrio = new Map();
+      for (const o of ordenes.puntos) {
+        const clave = o.barrio || "Sin barrio";
+        const acc = porBarrio.get(clave) || { n: 0, reales: 0, lat: 0, lon: 0, muni: o.municipio };
+        acc.n += 1;
+        acc.reales += esReal(o) ? 1 : 0;
+        acc.lat += o.lat;
+        acc.lon += o.lon;
+        porBarrio.set(clave, acc);
+      }
+
+      const rendererCargue = L.canvas({ pane: "cargue", padding: 0.3 });
+      for (const [nombre, acc] of porBarrio) {
+        const centro = [acc.lat / acc.n, acc.lon / acc.n];
+        const rad = Math.min(20, 7 + Math.sqrt(acc.n) * 0.7);
+        L.circleMarker(centro, {
+          radius: rad,
+          color,
+          weight: 1.5,
+          fillColor: color,
+          fillOpacity: 0.55,
+          renderer: rendererCargue
+        })
+          .bindTooltip(
+            `<b>${nombre}</b>` +
+              (acc.muni ? `<span class="tt-m">${acc.muni}</span>` : "") +
+              `<span>${acc.n.toLocaleString("es-CO")} por ejecutar</span>` +
+              `<span>${acc.reales.toLocaleString("es-CO")} con GPS real</span>`,
+            { className: "tt", direction: "top" }
+          )
+          .addTo(capa);
+      }
+    }
+    // Los puntos sueltos van en blanco y sin icono: a 18 px el foco se
+    // emborronaba, y lo que hay que distinguir de un vistazo es la precisión de
+    // la ubicación, que se lee en el relleno. Sobre el mosaico claro el blanco
+    // solo no se ve, así que el contorno lo saca del fondo.
+    const punto = P.carguePunto;
+    const linea = P.carguePuntoLinea;
     // Relleno sólido = GPS tomado en esa misma puerta. Translúcido = cerca.
     // Punteado = solo la calle correcta.
-    const solido = { fondo: color, borde: `1.5px solid ${color}`, opacidad: 1 };
+    const solido = { fondo: punto, borde: `1.5px solid ${linea}`, opacidad: 1 };
     const estilo = {
       nic: solido,
       exacta: solido,
-      cuadra: { fondo: color, borde: `1.5px solid ${color}`, opacidad: 0.68 },
-      via: { fondo: "transparent", borde: `1.5px dashed ${color}`, opacidad: 0.85 }
+      cuadra: { fondo: punto, borde: `1.5px solid ${linea}`, opacidad: 0.68 },
+      via: { fondo: "transparent", borde: `1.5px dashed ${linea}`, opacidad: 0.85 }
     };
     const precision = {
       nic: "GPS real de este suministro",
@@ -680,7 +752,7 @@ export default function LeafletMap({
       via: "sobre la misma vía (~41 m)"
     };
 
-    for (const o of ordenes.puntos) {
+    for (const o of sueltos) {
       const s = estilo[o.origen] || estilo.via;
       // Los colores van en línea y no en una clase de CSS porque salen de la
       // paleta en JS, que es la única que conoce el tema vigente.
@@ -688,12 +760,10 @@ export default function LeafletMap({
         className: "cargue-foco",
         html:
           `<span style="background:${s.fondo};border:${s.borde};` +
-          `color:${s.fondo === "transparent" ? color : tinta};opacity:${s.opacidad}">` +
-          FOCO_SVG +
-          `</span>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
-        popupAnchor: [0, -9]
+          `opacity:${s.opacidad}"></span>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+        popupAnchor: [0, -7]
       });
 
       L.marker([o.lat, o.lon], { icon: icono, pane: "cargue", riseOnHover: true })
@@ -720,7 +790,7 @@ export default function LeafletMap({
         )
         .addTo(capa);
     }
-  }, [ordenes, st.layers.cargue, theme]);
+  }, [ordenes, st.layers, theme]);
 
   // 3. Cambio de tema: se intercambian los mosaicos y se repintan los puntos
   useEffect(() => {
@@ -743,7 +813,12 @@ export default function LeafletMap({
 
   // Con las órdenes del archivo dibujadas el mapa NO está vacío, aunque el
   // histórico esté todo apagado: el aviso contradecía lo que se veía en pantalla.
-  const dibujandoCargue = st.layers.cargue && ordenes?.puntos?.length > 0;
+  const dibujandoCargue =
+    ordenes?.puntos?.length > 0 &&
+    (st.layers.cargueMarkers ||
+      st.layers.cargueHeat ||
+      st.layers.cargueGps ||
+      st.layers.cargueApprox);
   const mapaVacio = !st.est.some(Boolean) && !dibujandoCargue;
 
   return (

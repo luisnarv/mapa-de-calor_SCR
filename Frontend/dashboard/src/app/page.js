@@ -35,55 +35,39 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   )
 });
 
-/**
- * Cuántas órdenes del cargue están bien ubicadas y cuántas solo aproximadas.
- *
- * Existe porque los tres orígenes NO son igual de fiables y mezclarlos sin
- * decirlo sería engañoso: un GPS real está en la puerta del predio y una
- * coincidencia por vía solo garantiza la calle.
- */
-function LeyendaCargue({ ordenes, P }) {
-  const n = ordenes.por_origen || {};
-  // Los cuatro orígenes se distinguen por relleno, no por color: la capa debe
-  // leerse como una sola cosa con precisiones distintas. El orden es el mismo
-  // de la escalera del backend, de la puerta exacta a la calle.
-  const filas = [
-    { k: "nic", txt: "GPS real del suministro", relleno: true, op: 1 },
-    { k: "exacta", txt: "GPS real de esa misma dirección", relleno: true, op: 1 },
-    { k: "cuadra", txt: "otra placa de la misma cuadra (~32 m)", relleno: true, op: 0.68 },
-    { k: "via", txt: "sobre la misma vía (~41 m)", relleno: false, op: 0.85 }
-  ].filter((f) => n[f.k] > 0);
 
-  const sinUbicar = ordenes.no_ubicadas?.length || 0;
+// Cómo se dibuja la capa del cargue. Va en un componente porque el panel de capas
+// existe dos veces —diseño Enfoque y Clásico— y son idénticos.
+//
+// No hay un interruptor de encendido: apagar los cuatro modos ya deja la capa sin
+// dibujar, así que una casilla más solo daba dos formas de hacer lo mismo.
+function CapasCargue({ layers, onLayers }) {
+  const casilla = (clave, texto) => (
+    <label className="lay">
+      <input
+        type="checkbox"
+        checked={layers[clave]}
+        onChange={(e) => onLayers({ ...layers, [clave]: e.target.checked })}
+      />
+      {texto}
+    </label>
+  );
 
   return (
-    <div className="lay-nota">
-      {filas.map((f) => (
-        <div key={f.k} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <span
-            className="sw"
-            style={{
-              background: f.relleno ? P.cargue : "transparent",
-              border: f.relleno ? undefined : `1.5px dashed ${P.cargue}`,
-              borderRadius: "50%",
-              opacity: f.op,
-              flex: "0 0 auto"
-            }}
-          />
-          <b>{(n[f.k] || 0).toLocaleString("es-CO")}</b> {f.txt}
-        </div>
-      ))}
-      {sinUbicar > 0 && (
-        <div style={{ marginTop: "4px" }}>
-          <b>{sinUbicar.toLocaleString("es-CO")}</b> sin ubicar: su dirección no cruza
-          con el histórico. No se pintan — un punto aproximado a varias cuadras haría
-          que alguien fuera al sitio equivocado.
-        </div>
-      )}
+    <div className="lgrp">
+      <h4>Órdenes por ejecutar</h4>
+      {casilla("cargueMarkers", "Marcadores por barrio")}
+      {casilla("cargueHeat", "Mapa de calor")}
+      {casilla("cargueGps", "GPS reales")}
+      {casilla("cargueApprox", "Ubicaciones aproximadas")}
+      <p className="lay-nota">
+        Los <b>marcadores</b> resumen cuántas hay por barrio. <b>GPS reales</b> y{" "}
+        <b>aproximadas</b> filtran los puntos sueltos según lo fina que sea su
+        ubicación.
+      </p>
     </div>
   );
 }
-
 
 export default function Home() {
   // Paleta corporativa para los swatches de capas y la leyenda de riesgo
@@ -144,7 +128,13 @@ export default function Home() {
       mpoly: false,
       zpoly: false,
       sinNic: false,
-      cargue: true
+      // Cómo se dibuja el cargue. Su propio juego de casillas: es una capa que se
+      // mira A LA VEZ que el histórico, y compartir los controles obligaría a
+      // verlas siempre igual. Por defecto, solo los puntos sueltos.
+      cargueMarkers: false,
+      cargueHeat: false,
+      cargueGps: true,
+      cargueApprox: true
     },
     // Hierarchy selections
     jerBarrio: null,
@@ -1550,23 +1540,11 @@ export default function Home() {
                       </label>
 
                       {ordenes && (
-                        <div className="lgrp">
-                          <h4>Órdenes por ejecutar</h4>
-                          <label className="lay">
-                            <input
-                              type="checkbox"
-                              checked={st.layers.cargue}
-                              onChange={(e) => {
-                                const layers = { ...st.layers, cargue: e.target.checked };
-                                handleFilterChange("layers", layers);
-                              }}
-                            />
-                            <span className="sw" style={{ background: P.cargue }}></span>
-                            Del archivo cargado
-                          </label>
-                          <LeyendaCargue ordenes={ordenes} P={P} />
-                        </div>
-                      )}
+  <CapasCargue
+    layers={st.layers}
+    onLayers={(layers) => handleFilterChange("layers", layers)}
+  />
+)}
 
                       <div className="lgrp">
                         <h4>Cómo dibujarlas</h4>
@@ -1860,23 +1838,11 @@ export default function Home() {
             </label>
 
             {ordenes && (
-              <div className="lgrp">
-                <h4>Órdenes por ejecutar</h4>
-                <label className="lay">
-                  <input
-                    type="checkbox"
-                    checked={st.layers.cargue}
-                    onChange={(e) => {
-                      const layers = { ...st.layers, cargue: e.target.checked };
-                      handleFilterChange("layers", layers);
-                    }}
-                  />
-                  <span className="sw" style={{ background: P.cargue }}></span>
-                  Del archivo cargado
-                </label>
-                <LeyendaCargue ordenes={ordenes} P={P} />
-              </div>
-            )}
+  <CapasCargue
+    layers={st.layers}
+    onLayers={(layers) => handleFilterChange("layers", layers)}
+  />
+)}
 
             <div className="lgrp">
               <h4>Cómo dibujarlas</h4>
