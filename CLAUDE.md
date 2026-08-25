@@ -57,6 +57,13 @@ pedir que se lea.
   Cualquier cifra debe decir cuál está usando.
 - **El chat y el mapa leen la misma fuente**: los JSON del ETL. Nunca calcular
   las métricas por otro camino, o las dos pantallas empiezan a discrepar.
+- **Lo que el técnico escribe a mano vive en el acta, y solo el chat la lee.**
+  `OBSERVACION` trae el acta de visita (`VS: ... VM: ... SS: ...`), y ahí quedan
+  los detalles sin casilla propia: red chilena, voltaje, el estado del poste. El
+  ETL la vuelca en `observaciones_YYYY-MM.json`, alineada **por posición** con
+  `pts` de ese mes; si los dos largos no coinciden, el backend descarta el mes
+  entero en vez de contar mal. Buscar ahí cuenta **menciones, no causas**: una
+  orden efectiva puede nombrar el término igual que una perdida.
 - **`Backend/app/core/taxonomy.py` es un espejo de `Etl/etl/taxonomy.py`.** Si
   cambias una causa o una homologación, cámbiala en los dos. Hay una prueba que
   lo verifica, pero solo corre si pandas está instalado en el venv del backend.
@@ -80,7 +87,8 @@ cd Etl && python run_etl.py
 ## Pendientes conocidos
 
 - Repartir la salida del ETL a `Frontend/dashboard/public/` y `Backend/app/data/`
-  sigue siendo manual.
+  sigue siendo manual. Los `observaciones_*.json` son la excepción: van solo al
+  backend. Copiarlos al frontend sería peso muerto en cada visita al tablero.
 - El endpoint del chat no tiene autenticación ni límite de peticiones.
 - Los pulgares de calificación del chat no se guardan en ningún lado.
 - La herramienta `efectividad` no acepta filtro por brigada: si le preguntan por

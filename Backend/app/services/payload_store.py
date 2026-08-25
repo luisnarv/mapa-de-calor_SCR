@@ -18,9 +18,9 @@ from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
-from typing import Iterator
+from typing import Iterator, Sequence
 
-from app.core.taxonomy import norm_dato
+from app.core.taxonomy import norm, norm_dato
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,10 @@ class Payload:
     b_muni: list[int]  # barrio -> municipio
     b_zona: list[int]  # barrio -> zona
     meses: list[str]  # "YYYY-MM", del más antiguo al más reciente
+    # Posición global donde arranca cada mes. Las observaciones viven en un
+    # archivo por mes indexado desde 0, así que hace falta esto para traducir
+    # una posición dentro de un mes al índice global de las columnas de abajo.
+    inicio_mes: list[int]
 
     # Una posición por orden
     b: array  # barrio
@@ -97,7 +101,13 @@ def _firma_de(directorio: Path) -> tuple:
         (p.name, p.stat().st_mtime_ns, p.stat().st_size)
         # El índice de direcciones entra en la huella: si el ETL lo regenera y
         # no se mira, el backend seguiría ubicando con el índice viejo.
-        for p in sorted(list(directorio.glob("data*.json")) + list(directorio.glob("direcciones.json")))
+        # Las observaciones entran por lo mismo: se regeneran en la misma
+        # corrida y su caché tiene que caducar con el resto.
+        for p in sorted(
+            list(directorio.glob("data*.json"))
+            + list(directorio.glob("direcciones.json"))
+            + list(directorio.glob("observaciones_*.json"))
+        )
     )
 
 
@@ -224,8 +234,10 @@ def _cargar(directorio: Path) -> Payload:
         "o": array("b"), "c": array("b"), "e": array("b"), "mes": array("b"),
     }
 
+    inicio_mes: list[int] = []
     for i, (mes, pts) in enumerate(_iter_meses(directorio, raiz)):
         meses.append(mes["key"])
+        inicio_mes.append(len(columnas["e"]))
         n = len(pts["e"])
         if n != mes["n"]:
             logger.warning(
@@ -248,6 +260,7 @@ def _cargar(directorio: Path) -> Payload:
         b_muni=dim["b_muni"],
         b_zona=dim["b_zona"],
         meses=meses,
+        inicio_mes=inicio_mes,
         generado=meta.get("generated", ""),
         **columnas,
     )
@@ -262,3 +275,70 @@ def _cargar(directorio: Path) -> Payload:
         f"{len(payload):,}", len(meses), payload.generado,
     )
     return payload
+
+
+# --- Observaciones -------------------------------------------------------------
+
+# Se cachean por mes y no de una: son ~60 MB de texto en el histórico completo y
+# la mayoría de conversaciones no busca en ellas nunca. El payload en enteros
+# sigue cargándose entero al arrancar; esto entra solo si alguien lo pide.
+#
+# Lo que se guarda es el texto YA NORMALIZADO, no el original. Normalizar el
+# histórico completo tarda ~2 s, y hacerlo en cada búsqueda era inaceptable
+# dentro de una conversación; guardar las dos versiones costaba el doble de
+# memoria. Los extractos que se le muestran al usuario salen de `leer_actas`,
+# que relee el archivo para las pocas posiciones que hagan falta.
+_observaciones: dict[str, list[str]] = {}
+_firma_obs: tuple | None = None
+
+
+def obtener_observaciones(directorio: Path, mes: str) -> list[str]:
+    """Actas de un mes, normalizadas y alineadas por posición con las columnas.
+
+    La posición `i` de la lista es la orden `inicio_mes[m] + i` del payload.
+    Devuelve `[]` si ese mes todavía no tiene archivo: hasta que no corra el ETL
+    nuevo no existe ninguno, y buscar sin resultados es mejor que caerse.
+    """
+    global _firma_obs
+
+    try:
+        firma = _firma_de(directorio)
+    except OSError as exc:
+        raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
+
+    with _lock:
+        if firma != _firma_obs:
+            _observaciones.clear()
+            _firma_obs = firma
+        if mes not in _observaciones:
+            crudas = _leer_observaciones(directorio, mes)
+            _observaciones[mes] = [norm(t) for t in crudas]
+        return _observaciones[mes]
+
+
+def leer_actas(directorio: Path, mes: str, posiciones: Sequence[int]) -> dict[int, str]:
+    """Texto original de unas pocas actas, para mostrarlas como ejemplo.
+
+    No se cachea a propósito: releer el archivo cuesta unos milisegundos y
+    guardar el original de todo un mes duplicaría la memoria de `_observaciones`
+    para enseñar tres líneas.
+    """
+    if not posiciones:
+        return {}
+    crudas = _leer_observaciones(directorio, mes)
+    return {i: crudas[i] for i in posiciones if 0 <= i < len(crudas)}
+
+
+def _leer_observaciones(directorio: Path, mes: str) -> list[str]:
+    ruta = directorio / f"observaciones_{mes}.json"
+    if not ruta.is_file():
+        logger.info("No hay %s: ese mes no se puede buscar por texto.", ruta.name)
+        return []
+    try:
+        with open(ruta, encoding="utf-8") as fh:
+            textos = json.load(fh)["obs"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # Un archivo ilegible no puede tumbar el chat: se busca sin ese mes.
+        logger.warning("No se pudo leer %s (%s); se buscará sin él.", ruta.name, exc)
+        return []
+    return textos

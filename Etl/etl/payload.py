@@ -159,6 +159,7 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
             _escribir(settings.public_dir / fname, {"pts": _pts_dict(grp)})
             manifest.append({"key": ym, "label": _mes_label(ym), "n": int(len(grp)), "file": fname})
             log.info("JSON mes -> %s (%s órdenes)", fname, f"{len(grp):,}")
+        _escribir_observaciones(grp, ym, settings.public_dir)
 
     data = {
         "meta": {
@@ -197,6 +198,32 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     log.info("JSON direcciones -> %s (%.2f MB)", dir_path.name, dir_path.stat().st_size / 1e6)
 
     return {"total_all": int(len(d)), "meses": resumen_meses}
+
+
+def _escribir_observaciones(grp: pd.DataFrame, ym: str, destino: Path) -> None:
+    """Vuelca el acta de visita de un mes, alineada por posición con `pts`.
+
+    Va en archivos aparte —uno por mes— y NO dentro de data.json porque es el
+    campo más pesado de todos (~350 caracteres por orden, unos 60 MB en el
+    histórico completo) y el tablero no lo usa: solo lo lee el backend cuando
+    alguien busca un término en el chat. Mismo criterio que `direcciones.json`.
+
+    El acta se guarda íntegra, sin trocear por las etiquetas del formato
+    (`VS:`, `VM:`, `SS:`, `TL:`), porque esas etiquetas no aparecen siempre ni
+    en el mismo orden: el texto útil unas veces sigue a `SS:` y otras cuelga
+    suelto detrás de un `TL:` vacío. Un parser que se equivoque no falla, solo
+    deja de encontrar menciones, y eso no se nota.
+
+    El orden es el mismo que el de `_pts_dict(grp)`: la posición `i` de esta
+    lista es la orden `i` de ese mes. Así no hay que repetir barrio, estado ni
+    fecha, que ya viajan en el payload.
+    """
+    textos = grp["OBS_COMBINADA"].fillna("").astype(str).tolist()
+    fname = f"observaciones_{ym}.json"
+    path = destino / fname
+    _escribir(path, {"obs": textos})
+    log.info("JSON observaciones -> %s (%s actas, %.2f MB)",
+             fname, f"{len(textos):,}", path.stat().st_size / 1e6)
 
 
 def _escribir(path: Path, obj: Any) -> None:

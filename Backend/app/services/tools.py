@@ -114,14 +114,21 @@ TOOLS: list[dict[str, Any]] = [
                     "ordenar_por": {
                         "type": "string",
                         "enum": [
-                            "ef_adj", "ef_pct", "perdidas", "pct_perdidas",
+                            "ef_adj", "ef_pct", "ef_adj_pond", "ef_pond",
+                            "perdidas", "pct_perdidas",
                             "fallidas", "pct_fallidas", "volumen",
                         ],
                         "description": (
-                            "Criterio de orden. Por defecto ef_adj. Usa 'perdidas' "
-                            "cuando pregunten dónde se pierde más: son las órdenes "
-                            "que NO se cobran. 'fallidas' son las que no se "
-                            "ejecutaron pero sí se pagan, que es otra cosa."
+                            "Criterio de orden. Por defecto ef_adj.\n"
+                            "Para «el mejor barrio» o «los peores barrios» usa "
+                            "'ef_adj_pond': pondera por volumen, así un barrio de 10 "
+                            "órdenes que salieron todas bien no le gana a uno de 200 "
+                            "con 90%. Ordenar por 'ef_pct' o 'ef_adj' a secas llena "
+                            "el top de barrios diminutos empatados en 100%, que no "
+                            "responden la pregunta.\n"
+                            "Usa 'perdidas' cuando pregunten dónde se pierde más: son "
+                            "las órdenes que NO se cobran. 'fallidas' son las que no "
+                            "se ejecutaron pero sí se pagan, que es otra cosa."
                         ),
                     },
                     "peores": {
@@ -155,6 +162,52 @@ TOOLS: list[dict[str, Any]] = [
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
                     "brigada": _BRIGADA,
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_en_observaciones",
+            "description": (
+                "Busca una palabra dentro del acta de visita que el técnico escribió "
+                "a mano, y dice en qué barrios aparece. Es lo ÚNICO que llega al texto "
+                "libre: el resto de herramientas solo ven campos codificados.\n"
+                "Úsala cuando pregunten por algo que no está en el catálogo de causas: "
+                "«red chilena», «oscilación de voltaje», «poste en mal estado», "
+                "«transformador», «perro», lo que sea. Antes de decir que no tienes un "
+                "dato, PRUÉBALA: casi todo lo que el técnico reporta está ahí.\n"
+                "El texto viene sucio y con faltas de ortografía, así que busca la raíz "
+                "y no la frase entera: «chilena» encuentra más que «red chilena», y "
+                "«oscilaci» más que «oscilación». Si no hay resultados, reintenta con "
+                "un término más corto antes de darte por vencido.\n"
+                "OJO: cuenta MENCIONES, no causas. Que el acta nombre el término no "
+                "significa que la orden se cayera por eso; puede estar en una efectiva. "
+                "Mira `por_estado` y el `tot` de cada barrio antes de sacar conclusiones."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "texto": {
+                        "type": "string",
+                        "description": (
+                            "Término a buscar. Una o dos palabras, en su raíz. "
+                            "No distingue mayúsculas ni tildes."
+                        ),
+                    },
+                    "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
+                    "zona": {
+                        "type": "string",
+                        "description": (
+                            "Zona del tablero: ATLANTICO CENTRO, ATLANTICO NORTE o "
+                            "ATLANTICO SUR. Úsala solo si el usuario nombra una de "
+                            "las tres. Si dice «zonas» en general está hablando de "
+                            "sectores: no filtres, que el resultado ya trae el "
+                            "desglose por zona y por barrio."
+                        ),
+                    },
+                },
+                "required": ["texto"],
             },
         },
     },
@@ -519,6 +572,7 @@ class ToolRunner:
         municipio: str | None,
         mes: str | None,
         brigada: str | None = None,
+        zona: str | None = None,
     ) -> tuple[list[str] | None, str | None, list[str] | None, str, FiltroMapa]:
         """Traduce los argumentos a un recorte concreto y a su descripción.
 
@@ -548,7 +602,7 @@ class ToolRunner:
         elif bkeys:
             donde = f"{len(bkeys)} barrios de {municipio} con ese nombre"
         else:
-            donde = municipio or "todo el Atlántico"
+            donde = municipio or zona or "todo el Atlántico"
 
         partes = [donde, etiqueta_periodo(meses)]
         if brigada:
@@ -559,6 +613,7 @@ class ToolRunner:
             # municipio, que es lo más cercano que se puede mostrar.
             barrio=bkeys[0] if bkeys and len(bkeys) == 1 else None,
             municipio=None if bkeys and len(bkeys) == 1 else municipio,
+            zona=None if bkeys or municipio else zona,
             brigada=brigada,
             meses=meses,
         )
@@ -679,6 +734,56 @@ class ToolRunner:
             bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses, brigada=brigada
         )
         return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
+
+    async def _buscar_en_observaciones(
+        self,
+        texto: str,
+        barrio: str | None = None,
+        municipio: str | None = None,
+        mes: str | None = None,
+        zona: str | None = None,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        bkeys, municipio, meses, base, filtro = await self._recorte(
+            barrio, municipio, mes, zona=zona
+        )
+        datos = await self.metrics.buscar_en_observaciones(
+            texto=texto,
+            bkeys=bkeys,
+            municipio=None if bkeys else municipio,
+            zona=None if bkeys or municipio else zona,
+            meses=meses,
+            etiqueta=base,
+        )
+
+        salida: dict[str, Any] = {"base": base, **datos.model_dump()}
+        if datos.sin_resolver:
+            # Antes decía «ninguna de las 0 actas dice X» y mandaba al modelo a
+            # acortar el término: el problema no era el término, era el recorte.
+            salida["nota"] = (
+                f"«{datos.sin_resolver}» no corresponde a ningún sitio del tablero, "
+                "así que no se buscó en ninguna acta. Esto NO significa que no haya "
+                "casos: significa que no se entendió el sitio. Pregúntale a cuál se "
+                "refiere, o repite la búsqueda sin ese filtro."
+            )
+        elif not datos.coincidencias:
+            salida["nota"] = (
+                f"Ninguna de las {datos.revisadas} actas de {base} dice «{texto}». "
+                "Prueba con una palabra más corta o con otra forma de decirlo antes "
+                "de responder que no hay nada."
+            )
+        else:
+            salida["nota"] = (
+                "Son menciones en el acta, no una causa: dilo así. El `tot` de cada "
+                "barrio son sus órdenes en el mismo recorte, para que se vea si el "
+                "barrio encabeza por problema o por volumen."
+            )
+        if datos.meses_sin_texto:
+            # Callarlo daría un conteo parcial con pinta de completo.
+            salida["aviso"] = (
+                "Estos meses no tienen acta guardada y quedaron FUERA del conteo: "
+                f"{', '.join(datos.meses_sin_texto)}. Acláralo."
+            )
+        return salida, filtro
 
     async def _buscar_barrio(self, texto: str) -> tuple[dict[str, Any], None]:
         candidatos = await self.metrics.buscar_barrios(texto)

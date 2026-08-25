@@ -15,9 +15,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from app.core.taxonomy import norm_dato
-from app.schemas.metrics import CandidatoBarrio, Efectividad, FilaCausa
-from app.services.payload_store import Payload, obtener
+from app.core.taxonomy import norm, norm_dato
+from app.schemas.metrics import (
+    BusquedaObservaciones,
+    CandidatoBarrio,
+    Efectividad,
+    FilaCausa,
+    FilaMencion,
+    FilaZona,
+)
+from app.services.payload_store import (
+    Payload,
+    leer_actas,
+    obtener,
+    obtener_observaciones,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +82,43 @@ def _pct(x: int, y: int) -> float:
 CRITERIOS = {
     "ef_adj": lambda f: f.ef_adj,
     "ef_pct": lambda f: f.ef_pct,
+    "ef_pond": lambda f: f.ef_pond or 0.0,
+    "ef_adj_pond": lambda f: f.ef_adj_pond or 0.0,
     "perdidas": lambda f: f.pe,
     "pct_perdidas": lambda f: f.pe / f.tot if f.tot else 0.0,
     "fallidas": lambda f: f.fa,
     "pct_fallidas": lambda f: f.fa / f.tot if f.tot else 0.0,
     "volumen": lambda f: f.tot,
 }
+
+
+# Órdenes "prestadas" de la media que se le suman a cada grupo al ponderar. Con
+# 50, un barrio de 10 órdenes queda dominado por ellas y uno de 400 apenas se
+# mueve, que es justo el efecto buscado: exigir muestra para creerle a un
+# porcentaje. Es del orden del volumen típico de un barrio en un mes; subirlo
+# aplana el ranking y bajarlo deja colarse otra vez a los de muestra mínima.
+PESO_PREVIO = 50
+
+
+def _ponderar(exitos: int, base: int, media: float) -> float:
+    """Acerca el porcentaje a la media del conjunto según la muestra.
+
+    El promedio ponderado de siempre: a `base` intentos observados se le suman
+    `PESO_PREVIO` imaginarios que salieron como el promedio. Con poca muestra
+    mandan los imaginarios y el grupo se pega a la media; con mucha, pesan tan
+    poco que el porcentaje real queda casi intacto.
+
+    Sin esto, «el mejor barrio» era siempre uno de diez órdenes que salieron
+    todas bien, y los barrios con historia no aparecían nunca.
+    """
+    if base <= 0:
+        # Sin nada observado, lo único honesto es la media: no sabemos si es
+        # bueno o malo. Devolver 0 lo mandaba a encabezar «los peores», y hay
+        # barrios enteros con todas sus órdenes fuera de control de la operación
+        # —su denominador ajustado es 0— que aparecían como el peor del mes sin
+        # tener una sola orden que se les pudiera reprochar.
+        return round(media * 100, 1)
+    return round((exitos + PESO_PREVIO * media) / (base + PESO_PREVIO) * 100, 1)
 
 
 def _a_dto(conteo: Conteo, nombre: str, municipio: str | None = None) -> Efectividad:
@@ -245,9 +288,24 @@ class MetricsService:
         )
         catalogo = {"brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios}[dimension]
 
-        filas = [
-            _a_dto(c, catalogo[i]) for i, c in conteos.items() if c.tot >= min_ordenes
-        ]
+        # Las medias salen de TODO el recorte, incluidos los grupos que luego
+        # descarta `min_ordenes`: son la referencia contra la que se compara cada
+        # uno, y calcularlas solo sobre los que pasan el corte las sesgaría.
+        tot_global = sum(c.tot for c in conteos.values())
+        ef_global = sum(c.ef for c in conteos.values())
+        den_global = sum(c.tot - c.noctrl for c in conteos.values())
+        media = ef_global / tot_global if tot_global else 0.0
+        media_adj = ef_global / den_global if den_global > 0 else 0.0
+
+        filas = []
+        for i, c in conteos.items():
+            if c.tot < min_ordenes:
+                continue
+            fila = _a_dto(c, catalogo[i])
+            fila.ef_pond = _ponderar(c.ef, c.tot, media)
+            fila.ef_adj_pond = _ponderar(c.ef, c.tot - c.noctrl, media_adj)
+            filas.append(fila)
+
         filas.sort(key=CRITERIOS[ordenar_por], reverse=not ascendente)
         return filas[:limite]
 
@@ -278,6 +336,144 @@ class MetricsService:
             )
             for c, n in ordenadas[:limite]
         ]
+
+    async def buscar_en_observaciones(
+        self,
+        *,
+        texto: str,
+        bkeys: Sequence[str] | None = None,
+        municipio: str | None = None,
+        zona: str | None = None,
+        meses: Sequence[str] | None = None,
+        etiqueta: str | None = None,
+        limite: int = 10,
+        n_ejemplos: int = 3,
+    ) -> BusquedaObservaciones:
+        """Busca un término dentro del acta de visita y lo agrupa por barrio.
+
+        Es la única consulta que mira texto libre. El resto de métricas salen de
+        campos codificados; aquí se lee lo que el técnico escribió a mano, que es
+        donde quedan los detalles que no tienen casilla propia —la red chilena,
+        el estado del poste, por qué no se pudo sacar la acometida—.
+
+        Cuenta MENCIONES, no causas: una orden efectiva puede nombrar el término
+        igual que una perdida. Por eso devuelve también `tot` por barrio y el
+        desglose por estado, para que la cifra no se lea como una tasa de fallo.
+        """
+        p = self.datos
+        objetivo = norm(texto)
+        if not objetivo:
+            raise ValueError("El término de búsqueda está vacío.")
+
+        nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
+
+        def vacio(sin_resolver: str | None = None) -> BusquedaObservaciones:
+            return BusquedaObservaciones(
+                termino=texto, base=nombre, coincidencias=0, revisadas=0, pct=0.0,
+                por_estado={}, zonas=[], barrios=[], ejemplos=[],
+                sin_resolver=sin_resolver,
+            )
+
+        f_barrios = self._indices_barrio(bkeys) if bkeys else None
+        f_muni = self._indice(p.munis, municipio)
+        f_zona = self._indice(p.zonas, zona)
+        f_meses = {p.meses.index(m) for m in meses if m in p.meses} if meses else None
+        for pedido, resuelto in (
+            (bkeys, f_barrios), (municipio, f_muni), (zona, f_zona),
+            (meses, f_meses or None),
+        ):
+            if pedido is not None and resuelto is None:
+                # Se devuelve QUÉ no resolvió: sin eso, el 0 se lee como «ahí no
+                # pasa nada» cuando lo que pasó es que el recorte no existe.
+                logger.info("Filtro sin coincidencia: %r", pedido)
+                return vacio(str(pedido))
+
+        B, E, b_muni, b_zona = p.b, p.e, p.b_muni, p.b_zona
+        coincidencias = revisadas = 0
+        por_estado = {"Efectiva": 0, "Fallida": 0, "Perdida": 0}
+        menciones: dict[int, int] = {}
+        tot_barrio: dict[int, int] = {}
+        menciones_zona: dict[int, int] = {}
+        tot_zona: dict[int, int] = {}
+        ejemplos_en: dict[str, list[int]] = {}
+        sin_texto: list[str] = []
+
+        for m, mes_key in enumerate(p.meses):
+            if f_meses is not None and m not in f_meses:
+                continue
+            inicio = p.inicio_mes[m]
+            fin = p.inicio_mes[m + 1] if m + 1 < len(p.inicio_mes) else len(p)
+            obs = obtener_observaciones(self.directorio, mes_key)
+            # Sin la misma cantidad de actas que de órdenes no se sabe a cuál
+            # pertenece cada texto, y un conteo desalineado es peor que ninguno.
+            if len(obs) != fin - inicio:
+                if obs:
+                    logger.warning(
+                        "El mes %s trae %s actas para %s órdenes; se omite.",
+                        mes_key, len(obs), fin - inicio,
+                    )
+                sin_texto.append(mes_key)
+                continue
+
+            for local in range(fin - inicio):
+                i = inicio + local
+                bi = B[i]
+                if f_barrios is not None and bi not in f_barrios:
+                    continue
+                if f_muni is not None and b_muni[bi] != f_muni:
+                    continue
+                zi = b_zona[bi]
+                if f_zona is not None and zi != f_zona:
+                    continue
+                revisadas += 1
+                tot_barrio[bi] = tot_barrio.get(bi, 0) + 1
+                tot_zona[zi] = tot_zona.get(zi, 0) + 1
+                if objetivo not in obs[local]:
+                    continue
+                coincidencias += 1
+                por_estado[("Efectiva", "Fallida", "Perdida")[E[i]]] += 1
+                menciones[bi] = menciones.get(bi, 0) + 1
+                menciones_zona[zi] = menciones_zona.get(zi, 0) + 1
+                if sum(len(v) for v in ejemplos_en.values()) < n_ejemplos:
+                    ejemplos_en.setdefault(mes_key, []).append(local)
+
+        filas = [
+            FilaMencion(
+                barrio=p.barrios[bi],
+                municipio=p.munis[b_muni[bi]],
+                zona=p.zonas[b_zona[bi]],
+                n=n,
+                tot=tot_barrio[bi],
+                pct=_pct(n, tot_barrio[bi]),
+            )
+            for bi, n in sorted(menciones.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+
+        filas_zona = [
+            FilaZona(
+                zona=p.zonas[zi], n=n, tot=tot_zona[zi], pct=_pct(n, tot_zona[zi])
+            )
+            for zi, n in sorted(menciones_zona.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+
+        ejemplos = [
+            acta
+            for mes_key, posiciones in ejemplos_en.items()
+            for acta in leer_actas(self.directorio, mes_key, posiciones).values()
+        ]
+
+        return BusquedaObservaciones(
+            termino=texto,
+            base=nombre,
+            coincidencias=coincidencias,
+            revisadas=revisadas,
+            pct=_pct(coincidencias, revisadas),
+            por_estado={k: v for k, v in por_estado.items() if v},
+            zonas=filas_zona,
+            barrios=filas[:limite],
+            ejemplos=ejemplos,
+            meses_sin_texto=sin_texto,
+        )
 
     async def meses_disponibles(self) -> list[str]:
         """Meses con datos, del más reciente al más antiguo."""
