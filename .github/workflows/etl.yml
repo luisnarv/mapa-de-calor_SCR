@@ -55,7 +55,7 @@ jobs:
       # defecto. Si alguien vuelve a definir ETL_OUTPUT_DIR en las variables del
       # repositorio, esta copia falla y el paso se cae — que es lo que se quiere:
       # antes apuntaba a dashboard/public/ y los datos llevaban días aterrizando
-      # en una carpeta que nadie lee, sin que nada avisara.
+      # en una carpeta que nadie lee, sin que nada avisara..
       - name: Repartir los JSON del mapa al tablero
         run: cp Etl/salida/data.json Etl/salida/data_*.json Frontend/dashboard/public/
 
