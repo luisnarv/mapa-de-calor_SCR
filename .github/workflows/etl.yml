@@ -56,7 +56,7 @@ jobs:
           # La carpeta entera, no una lista: el ETL escribe también
           # direcciones.json y los observaciones_*.json, y enumerarlos dejaba
           # el árbol sucio, con lo que el rebase se negaba y el push no corría.
-          git add Etl/salida
+          git add Frontend/dashboard/public
           if git diff --cached --quiet; then
             echo "Sin cambios en los datos; no se commitea."
           else
