@@ -1,7 +1,18 @@
-"""Los cuatro bugs que aparecieron probando el chat a mano.
+"""El repertorio de casos con los que se mide si el asistente responde bien.
 
-Cada prueba usa el caso real que los destapó, para que si vuelven se sepa cuál es.
+Cada prueba es un error que alguien vio de verdad, con el caso que lo destapó.
+Cuando un pulgar abajo del chat se diagnostica, el caso se agrega aquí: es lo que
+hace que ese error no vuelva, y es lo único que permite cambiar el prompt o una
+herramienta sabiendo si mejoró o si se rompió otra cosa.
+
+**Corren contra `tests/datos/`, no contra los JSON de producción.** Antes se
+afirmaban cifras exactas contra `app/data/`, que el ETL regenera a diario: las
+pruebas se rompían solas cada vez que entraban datos nuevos, y una suite que
+falla por diseño deja de avisar cuando el fallo es de verdad. El recorte
+congelado se regenera a mano con `tests/datos/generar.py` y no debería cambiar.
 """
+
+from pathlib import Path
 
 import pytest
 
@@ -10,15 +21,17 @@ from app.schemas.chat import VistaTablero
 from app.services.metrics_service import MetricsService
 from app.services.tools import ToolRunner
 
+DATOS = Path(__file__).resolve().parent / "datos"
+
 pytestmark = pytest.mark.skipif(
-    not (settings.DATA_DIR / "data.json").is_file(),
-    reason="No están los JSON del ETL en app/data/.",
+    not (DATOS / "data.json").is_file(),
+    reason="Falta el payload congelado: corre tests/datos/generar.py.",
 )
 
 
 @pytest.fixture
 def metrics() -> MetricsService:
-    return MetricsService(settings.DATA_DIR)
+    return MetricsService(DATOS)
 
 
 @pytest.fixture
@@ -102,7 +115,7 @@ async def test_los_homonimos_de_un_municipio_se_suman(metrics):
 
     salida, _ = await runner.run("efectividad", {"barrio": "Los Robles"})
 
-    assert salida["metricas"]["tot"] == 1095
+    assert salida["metricas"]["tot"] == 1110
     assert "10 barrios de SOLEDAD" in salida["base"]
     assert len(salida["detalle_por_barrio"]) == 10
 
@@ -145,7 +158,7 @@ async def test_mayor_perdida_ordena_por_ordenes_no_cobradas(runner):
 
     filas = salida["filas"]
     assert filas[0]["nombre"] == "BARRANQUILLA | CIUDADELA 20 DE JULIO"
-    assert filas[0]["pe"] == 280
+    assert filas[0]["pe"] == 285
     assert [f["pe"] for f in filas] == sorted((f["pe"] for f in filas), reverse=True)
     assert salida["criterio"] == "perdidas"
 
@@ -191,7 +204,7 @@ def test_la_regla_de_negocio_esta_en_el_prompt():
 @pytest.mark.asyncio
 async def test_filtrar_mapa_sin_campos_no_mueve_el_tablero():
     """El modelo la llama vacía al cerrar un ranking; eso cambiaba de pestaña."""
-    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    runner = ToolRunner(MetricsService(DATOS))
     resultado, filtro = await runner.run("filtrar_mapa", {})
 
     assert filtro is None, "un filtro vacío no debe llegar al tablero"
@@ -203,7 +216,7 @@ async def test_un_ranking_sin_recorte_no_emite_accion(monkeypatch):
     """`_recorte` arma un filtro vacío; emitirlo le cambiaba la pestaña al usuario."""
     from app.services.openai_service import OpenAIService
 
-    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    runner = ToolRunner(MetricsService(DATOS))
     _resultado, filtro = await runner.run(
         "ranking", {"dimension": "barrio", "ordenar_por": "ef_adj", "peores": True}
     )
@@ -254,7 +267,7 @@ def test_un_periodo_sin_datos_no_se_confunde_con_todo_el_historico():
 
 @pytest.mark.asyncio
 async def test_pedir_un_ano_sin_datos_avisa_en_vez_de_dar_cero():
-    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    runner = ToolRunner(MetricsService(DATOS))
     resultado, filtro = await runner.run("efectividad", {"mes": "2019"})
 
     assert resultado["error"] == "periodo_sin_datos"
@@ -266,7 +279,7 @@ async def test_pedir_un_ano_sin_datos_avisa_en_vez_de_dar_cero():
 @pytest.mark.asyncio
 async def test_pedir_un_ano_agrega_todos_sus_meses():
     """El caso real: Rebolo no tiene órdenes en enero, pero sí en el año."""
-    runner = ToolRunner(MetricsService(settings.DATA_DIR))
+    runner = ToolRunner(MetricsService(DATOS))
 
     enero, _ = await runner.run("efectividad", {"barrio": "Rebolo", "mes": "2026-01"})
     ano, _ = await runner.run("efectividad", {"barrio": "Rebolo", "mes": "2026"})
@@ -279,7 +292,7 @@ async def test_pedir_un_ano_agrega_todos_sus_meses():
 # --- Bug 5: el mapa y la respuesta hablaban de periodos distintos --------------
 #
 # El caso real: «mejor barrio de Barranquilla» devolvió El Romance con 17 órdenes
-# de todo el histórico y filtró el mapa, pero el mapa se quedó en agosto, donde
+# de todo el histórico (19 en el recorte congelado) y filtró el mapa, pero el mapa se quedó en agosto, donde
 # ese barrio no tiene ninguna. El usuario vio la pantalla vacía y preguntó si los
 # datos eran de agosto; el modelo dijo que sí.
 
@@ -311,7 +324,7 @@ async def test_sin_mes_se_hereda_el_periodo_de_la_pantalla(metrics):
     runner = ToolRunner(metrics, vista=VistaTablero(meses=["2026-01"]))
     resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
 
-    assert resultado["metricas"]["tot"] == 5, "enero, no las 17 del histórico"
+    assert resultado["metricas"]["tot"] == 5, "enero, no las 19 del histórico"
     assert "2026-01" in resultado["base"]
     assert filtro.meses == ["2026-01"]
 
@@ -324,7 +337,7 @@ async def test_el_historico_completo_hay_que_pedirlo_por_su_nombre(metrics):
         "efectividad", {"barrio": "El Romance", "mes": "todo"}
     )
 
-    assert resultado["metricas"]["tot"] == 17
+    assert resultado["metricas"]["tot"] == 19
     assert filtro.meses == sorted(await metrics.meses_disponibles())
 
 
@@ -344,5 +357,91 @@ async def test_sin_vista_se_sigue_respondiendo_el_historico(runner, metrics):
     """El chat también se usa sin tablero detrás; ahí no hay nada que heredar."""
     resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
 
-    assert resultado["metricas"]["tot"] == 17
+    assert resultado["metricas"]["tot"] == 19
     assert filtro.meses == sorted(await metrics.meses_disponibles())
+
+
+# --- Bug 7: buscaba dos veces y respondía otra cosa ----------------------------
+#
+# El caso real: «cuál es el barrio con más predio enrrejado». La frase con la
+# errata daba cero con el `in` literal, así que el modelo probaba por su cuenta
+# «reja» y «enrejado» y presentaba las dos listas como si se las hubieran pedido.
+# Los números eran correctos; la pregunta que respondían, no.
+
+@pytest.mark.asyncio
+async def test_una_errata_del_usuario_no_cambia_la_busqueda(metrics):
+    """«enrrejado» y «enrejado» son la misma pregunta."""
+    runner = ToolRunner(metrics)
+
+    con_errata, _ = await runner.run("buscar_en_observaciones", {"texto": "predio enrrejado"})
+    sin_errata, _ = await runner.run("buscar_en_observaciones", {"texto": "predio enrejado"})
+
+    assert con_errata["coincidencias"] == sin_errata["coincidencias"]
+    assert con_errata["coincidencias"] > 0, "con el `in` literal esto daba cero"
+
+
+@pytest.mark.asyncio
+async def test_una_frase_se_busca_seguida(metrics):
+    """El caso real: «red trenzada neutro» daba 12 en San Felipe donde hay 2.
+
+    Buscando cada palabra por su lado contaba «…tendido red trenzada, se
+    desconecta fase y neutro», que tiene las tres palabras y no es lo que se
+    preguntó. Una frase es una frase.
+    """
+    runner = ToolRunner(metrics)
+
+    frase, _ = await runner.run(
+        "buscar_en_observaciones", {"texto": "red trenzada neutro", "mes": "2026-08"})
+    parte, _ = await runner.run(
+        "buscar_en_observaciones", {"texto": "red trenzada", "mes": "2026-08"})
+
+    assert frase["coincidencias"] < parte["coincidencias"], (
+        "la frase completa no puede aparecer tanto como su primera mitad"
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminos_distintos_siguen_siendo_busquedas_distintas(metrics):
+    """La tolerancia es a las erratas, no a los sinónimos: «reja» no es «enrejado»."""
+    runner = ToolRunner(metrics)
+
+    reja, _ = await runner.run("buscar_en_observaciones", {"texto": "reja"})
+    enrejado, _ = await runner.run("buscar_en_observaciones", {"texto": "enrejado"})
+
+    assert reja["coincidencias"] != enrejado["coincidencias"]
+
+
+def test_la_herramienta_pide_una_sola_busqueda():
+    """Su descripción es lo que el modelo lee justo antes de decidir cuántas hace."""
+    from app.services.tools import TOOLS
+
+    descripcion = next(
+        t["function"]["description"] for t in TOOLS
+        if t["function"]["name"] == "buscar_en_observaciones"
+    )
+
+    assert "UNA SOLA BÚSQUEDA" in descripcion
+    assert "No repitas con variantes" in descripcion
+    assert "Di siempre qué término buscaste" in descripcion
+    # La primera línea decía «busca una palabra» y contradecía todo lo anterior.
+    assert "una palabra dentro del acta" not in descripcion
+
+
+def test_el_parametro_no_puede_pedir_lo_contrario_que_la_descripcion():
+    """El modelo lee el parámetro justo al rellenarlo: si dice «raíz», acorta.
+
+    Pasó de verdad: la regla nueva estaba en el cuerpo de la descripción y el
+    parámetro seguía diciendo «una o dos palabras, en su raíz». Ganó el parámetro,
+    y «predio enrejado» se buscó como «predio» y «enrejado» por separado.
+    """
+    from app.services.tools import TOOLS
+
+    parametro = next(
+        t["function"]["parameters"]["properties"]["texto"]["description"]
+        for t in TOOLS
+        if t["function"]["name"] == "buscar_en_observaciones"
+    )
+
+    assert "TODAS sus palabras" in parametro
+    assert "no lo partas" in parametro
+    assert "en su raíz. " not in parametro

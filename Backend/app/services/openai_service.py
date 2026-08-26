@@ -23,7 +23,8 @@ from openai import (
 )
 
 from app.core.config import settings
-from app.schemas.chat import ChatRequest, ChatResponse, VistaTablero
+from app.schemas.chat import ChatRequest, VistaTablero
+from app.schemas.metrics import FiltroMapa
 from app.services.tools import TOOLS, ToolRunner
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,46 @@ COLOMBIA = timezone(timedelta(hours=-5))
 # confundido puede quedarse pidiendo datos en bucle y consumir la cuota.
 MAX_RONDAS = 4
 
+# Tope de lo que se guarda del resultado de una herramienta. Un ranking completo
+# pesa cientos de kilobytes y la traza es para diagnosticar, no para reconstruir
+# el dato: con el principio alcanza para ver qué devolvió.
+LIMITE_TRAZA = 20_000
+
 # Solo se usa si tras el cierre forzado el modelo sigue sin redactar nada.
 AVISO_SIN_CIERRE = "\n\n(No pude cerrar la consulta; intenta con una pregunta mas concreta.)"
+
+
+def _para_traza(resultado: dict[str, Any]) -> dict[str, Any]:
+    """Recorta un resultado enorme para que quepa en la traza."""
+    texto = json.dumps(resultado, ensure_ascii=False, default=str)
+    if len(texto) <= LIMITE_TRAZA:
+        return resultado
+    return {"truncado_de": len(texto), "json": texto[:LIMITE_TRAZA]}
+
+
+def _unificar_filtros(filtros: list[FiltroMapa]) -> dict[str, Any] | None:
+    """Un turno mueve el tablero una sola vez, o no lo mueve.
+
+    Antes cada llamada a una herramienta emitía su filtro en cuanto terminaba, y
+    con dos llamadas en un turno —«en junio y agosto»— la segunda pisaba a la
+    primera: la respuesta hablaba de dos meses y el mapa enseñaba uno, sin que
+    nada avisara. Es el mismo error de los bugs 5 y 6 entrando por otra puerta.
+
+    Cuando los recortes solo se diferencian en el periodo se unen, que es lo que
+    el usuario pidió ver. Cuando se diferencian en algo más —dos barrios
+    distintos— no hay un tablero que muestre las dos cosas a la vez, así que se
+    deja quieto: peor que no moverlo es moverlo a la mitad de la respuesta.
+    """
+    utiles = [f for f in filtros if f.model_dump(exclude_none=True)]
+    if not utiles:
+        return None
+    if len(utiles) > 1:
+        sin_meses = [f.model_dump(exclude={"meses"}) for f in utiles]
+        if any(otro != sin_meses[0] for otro in sin_meses[1:]):
+            return None
+
+    meses = sorted({m for f in utiles for m in (f.meses or [])})
+    return {"tipo": "filtrar_mapa", **utiles[0].model_dump(), "meses": meses or None}
 
 
 class OpenAIServiceError(Exception):
@@ -59,21 +98,65 @@ class OpenAIService:
 
     # --- API pública ---------------------------------------------------------
 
+    @property
+    def modelo_por_defecto(self) -> str:
+        """Con cuál se responde si la petición no pide uno."""
+        return self._default_model
+
     async def stream_chat(
-        self, request: ChatRequest, runner: ToolRunner | None = None
+        self,
+        request: ChatRequest,
+        runner: ToolRunner | None = None,
+        ejemplos: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Emite eventos `{"delta": texto}` y `{"accion": {...}}` hasta terminar.
+        """Emite `{"delta": ...}` y `{"accion": ...}`, y cierra con `{"fin": ...}`.
+
+        `fin` es interno: lleva la respuesta completa y la traza de herramientas
+        para que el endpoint las guarde. No sale a la red tal cual —el endpoint
+        lo cambia por el id de la interacción—, porque la traza trae los datos
+        que el modelo consultó y el navegador no tiene nada que hacer con ellos.
+
+        Si el turno falla, `fin` no se emite y no se guarda nada: una respuesta
+        que nunca llegó a existir no es feedback de nada.
+        """
+        model = request.model or self._default_model
+        partes: list[str] = []
+        traza: list[dict[str, Any]] = []
+        filtros: list[FiltroMapa] = []
+
+        async for evento in self._conversar(request, runner, model, traza, ejemplos, filtros):
+            if "delta" in evento:
+                partes.append(evento["delta"])
+            yield evento
+
+        # Al final del turno, cuando ya se sabe cuántos recortes hubo. Llega
+        # después del texto: el tablero se mueve al cerrar la respuesta, no a
+        # media redacción.
+        if accion := _unificar_filtros(filtros):
+            yield {"accion": accion}
+
+        yield {"fin": {"respuesta": "".join(partes), "traza": traza}}
+
+    async def _conversar(
+        self,
+        request: ChatRequest,
+        runner: ToolRunner | None,
+        model: str,
+        traza: list[dict[str, Any]],
+        ejemplos: list[dict[str, str]] | None = None,
+        filtros: list[FiltroMapa] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """El ciclo de tool calling. Anota en `traza` cada herramienta que corre.
 
         Si se pasa `runner`, el modelo puede consultar la base. Sin él responde
         solo con lo que sabe.
         """
-        model = request.model or self._default_model
         if runner is not None:
             # La vista y el cargue llegan en el cuerpo: no se inyectan por DI.
             runner.vista = request.vista
             runner.cargue_id = request.cargue
         # Después de asignarlos: el prompt anuncia el archivo cargado, si lo hay.
-        mensajes = self._build_messages(request, runner)
+        mensajes = self._build_messages(request, runner, ejemplos)
 
         try:
             for ronda in range(MAX_RONDAS):
@@ -105,14 +188,21 @@ class OpenAIService:
 
                 mensajes.append(self._mensaje_asistente(texto, llamadas))
                 for llamada in llamadas.values():
-                    resultado, filtro = await self._ejecutar(runner, llamada)
+                    resultado, filtro, args = await self._ejecutar(runner, llamada)
+                    traza.append(
+                        {
+                            "herramienta": llamada["name"],
+                            "argumentos": args,
+                            "resultado": _para_traza(resultado),
+                        }
+                    )
                     # `_recorte` arma un FiltroMapa aunque no haya recorte, así que
                     # un ranking de todo el Atlántico devolvía uno con todos los
                     # campos vacíos. Al llegar al tablero no filtraba nada pero sí
                     # le cambiaba la pestaña al usuario, que es peor que no hacer
                     # nada: parece que respondió moviéndole la vista porque sí.
-                    if filtro is not None and filtro.model_dump(exclude_none=True):
-                        yield {"accion": {"tipo": "filtrar_mapa", **filtro.model_dump()}}
+                    if filtro is not None and filtros is not None:
+                        filtros.append(filtro)
                     mensajes.append(
                         {
                             "role": "tool",
@@ -137,26 +227,6 @@ class OpenAIService:
             raise
         except Exception as exc:
             raise self._translate(exc) from exc
-
-    async def chat(self, request: ChatRequest, runner: ToolRunner | None = None) -> ChatResponse:
-        """Igual que `stream_chat`, pero devolviendo la respuesta completa.
-
-        Reutiliza el mismo camino para que las dos rutas no se desincronicen.
-        """
-        partes: list[str] = []
-        acciones: list[dict[str, Any]] = []
-
-        async for evento in self.stream_chat(request, runner):
-            if "delta" in evento:
-                partes.append(evento["delta"])
-            elif "accion" in evento:
-                acciones.append(evento["accion"])
-
-        return ChatResponse(
-            content="".join(partes),
-            model=request.model or self._default_model,
-            acciones=acciones,
-        )
 
     async def close(self) -> None:
         await self._client.close()
@@ -223,22 +293,39 @@ class OpenAIService:
         }
 
     @staticmethod
-    async def _ejecutar(runner: ToolRunner, llamada: dict[str, str]) -> tuple[dict[str, Any], Any]:
-        """Ejecuta una herramienta, tolerando argumentos mal formados."""
+    async def _ejecutar(
+        runner: ToolRunner, llamada: dict[str, str]
+    ) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+        """Ejecuta una herramienta, tolerando argumentos mal formados.
+
+        Devuelve también los argumentos ya parseados: son parte de la traza, y
+        volver a parsearlos fuera sería hacer dos veces el mismo trabajo.
+        """
         try:
             args = json.loads(llamada["args"] or "{}")
         except json.JSONDecodeError:
             logger.warning("Argumentos no son JSON válido: %r", llamada["args"])
-            return {"error": "Los argumentos no eran JSON válido. Reintenta."}, None
-        return await runner.run(llamada["name"], args)
+            return {"error": "Los argumentos no eran JSON válido. Reintenta."}, None, {}
+        resultado, filtro = await runner.run(llamada["name"], args)
+        return resultado, filtro, args
 
-    def _build_messages(self, request: ChatRequest, runner: Any = None) -> list[dict]:
+    def _build_messages(
+        self,
+        request: ChatRequest,
+        runner: Any = None,
+        ejemplos: list[dict[str, str]] | None = None,
+    ) -> list[dict]:
         """Antepone el prompt de sistema. El cliente no puede sobrescribirlo."""
         turns = [m.model_dump() for m in request.messages if m.role != "system"]
-        sistema = self._prompt_de_sistema(request.vista, runner)
+        sistema = self._prompt_de_sistema(request.vista, runner, ejemplos)
         return [{"role": "system", "content": sistema}, *turns]
 
-    def _prompt_de_sistema(self, vista: VistaTablero | None = None, runner: Any = None) -> str:
+    def _prompt_de_sistema(
+        self,
+        vista: VistaTablero | None = None,
+        runner: Any = None,
+        ejemplos: list[dict[str, str]] | None = None,
+    ) -> str:
         """El prompt configurado, la fecha, lo que el usuario ve y lo que subió."""
         bloques = [
             b
@@ -247,10 +334,39 @@ class OpenAIService:
                 self._fecha(),
                 self._vista(vista),
                 self._cargue(runner),
+                self._ejemplos(ejemplos),
             )
             if b
         ]
         return "\n\n".join(bloques)
+
+    @staticmethod
+    def _ejemplos(ejemplos: list[dict[str, str]] | None) -> str:
+        """Respuestas que alguien aprobó, para que el modelo copie la forma.
+
+        Va de último, después de las reglas: puesto antes, el modelo tiende a
+        imitar el ejemplo por encima de lo que el prompt le pide.
+
+        El aviso sobre las cifras no es decorativo. Un ejemplo guardado trae los
+        números de cuando se respondió, y sin la advertencia el modelo los repite
+        —con toda seguridad, porque vienen de una respuesta «buena»— en vez de
+        volver a calcular. Sería el peor error posible aquí: una cifra vieja y
+        una nueva son igual de plausibles y nadie notaría el cambiazo.
+        """
+        if not ejemplos:
+            return ""
+        muestras = "\n\n".join(
+            f"Pregunta: {e['pregunta']}\nRespuesta: {e['respuesta']}" for e in ejemplos
+        )
+        return (
+            "EJEMPLOS DE RESPUESTAS BIEN CALIFICADAS — copia de ellos el tono, la "
+            "estructura y el nivel de detalle, nada más.\n"
+            "Las cifras que aparecen son de cuando se respondieron y hoy pueden ser "
+            "otras: NUNCA las reutilices ni las cites. Toda cifra que des tiene que "
+            "salir de una herramienta llamada en esta conversación.\n"
+            "Si la pregunta de ahora no se parece a ninguno, ignóralos.\n\n"
+            f"{muestras}"
+        )
 
     @staticmethod
     def _cargue(runner: Any) -> str:

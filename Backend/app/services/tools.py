@@ -170,17 +170,21 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "buscar_en_observaciones",
             "description": (
-                "Busca una palabra dentro del acta de visita que el técnico escribió "
+                "Busca un término dentro del acta de visita que el técnico escribió "
                 "a mano, y dice en qué barrios aparece. Es lo ÚNICO que llega al texto "
                 "libre: el resto de herramientas solo ven campos codificados.\n"
                 "Úsala cuando pregunten por algo que no está en el catálogo de causas: "
                 "«red chilena», «oscilación de voltaje», «poste en mal estado», "
                 "«transformador», «perro», lo que sea. Antes de decir que no tienes un "
                 "dato, PRUÉBALA: casi todo lo que el técnico reporta está ahí.\n"
-                "El texto viene sucio y con faltas de ortografía, así que busca la raíz "
-                "y no la frase entera: «chilena» encuentra más que «red chilena», y "
-                "«oscilaci» más que «oscilación». Si no hay resultados, reintenta con "
-                "un término más corto antes de darte por vencido.\n"
+                "UNA SOLA BÚSQUEDA por pregunta, con las palabras que usó el usuario. "
+                "No repitas con variantes, raíces ni sinónimos por tu cuenta: si te "
+                "preguntan por «predio enrejado», no busques además «reja» ni "
+                "«enrejado». Son preguntas distintas, y mezclarlas responde algo que "
+                "nadie preguntó.\n"
+                "No hace falta acortar: la búsqueda ya tolera las erratas del acta y "
+                "las de quien pregunta —«enrrejado» encuentra «enrejado»— y halla las "
+                "palabras en cualquier orden. Di siempre qué término buscaste.\n"
                 "OJO: cuenta MENCIONES, no causas. Que el acta nombre el término no "
                 "significa que la orden se cayera por eso; puede estar en una efectiva. "
                 "Mira `por_estado` y el `tot` de cada barrio antes de sacar conclusiones."
@@ -191,8 +195,11 @@ TOOLS: list[dict[str, Any]] = [
                     "texto": {
                         "type": "string",
                         "description": (
-                            "Término a buscar. Una o dos palabras, en su raíz. "
-                            "No distingue mayúsculas ni tildes."
+                            "El término tal como lo dijo el usuario, con TODAS sus "
+                            "palabras. No lo acortes, no lo partas y no lo cambies por "
+                            "su raíz: «predio enrejado» se busca entero, nunca como "
+                            "«predio» y «enrejado» por separado. No distingue "
+                            "mayúsculas, tildes ni letras repetidas."
                         ),
                     },
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
@@ -766,16 +773,20 @@ class ToolRunner:
                 "refiere, o repite la búsqueda sin ese filtro."
             )
         elif not datos.coincidencias:
+            # Único caso en que se admite repetir: con cero resultados no hay nada
+            # que mezclar, y a veces el término del usuario no es el que usa el
+            # técnico. Una sola vez, y diciéndolo.
             salida["nota"] = (
                 f"Ninguna de las {datos.revisadas} actas de {base} dice «{texto}». "
-                "Prueba con una palabra más corta o con otra forma de decirlo antes "
-                "de responder que no hay nada."
+                "Puedes reintentar UNA vez con una palabra más corta; si lo haces, "
+                "di al final con cuál buscaste."
             )
         else:
             salida["nota"] = (
-                "Son menciones en el acta, no una causa: dilo así. El `tot` de cada "
-                "barrio son sus órdenes en el mismo recorte, para que se vea si el "
-                "barrio encabeza por problema o por volumen."
+                f"Son menciones de «{texto}» en el acta, no una causa: dilo así, y di "
+                "qué término buscaste. El `tot` de cada barrio son sus órdenes en el "
+                "mismo recorte, para que se vea si el barrio encabeza por problema o "
+                "por volumen."
             )
         if datos.meses_sin_texto:
             # Callarlo daría un conteo parcial con pinta de completo.

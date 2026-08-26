@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.cargue_store import CargueStore
+from app.services.feedback_service import FeedbackService
 from app.services.geolocalizacion import Geolocalizador
 from app.services.metrics_service import MetricsService
 from app.services.openai_service import OpenAIService, get_openai_service
@@ -21,8 +22,7 @@ logger = logging.getLogger(__name__)
 async def get_db() -> AsyncIterator[AsyncSession]:
     """Una sesión por petición; se cierra siempre y revierte si algo falla.
 
-    Hoy nadie la usa: las métricas salen del payload del ETL. Queda lista para
-    cuando haga falta consultar la base directamente.
+    La usa el endpoint del voto. Las métricas no: salen del payload del ETL.
     """
     async with SessionLocal() as session:
         try:
@@ -64,6 +64,14 @@ def get_tool_runner(metrics: MetricsDep, store: CargueStoreDep) -> ToolRunner:
     """Las herramientas que el modelo puede invocar, atadas a la sesión de esta petición."""
     return ToolRunner(metrics, cargues=store)
 
+
+@lru_cache
+def get_feedback_service() -> FeedbackService:
+    """Uno por proceso: no guarda estado, solo abre sesiones cuando escribe."""
+    return FeedbackService()
+
+
+FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
 
 ToolRunnerDep = Annotated[ToolRunner, Depends(get_tool_runner)]
 OpenAIServiceDep = Annotated[OpenAIService, Depends(get_openai_service)]

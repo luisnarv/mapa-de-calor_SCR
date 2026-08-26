@@ -1,38 +1,54 @@
 """Pruebas del endpoint de OpenAI. El servicio se sustituye: no se llama a la red."""
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import get_feedback_service
 from app.main import app
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest
 from app.services.openai_service import OpenAIServiceError, get_openai_service
 
 PREGUNTA = {"messages": [{"role": "user", "content": "hola"}]}
+
+TRAZA = [{"herramienta": "efectividad", "argumentos": {"barrio": "X"}, "resultado": {"tot": 1}}]
 
 
 class FakeOpenAIService:
     """Doble de prueba con el mismo contrato que `OpenAIService`."""
 
+    modelo_por_defecto = "gpt-4o-mini"
+
     def __init__(self, error: OpenAIServiceError | None = None, accion: dict | None = None):
         self.error = error
         self.accion = accion
+        self.ejemplos_recibidos = None
 
-    async def stream_chat(self, request: ChatRequest, runner=None):
+    async def stream_chat(self, request: ChatRequest, runner=None, ejemplos=None):
+        self.ejemplos_recibidos = ejemplos
         if self.error:
             raise self.error
         yield {"delta": "respuesta "}
         if self.accion:
             yield {"accion": self.accion}
         yield {"delta": "de prueba"}
+        yield {"fin": {"respuesta": "respuesta de prueba", "traza": TRAZA}}
 
-    async def chat(self, request: ChatRequest, runner=None) -> ChatResponse:
-        partes, acciones = [], []
-        async for evento in self.stream_chat(request, runner):
-            if "delta" in evento:
-                partes.append(evento["delta"])
-            else:
-                acciones.append(evento["accion"])
-        return ChatResponse(content="".join(partes), model="gpt-4o-mini", acciones=acciones)
+
+class FakeFeedback:
+    """Doble del registro. Devolver `None` simula la base caída."""
+
+    def __init__(self, interaccion_id: uuid.UUID | None):
+        self.interaccion_id = interaccion_id
+        self.recibido: list[dict] = []
+
+    async def registrar(self, request, fin):
+        self.recibido.append(fin)
+        return self.interaccion_id
+
+    async def ejemplos(self):
+        return [{"pregunta": "¿efectividad de X?", "respuesta": "72% sobre 40 órdenes."}]
 
 
 @pytest.fixture
@@ -42,8 +58,16 @@ def client():
     app.dependency_overrides.clear()
 
 
-def override(service) -> None:
+def override(service, feedback: FakeFeedback | None = None) -> FakeFeedback:
+    """Sustituye el servicio y **siempre** el feedback.
+
+    Sin lo segundo las pruebas escribirían en la base de verdad, que es la de
+    producción: el doble no es una comodidad, es lo que lo impide.
+    """
+    doble = feedback or FakeFeedback(uuid.uuid4())
     app.dependency_overrides[get_openai_service] = lambda: service
+    app.dependency_overrides[get_feedback_service] = lambda: doble
+    return doble
 
 
 def test_health(client):
@@ -343,3 +367,128 @@ async def test_si_ni_con_el_cierre_redacta_se_avisa(monkeypatch):
     texto = await _texto_de(cliente)
 
     assert "No pude cerrar" in texto
+
+
+# --- El id contra el que se vota ----------------------------------------------
+
+
+def test_chat_devuelve_el_id_para_votar(client):
+    feedback = override(FakeOpenAIService())
+
+    body = client.post("/api/v1/openai/chat", json=PREGUNTA).json()
+
+    assert body["interaccion_id"] == str(feedback.interaccion_id)
+    assert feedback.recibido[0]["traza"] == TRAZA
+
+
+def test_el_chat_responde_aunque_el_feedback_no_se_guarde(client):
+    """Si la base está caída se pierde el pulgar, no la respuesta."""
+    override(FakeOpenAIService(), FakeFeedback(None))
+
+    body = client.post("/api/v1/openai/chat", json=PREGUNTA).json()
+
+    assert body["content"] == "respuesta de prueba"
+    assert body["interaccion_id"] is None
+
+
+def test_el_stream_manda_el_id_y_no_la_traza(client):
+    """La traza trae los datos que consultó el modelo: se guarda, no se publica."""
+    feedback = override(FakeOpenAIService())
+
+    texto = client.post("/api/v1/openai/chat/stream", json=PREGUNTA).text
+
+    assert str(feedback.interaccion_id) in texto
+    assert "traza" not in texto
+    assert "herramienta" not in texto
+
+
+# --- Ejemplos aprobados en el prompt -------------------------------------------
+
+
+def test_los_ejemplos_llegan_al_servicio(client):
+    servicio_falso = FakeOpenAIService()
+    override(servicio_falso)
+
+    client.post("/api/v1/openai/chat", json=PREGUNTA)
+
+    assert servicio_falso.ejemplos_recibidos[0]["pregunta"] == "¿efectividad de X?"
+
+
+def test_sin_ejemplos_no_se_agrega_bloque_al_prompt():
+    """Lo normal es no tener ninguno aprobado; el prompt no debe cambiar por eso."""
+    from app.services.openai_service import OpenAIService
+
+    assert OpenAIService._ejemplos(None) == ""
+    assert OpenAIService._ejemplos([]) == ""
+
+
+def test_el_bloque_prohibe_reutilizar_las_cifras_del_ejemplo():
+    """Un ejemplo trae los números de cuando se respondió; copiarlos es el peor error."""
+    from app.services.openai_service import OpenAIService
+
+    bloque = OpenAIService._ejemplos([{"pregunta": "¿y X?", "respuesta": "72% sobre 40."}])
+
+    assert "NUNCA las reutilices" in bloque
+    assert "72% sobre 40." in bloque, "el ejemplo sí debe verse"
+
+
+def test_los_ejemplos_van_despues_de_las_reglas():
+    """Puestos antes, el modelo imita el ejemplo por encima de lo que se le pide."""
+    from app.services.openai_service import OpenAIService
+
+    servicio = OpenAIService(client=None, default_model="x", system_prompt="LAS REGLAS")
+    prompt = servicio._prompt_de_sistema(
+        None, None, [{"pregunta": "p", "respuesta": "r"}]
+    )
+
+    assert prompt.index("LAS REGLAS") < prompt.index("EJEMPLOS DE RESPUESTAS")
+
+
+# --- Un turno mueve el tablero una sola vez ------------------------------------
+#
+# El caso real: «el barrio con más predio enrejado en junio y agosto» llamó a la
+# herramienta dos veces, una por mes. Cada llamada filtraba el mapa y la segunda
+# pisaba a la primera: la respuesta hablaba de junio y agosto, el mapa mostraba
+# solo agosto, y nada avisaba.
+
+
+def unificar(*filtros: dict) -> dict | None:
+    from app.schemas.metrics import FiltroMapa
+    from app.services.openai_service import _unificar_filtros
+
+    return _unificar_filtros([FiltroMapa(**f) for f in filtros])
+
+
+def test_dos_meses_del_mismo_recorte_se_unen():
+    accion = unificar({"meses": ["2026-08"]}, {"meses": ["2026-06"]})
+
+    assert accion["meses"] == ["2026-06", "2026-08"], "el mapa debe mostrar los dos"
+
+
+def test_dos_recortes_distintos_dejan_el_tablero_quieto():
+    """No hay un tablero que muestre dos barrios a la vez; enseñar uno mentiría."""
+    assert unificar({"barrio": "SOLEDAD | NUEVO MILENIO"}, {"barrio": "BARRANQUILLA | OLAYA"}) is None
+
+
+def test_una_sola_llamada_filtra_como_siempre():
+    accion = unificar({"municipio": "SOLEDAD", "meses": ["2026-08"]})
+
+    assert accion == {
+        "tipo": "filtrar_mapa", "barrio": None, "municipio": "SOLEDAD",
+        "zona": None, "brigada": None, "tipo_os": None, "meses": ["2026-08"],
+    }
+
+
+def test_un_filtro_vacio_no_mueve_el_tablero():
+    """El modelo llama a filtrar_mapa vacía al cerrar un ranking."""
+    assert unificar({}) is None
+    assert unificar() is None
+
+
+def test_el_mismo_recorte_repetido_no_se_duplica():
+    """Dos llamadas idénticas son un solo recorte, no dos en conflicto."""
+    accion = unificar({"municipio": "SOLEDAD", "meses": ["2026-08"]},
+                      {"municipio": "SOLEDAD", "meses": ["2026-08"]})
+
+    assert accion["municipio"] == "SOLEDAD"
+    assert accion["meses"] == ["2026-08"]

@@ -1,6 +1,7 @@
 """Esquemas Pydantic del chat con OpenAI: contrato de entrada y salida."""
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +51,13 @@ class ChatRequest(BaseModel):
     vista: VistaTablero | None = Field(
         default=None, description="Filtros activos en el tablero del usuario."
     )
+    conversacion_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Id de la conversación, generado por el cliente. Sirve para agrupar "
+            "el feedback; sin él la interacción se guarda igual, pero suelta."
+        ),
+    )
     cargue: str | None = Field(
         default=None,
         description=(
@@ -77,4 +85,11 @@ class ChatResponse(BaseModel):
     usage: Usage | None = None
     acciones: list[dict] = Field(
         default_factory=list, description="Filtros que el frontend debe aplicar al tablero."
+    )
+    interaccion_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Contra qué votar esta respuesta. Nulo si el feedback no se pudo "
+            "guardar: el chat responde igual, solo que ese turno no es calificable."
+        ),
     )

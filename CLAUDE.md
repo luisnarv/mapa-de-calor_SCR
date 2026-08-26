@@ -40,6 +40,7 @@ pedir que se lea.
 |---|---|
 | `Etl/` | Proceso independiente. Lee `dbanalitica.historico_mo` y genera los JSON del mapa en `Etl/salida/`. |
 | `Backend/` | API FastAPI. Chatbot con OpenAI y tool calling sobre los datos del tablero. |
+| `Backend/migraciones/` | Los `.sql` del esquema, numerados. Se aplican a mano; no hay Alembic. |
 | `Frontend/dashboard/` | Tablero Next.js: mapa de calor, paneles y el chat. |
 | `Modelos/` | Modelo CatBoost de riesgo social (predice agresividad del cliente). |
 | `.github/workflows/etl.yml` | Cron del ETL. **Debe vivir en la raíz**: GitHub solo lee ahí. |
@@ -64,6 +65,28 @@ pedir que se lea.
   `pts` de ese mes; si los dos largos no coinciden, el backend descarta el mes
   entero en vez de contar mal. Buscar ahí cuenta **menciones, no causas**: una
   orden efectiva puede nombrar el término igual que una perdida.
+- **`tests/test_recortes.py` es el repertorio con el que se mide al asistente,
+  y corre contra `tests/datos/`, no contra los datos de producción.** Cada caso
+  es un error que alguien vio de verdad; cuando un pulgar abajo se diagnostica,
+  se agrega ahí. El recorte congelado se regenera a mano con
+  `tests/datos/generar.py` y **no debería cambiar**: antes estas pruebas
+  afirmaban cifras contra `app/data/`, que el ETL regenera a diario, y se
+  rompían solas cada mañana. Una suite que falla por diseño deja de avisar
+  cuando el fallo es real.
+- **Las respuestas con pulgar arriba se le inyectan al prompt como ejemplo, y
+  sus cifras son veneno.** El bloque le prohíbe expresamente reutilizarlas: son
+  de cuando se respondió, y si las copia da un número viejo con toda la
+  seguridad de uno bueno. Subir `LIMITE_EJEMPLOS` encarece **todas** las
+  preguntas, no solo las que se parezcan al ejemplo. Y como el chat no tiene
+  autenticación, quien lo use puede votarse a sí mismo y con eso influir en lo
+  que se le responde a los demás: es el costo aceptado de que sea automático.
+- **El feedback del chat se guarda con la traza, y guardarlo nunca puede
+  romper el chat.** Cada respuesta entregada deja una fila en
+  `dbanalitica.chat_interaccion` con las tool calls que la produjeron: sin ellas
+  un «el dato está mal» no se puede diagnosticar, porque no se sabe si falló la
+  herramienta o la redacción. El registro no lanza jamás —si la base está caída
+  se pierde el pulgar, no la respuesta—, y por eso `interaccion_id` puede venir
+  nulo. El voto en sí (`PATCH /api/v1/feedback/{id}`) sí falla hacia el cliente.
 - **`Backend/app/core/taxonomy.py` es un espejo de `Etl/etl/taxonomy.py`.** Si
   cambias una causa o una homologación, cámbiala en los dos. Hay una prueba que
   lo verifica, pero solo corre si pandas está instalado en el venv del backend.
@@ -77,6 +100,9 @@ pedir que se lea.
 cd Backend && uvicorn app.main:app --reload --reload-dir app
 cd Backend && .venv/Scripts/python.exe -m pytest -q
 
+# Regenerar el recorte congelado de las pruebas (rara vez: cambia las cifras)
+cd Backend && .venv/Scripts/python.exe tests/datos/generar.py
+
 # Frontend
 cd Frontend/dashboard && npm run dev
 
@@ -89,10 +115,13 @@ cd Etl && python run_etl.py
 - Repartir la salida del ETL a `Frontend/dashboard/public/` y `Backend/app/data/`
   sigue siendo manual. Los `observaciones_*.json` son la excepción: van solo al
   backend. Copiarlos al frontend sería peso muerto en cada visita al tablero.
-- El endpoint del chat no tiene autenticación ni límite de peticiones.
-- Los pulgares de calificación del chat no se guardan en ningún lado.
-- La herramienta `efectividad` no acepta filtro por brigada: si le preguntan por
-  una, responde sin ese filtro y redacta como si lo hubiera aplicado.
+- El endpoint del chat no tiene autenticación ni límite de peticiones. Y
+  `ChatRequest.model` es libre: el cliente elige con qué modelo se le responde.
+- Los endpoints de lectura del feedback (`GET /api/v1/feedback`) tampoco tienen
+  autenticación, y ahí sí hay conversaciones completas de usuarios.
+- Nadie ha revisado feedback todavía: el ciclo de la fase 4 —leer los votos
+  negativos, diagnosticarlos con la traza y convertirlos en casos de
+  `test_recortes.py`— está montado pero sin estrenar.
 
 ---
 

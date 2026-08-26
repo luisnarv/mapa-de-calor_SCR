@@ -30,6 +30,7 @@ const CLOSE_MS = 160;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const STREAM_ENDPOINT = `${API_URL}/api/v1/openai/chat/stream`;
+const VOTO_ENDPOINT = (id) => `${API_URL}/api/v1/feedback/${id}`;
 const CARGA_ENDPOINT = `${API_URL}/api/v1/ordenes/cargar`;
 const HEALTH_ENDPOINT = `${API_URL}/health`;
 
@@ -45,11 +46,10 @@ const PING_TIMEOUT_MS = 5000;
 // Lo que dura el «Gracias» tras calificar, antes de quitarse solo.
 const GRACIAS_MS = 3000;
 
-// PENDIENTE: los votos solo viven en la pantalla. Falta el endpoint que los
-// guarde; hasta entonces se pierden al recargar.
-//
 // Cada motivo se arregla en un lugar distinto: "el dato está mal" es una
 // propuesta para la taxonomía del ETL; los otros tres son fallas del agente.
+// Los ids viajan tal cual al backend y son el CHECK de la tabla: cambiar uno
+// aquí sin cambiarlo allá hace que el voto se rechace con un 422.
 const MOTIVOS = [
   { id: "dato_incorrecto", txt: "El dato está mal" },
   { id: "no_entendio", txt: "No entendió" },
@@ -358,6 +358,10 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
   const [draft, setDraft] = useState("");
 
   const [messages, setMessages] = useState([SALUDO]);
+  // Agrupa el feedback de un mismo hilo. Se crea al primer envío y vive lo que
+  // viva el componente: el backend no guarda la conversación, así que si no lo
+  // pone el cliente no lo pone nadie.
+  const conversacionRef = useRef(null);
   const [busy, setBusy] = useState(false);
   // "probando" mientras no se sabe: antes decía "En línea" desde el primer
   // render, con lo cual afirmaba algo que nadie había comprobado.
@@ -679,11 +683,21 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
     });
   }, []);
 
-  const votar = useCallback((indice, voto, motivo = null, comentario = "") => {
-    // Solo estado local por ahora: no hay dónde guardarlo.
+  const votar = useCallback((indice, interaccionId, voto, motivo = null, comentario = "") => {
     setMessages((prev) =>
       prev.map((m, i) => (i === indice ? { ...m, voto, motivo, comentario } : m))
     );
+
+    // Sin id el backend no pudo registrar el turno; el pulgar se queda pintado
+    // pero no hay contra qué votar. Se calla: al usuario no le sirve de nada
+    // enterarse de que la telemetría está caída.
+    if (!interaccionId) return;
+
+    fetch(VOTO_ENDPOINT(interaccionId), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voto, motivo, comentario })
+    }).catch(() => {});
   }, []);
 
   const send = useCallback(
@@ -701,6 +715,14 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // randomUUID solo existe en contexto seguro (https o localhost); el
+      // respaldo evita que el chat reviente en un despliegue por http plano.
+      conversacionRef.current ??=
+        crypto.randomUUID?.() ??
+        "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+          (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)
+        );
+
       try {
         const res = await fetch(STREAM_ENDPOINT, {
           method: "POST",
@@ -708,7 +730,8 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
           body: JSON.stringify({
             messages: historial.map(({ role, content }) => ({ role, content })),
             vista: vistaRef.current?.() ?? null,
-            cargue: cargueRef.current
+            cargue: cargueRef.current,
+            conversacion_id: conversacionRef.current
           }),
           signal: controller.signal
         });
@@ -744,6 +767,16 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
             const payload = JSON.parse(dato);
             if (payload.error) throw new Error(payload.error);
             if (payload.delta) appendToLast(payload.delta);
+            // Llega al final del flujo: es lo que habilita los pulgares de esta
+            // respuesta. Si no llega, el turno no quedó guardado.
+            if (payload.interaccion_id) {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                next[next.length - 1] = { ...last, interaccionId: payload.interaccion_id };
+                return next;
+              });
+            }
             // El backend resolvió una consulta: que el tablero se filtre solo.
             if (payload.accion) {
               accionRef.current?.(payload.accion);
@@ -1030,7 +1063,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
                         <Acciones
                           texto={m.content}
                           voto={m.voto}
-                          onVotar={(v, mo, co) => votar(i, v, mo, co)}
+                          onVotar={(v, mo, co) => votar(i, m.interaccionId, v, mo, co)}
                         />
                       )}
                     </React.Fragment>

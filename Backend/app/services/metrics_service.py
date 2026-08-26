@@ -11,6 +11,7 @@ que no hace falta caché ni precalentado.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -135,6 +136,42 @@ def _a_dto(conteo: Conteo, nombre: str, municipio: str | None = None) -> Efectiv
         ef_adj=_pct(conteo.ef, den) if den > 0 else 0.0,
     )
 
+
+def _colapsar(palabra: str) -> str:
+    """«enrrejado» -> «enrejado». La letra doblada es la errata más común."""
+    salida: list[str] = []
+    for letra in palabra:
+        if not salida or salida[-1] != letra:
+            salida.append(letra)
+    return "".join(salida)
+
+
+def _patron_flexible(texto: str) -> re.Pattern[str] | None:
+    """La frase buscada, tolerante a letras repetidas, pero seguida.
+
+    Las actas las escribe el técnico a mano y vienen con erratas; quien pregunta
+    también las comete. Antes esto era un `in` literal, así que «predio enrrejado»
+    daba cero y el modelo salía a inventar variantes más cortas por su cuenta
+    —«reja», «enrejado»— y respondía sobre un término que nadie le pidió.
+
+    Las letras repetidas se colapsan en lo buscado y se admiten en el acta, así
+    que «enrrejado» y «enrejado» son la misma búsqueda en cualquier dirección.
+
+    Lo que NO hace es soltar las palabras. Se intentó y fue peor: buscando cada
+    una por su lado, «red trenzada neutro» encontraba 12 actas en San Felipe
+    donde en realidad hay 2, porque contaba «…tendido red trenzada, se desconecta
+    fase y neutro» —las tres palabras sueltas, otra cosa completamente—. Una
+    frase se busca como frase; entre palabra y palabra solo se admite el espacio.
+    """
+    palabras = norm(texto).split()
+    if not palabras:
+        return None
+    return re.compile(
+        r"\s+".join(
+            "".join(f"{re.escape(letra)}+" for letra in _colapsar(palabra))
+            for palabra in palabras
+        )
+    )
 
 class MetricsService:
     """Consultas de negocio sobre el payload. Los métodos son `async` solo para
@@ -361,8 +398,8 @@ class MetricsService:
         desglose por estado, para que la cifra no se lea como una tasa de fallo.
         """
         p = self.datos
-        objetivo = norm(texto)
-        if not objetivo:
+        patron = _patron_flexible(texto)
+        if patron is None:
             raise ValueError("El término de búsqueda está vacío.")
 
         nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
@@ -428,7 +465,7 @@ class MetricsService:
                 revisadas += 1
                 tot_barrio[bi] = tot_barrio.get(bi, 0) + 1
                 tot_zona[zi] = tot_zona.get(zi, 0) + 1
-                if objetivo not in obs[local]:
+                if not patron.search(obs[local]):
                     continue
                 coincidencias += 1
                 por_estado[("Efectiva", "Fallida", "Perdida")[E[i]]] += 1
