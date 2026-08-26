@@ -47,8 +47,20 @@ jobs:
           ETL_LOG_LEVEL: INFO
         run: python run_etl.py
 
-      # PENDIENTE: el ETL deja los JSON en Etl/salida/. Repartirlos a
-      # Frontend/dashboard/public/ y a Backend/app/data/ sigue siendo manual.
+      # El tablero lee de su propio public/, no de Etl/salida/. Van solo los
+      # data*.json: los observaciones_*.json son del backend, y en el frontend
+      # serían peso muerto en cada visita al tablero.
+      #
+      # Depende de que el ETL escriba en Etl/salida/, que es su valor por
+      # defecto. Si alguien vuelve a definir ETL_OUTPUT_DIR en las variables del
+      # repositorio, esta copia falla y el paso se cae — que es lo que se quiere:
+      # antes apuntaba a dashboard/public/ y los datos llevaban días aterrizando
+      # en una carpeta que nadie lee, sin que nada avisara.
+      - name: Repartir los JSON del mapa al tablero
+        run: cp Etl/salida/data.json Etl/salida/data_*.json Frontend/dashboard/public/
+
+      # PENDIENTE: el reparto a Backend/app/data/, que es lo que lee el chat,
+      # sigue siendo manual.
       - name: Commitear el JSON regenerado (si cambió)
         run: |
           git config user.name  "etl-bot"
@@ -56,11 +68,11 @@ jobs:
           # La carpeta entera, no una lista: el ETL escribe también
           # direcciones.json y los observaciones_*.json, y enumerarlos dejaba
           # el árbol sucio, con lo que el rebase se negaba y el push no corría.
-          git add Frontend/dashboard/public
+          git add Etl/salida Frontend/dashboard/public
           if git diff --cached --quiet; then
             echo "Sin cambios en los datos; no se commitea."
           else
-            git commit -m "chore(etl): datos regenerados desde la BD [skip ci]"
+            git commit -m "chore(etl): datos regenerados desde la BD"
             git pull --rebase --autostash origin main
             git push origin main
           fi
