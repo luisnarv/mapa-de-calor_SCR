@@ -1,27 +1,60 @@
-# ===== ETL: fuentes y salidas (NO los usa la app; se regeneran con Index.py) =====
-# La app despliega dashboard/ y lee sus datos de dashboard/public/*.json.
+# ===== SECRETOS =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===== PYTHON =====
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# ===== DATOS TABULARES =====
 *.csv
 *.xlsx
 *.xls
-__pycache__/
-*.pyc
+*.xlsm
+*.xlsb
 
-# Fuentes geográficas y respaldos autónomos del ETL
-/Base/
-/Limetes/
-/Nueva carpeta/
-/index.html
-/mapa_operativo.html
+# ===== NOTEBOOKS Y MODELOS (Modelos/) =====
+.ipynb_checkpoints/
+catboost_info/
+*.parquet
 
-# Respaldos locales del dashboard (no deben ir al repo)
-/dashboard/public/*.bak
-/dashboard/public/data_history.json
+# ===== NODE =====
+node_modules/
+.next/
+out/
 
-# Secretos: el .env real nunca al repo (sí se versiona .env.example)
-.env
-dashboard/.env
-*.pyc
+# ===== REGISTROS =====
+*.log
+logs/
 
-# Sistema
-.DS_Store
+# ===== WINDOWS / ONEDRIVE =====
 Thumbs.db
+ehthumbs.db
+desktop.ini
+~$*
+*.tmp
+*.stackdump
+
+# ===== macOS / LINUX =====
+.DS_Store
+.DS_Store?
+._*
+*~
+
+# ===== EDITORES =====
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
