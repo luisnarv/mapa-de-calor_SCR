@@ -7,8 +7,29 @@ if (typeof window !== "undefined") {
   window.L = L;
 }
 import "leaflet.heat";
+import { setWorkerUrl } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import "@maplibre/maplibre-gl-leaflet";
 
-import { useTheme, riskColor as riskColorOf } from "@/lib/theme";
+import { useTheme, riskColor as riskColorOf, BASEMAP } from "@/lib/theme";
+
+// Los retoques de color se aplican sobre el estilo ya cargado en vez de
+// hospedar una copia propia del JSON: así OpenFreeMap sigue sirviendo el estilo
+// y nosotros solo pisamos los colores que nos interesan.
+function aclararBasemap(gl, tema) {
+  if (tema !== "light") return;
+  for (const [capa, color] of Object.entries(BASEMAP.coloresClaro)) {
+    const def = gl.getLayer(capa);
+    if (!def) continue;
+    const prop =
+      def.type === "background"
+        ? "background-color"
+        : def.type === "fill"
+          ? "fill-color"
+          : "line-color";
+    gl.setPaintProperty(capa, prop, color);
+  }
+}
 
 export default function LeafletMap({
   A,
@@ -30,8 +51,8 @@ export default function LeafletMap({
   const ptLayerRef = useRef(null);
   const cargueLayerRef = useRef(null);
   const heatLayersRef = useRef({ 0: null, 1: null, 2: null });
+  const basemapRef = useRef(null);
   const cargueHeatRef = useRef(null);
-  const tileRefs = useRef({ base: null, labels: null });
 
   // Paleta corporativa: el mapa pinta en canvas/Leaflet, donde var(--x) no se
   // resuelve, así que los colores vienen del módulo de tema.
@@ -42,6 +63,10 @@ export default function LeafletMap({
   useEffect(() => {
     paletteRef.current = P;
   }, [P]);
+  const temaRef = useRef(theme);
+  useEffect(() => {
+    temaRef.current = theme;
+  }, [theme]);
 
   // El canvas de puntos GPS y el hit-test se definen UNA sola vez (en el effect
   // de init) y viven fuera del render de React. Sin este ref usarían un `st`
@@ -74,18 +99,24 @@ export default function LeafletMap({
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
-    // Tiles — el basemap acompaña al tema (claro / oscuro)
-    tileRefs.current.base = L.tileLayer(paletteRef.current.tiles.base, {
-      attribution: "&copy; OpenStreetMap &copy; CARTO",
-      subdomains: "abcd",
-      maxZoom: 19
-    }).addTo(map);
+    // Sin esto maplibre deduce la URL de su worker de `import.meta.url`, que
+    // al empaquetar con Turbopack no es http(s): se queda en cadena vacía, el
+    // worker no arranca y el mapa sale en blanco sin lanzar ningún error. El
+    // archivo lo deja en public/ el postinstall.
+    setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
-    tileRefs.current.labels = L.tileLayer(paletteRef.current.tiles.labels, {
-      subdomains: "abcd",
-      maxZoom: 19,
-      pane: "shadowPane"
+    // El plugin lo cuelga de `tilePane`, debajo de los paneles de datos, y
+    // publica en el control de Leaflet la atribución que declara el estilo.
+    basemapRef.current = L.maplibreGL({
+      style: BASEMAP[theme]
     }).addTo(map);
+    // `isStyleLoaded()` sigue en false mientras saltan estos eventos, pero las
+    // capas ya existen: por eso se pisa el color aquí y no se espera a `load`,
+    // que con este estilo no llega a tiempo. Reaplicar de más es inocuo. El
+    // manejador vive lo que el mapa y cubre también el cambio de tema, que
+    // vuelve a disparar `styledata` al reemplazar el estilo.
+    const gl = basemapRef.current.getMaplibreMap();
+    gl.on("styledata", () => aclararBasemap(gl, temaRef.current));
 
     // Panes
     map.createPane("heat");
@@ -792,12 +823,10 @@ export default function LeafletMap({
     }
   }, [ordenes, st.layers, theme]);
 
-  // 3. Cambio de tema: se intercambian los mosaicos y se repintan los puntos
+  // 3. Cambio de tema: se cambia el estilo del basemap y se repintan los puntos
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (tileRefs.current.base) tileRefs.current.base.setUrl(P.tiles.base);
-    if (tileRefs.current.labels) tileRefs.current.labels.setUrl(P.tiles.labels);
+    if (!mapRef.current) return;
+    if (basemapRef.current) basemapRef.current.getMaplibreMap().setStyle(BASEMAP[theme]);
     if (ptLayerRef.current && ptLayerRef.current._c) ptLayerRef.current._draw();
   }, [theme]);
 

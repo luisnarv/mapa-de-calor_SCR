@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# copia del worker de maplibre: la regenera el postinstall
+/public/maplibre/

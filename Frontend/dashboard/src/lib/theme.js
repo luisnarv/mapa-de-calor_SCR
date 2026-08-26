@@ -59,6 +59,28 @@ export const SERIE_REF = BRAND.grisMedio;
    ámbar · azul activo). */
 export const SERIES_DARK = ["#4A9EE8", "#2BD98C", "#F0C040", "#3B8AD9"];
 
+// Basemap — OpenFreeMap: teselas vectoriales de OpenStreetMap, sin API key ni
+// marca de agua. Positron es el mismo estilo que usaba CARTO antes de cobrarlo,
+// y de ahí salen los nombres de calle y de barrio.
+export const BASEMAP = {
+  light: "https://tiles.openfreemap.org/styles/positron",
+  dark: "https://tiles.openfreemap.org/styles/dark",
+  // Positron viene tan desaturado que en el tablero se leía apagado. Se aclaran
+  // fondo y manzanas, y se le devuelve color al agua y al verde. Las vías y las
+  // manzanas quedan neutras a propósito: ahí van los marcadores y el heatmap, y
+  // un basemap saturado competiría con el verde del índice de riesgo bajo.
+  // Solo aplica al tema claro; el estilo oscuro trae su propia paleta.
+  coloresClaro: {
+    background: "#FBFBF9",
+    landuse_residential: "#F4F4F0",
+    building: "#EFEFE9",
+    water: "#C6DEEC",
+    waterway: "#AECFE2",
+    park: "#DCEBD1",
+    landcover_wood: "#D2E5C5"
+  }
+};
+
 export const PALETTES = {
   light: {
     name: "light",
@@ -114,10 +136,6 @@ export const PALETTES = {
     pointStroke: "rgba(255,255,255,.85)",
     markerSel: BRAND.verdeOscuro,
     limitStroke: BRAND.verdeOscuro,
-    tiles: {
-      base: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-      labels: "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
-    },
     heat: [
       { 0.35: "#CFE3B4", 0.65: BRAND.verde, 1.0: BRAND.verdeOscuro },
       { 0.35: "#E8EAA8", 0.65: BRAND.lima, 1.0: "#7E8400" },
@@ -183,10 +201,6 @@ export const PALETTES = {
     markerSel: DARK.text1,
     markerHalo: DARK.acento,
     limitStroke: DARK.acento,
-    tiles: {
-      base: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
-      labels: "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png"
-    },
     heat: [
       { 0.35: "#0E3A2C", 0.65: "#1E8A64", 1.0: "#2BD98C" },
       { 0.35: "#5C4712", 0.65: "#C09526", 1.0: "#F0C040" },
