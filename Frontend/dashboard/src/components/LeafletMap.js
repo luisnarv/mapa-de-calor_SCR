@@ -13,11 +13,25 @@ import "@maplibre/maplibre-gl-leaflet";
 
 import { useTheme, riskColor as riskColorOf, BASEMAP } from "@/lib/theme";
 
+const CAPAS_FRONTERA = ["boundary_country_z0-4", "boundary_country_z5-", "boundary_state"];
+
+function ocultarFronteraMaritima(gl) {
+  for (const capa of CAPAS_FRONTERA) {
+    if (!gl.getLayer(capa)) continue;
+    const filtro = gl.getFilter(capa);
+    if (!filtro || JSON.stringify(filtro).includes('"maritime"')) continue;
+    gl.setFilter(capa, ["all", filtro, ["!=", ["get", "maritime"], 1]]);
+  }
+}
+
 // Los retoques de color se aplican sobre el estilo ya cargado en vez de
 // hospedar una copia propia del JSON: así OpenFreeMap sigue sirviendo el estilo
 // y nosotros solo pisamos los colores que nos interesan.
-function aclararBasemap(gl, tema) {
-  if (tema !== "light") return;
+function ajustarBasemap(gl, tema) {
+  if (tema !== "light") {
+    ocultarFronteraMaritima(gl);
+    return;
+  }
   for (const [capa, color] of Object.entries(BASEMAP.coloresClaro)) {
     const def = gl.getLayer(capa);
     if (!def) continue;
@@ -116,7 +130,7 @@ export default function LeafletMap({
     // manejador vive lo que el mapa y cubre también el cambio de tema, que
     // vuelve a disparar `styledata` al reemplazar el estilo.
     const gl = basemapRef.current.getMaplibreMap();
-    gl.on("styledata", () => aclararBasemap(gl, temaRef.current));
+    gl.on("styledata", () => ajustarBasemap(gl, temaRef.current));
 
     // Panes
     map.createPane("heat");
