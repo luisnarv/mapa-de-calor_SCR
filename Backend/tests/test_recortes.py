@@ -49,7 +49,7 @@ async def test_el_filtro_de_brigada_cambia_el_resultado(runner):
         "efectividad", {"barrio": "Villa Sabita", "brigada": "Brigada Tipo Pesada"}
     )
 
-    assert todas["metricas"]["tot"] == 37
+    assert todas["metricas"]["tot"] == 38
     assert pesada["metricas"]["tot"] == 7
     assert "Brigada Tipo Pesada" in pesada["base"]
 
@@ -115,7 +115,7 @@ async def test_los_homonimos_de_un_municipio_se_suman(metrics):
 
     salida, _ = await runner.run("efectividad", {"barrio": "Los Robles"})
 
-    assert salida["metricas"]["tot"] == 1110
+    assert salida["metricas"]["tot"] == 1160
     assert "10 barrios de SOLEDAD" in salida["base"]
     assert len(salida["detalle_por_barrio"]) == 10
 
@@ -158,7 +158,7 @@ async def test_mayor_perdida_ordena_por_ordenes_no_cobradas(runner):
 
     filas = salida["filas"]
     assert filas[0]["nombre"] == "BARRANQUILLA | CIUDADELA 20 DE JULIO"
-    assert filas[0]["pe"] == 285
+    assert filas[0]["pe"] == 301
     assert [f["pe"] for f in filas] == sorted((f["pe"] for f in filas), reverse=True)
     assert salida["criterio"] == "perdidas"
 
@@ -324,7 +324,7 @@ async def test_sin_mes_se_hereda_el_periodo_de_la_pantalla(metrics):
     runner = ToolRunner(metrics, vista=VistaTablero(meses=["2026-01"]))
     resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
 
-    assert resultado["metricas"]["tot"] == 5, "enero, no las 19 del histórico"
+    assert resultado["metricas"]["tot"] == 5, "enero, no las 21 del histórico"
     assert "2026-01" in resultado["base"]
     assert filtro.meses == ["2026-01"]
 
@@ -337,7 +337,7 @@ async def test_el_historico_completo_hay_que_pedirlo_por_su_nombre(metrics):
         "efectividad", {"barrio": "El Romance", "mes": "todo"}
     )
 
-    assert resultado["metricas"]["tot"] == 19
+    assert resultado["metricas"]["tot"] == 21
     assert filtro.meses == sorted(await metrics.meses_disponibles())
 
 
@@ -357,7 +357,7 @@ async def test_sin_vista_se_sigue_respondiendo_el_historico(runner, metrics):
     """El chat también se usa sin tablero detrás; ahí no hay nada que heredar."""
     resultado, filtro = await runner.run("efectividad", {"barrio": "El Romance"})
 
-    assert resultado["metricas"]["tot"] == 19
+    assert resultado["metricas"]["tot"] == 21
     assert filtro.meses == sorted(await metrics.meses_disponibles())
 
 

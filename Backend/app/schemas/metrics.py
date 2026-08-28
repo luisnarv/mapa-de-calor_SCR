@@ -73,6 +73,22 @@ class FilaZona(BaseModel):
     pct: float
 
 
+class CasoMencion(BaseModel):
+    """Una orden concreta donde apareció el término buscado.
+
+    Es lo que convierte «210 menciones en Ciudadela Metropolitana» en algo
+    accionable: quién es el cliente y qué escribió el técnico en su acta. Va
+    recortado a unos pocos casos porque una búsqueda amplia devuelve miles y
+    ninguna respuesta puede listarlos.
+    """
+
+    nic: str = Field(description="Cliente. Vacío si el mes no trae la columna.")
+    barrio: str
+    estado: str = Field(description="Efectiva, Fallida o Perdida.")
+    mes: str
+    acta: str = Field(description="El acta original, sin normalizar.")
+
+
 class BusquedaObservaciones(BaseModel):
     """Resultado de buscar un término en el texto de las actas de visita.
 
@@ -89,7 +105,9 @@ class BusquedaObservaciones(BaseModel):
     por_estado: dict[str, int]
     zonas: list[FilaZona]
     barrios: list[FilaMencion]
-    ejemplos: list[str]
+    # Reemplaza a los antiguos `ejemplos`, que eran las mismas actas pero sin
+    # decir de quién: un texto suelto no se puede ir a revisar.
+    casos: list[CasoMencion]
     meses_sin_texto: list[str] = Field(
         default_factory=list,
         description="Meses del recorte sin archivo de actas: quedaron fuera del conteo.",

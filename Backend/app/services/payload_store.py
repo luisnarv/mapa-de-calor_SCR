@@ -329,6 +329,29 @@ def leer_actas(directorio: Path, mes: str, posiciones: Sequence[int]) -> dict[in
     return {i: crudas[i] for i in posiciones if 0 <= i < len(crudas)}
 
 
+def leer_nics(directorio: Path, mes: str, posiciones: Sequence[int]) -> dict[int, str]:
+    """NIC de unas pocas órdenes, para poder nombrar al cliente de un hallazgo.
+
+    Se lee del archivo del mes en vez de cargar la columna entera en `Payload`:
+    son ~180.000 cadenas que solo harían falta para el puñado de filas que se
+    muestran. Mismo criterio —y mismo coste— que `leer_actas`.
+    """
+    if not posiciones:
+        return {}
+    raiz = _leer_raiz(directorio)
+    entrada = next((m for m in raiz["meta"].get("months", []) if m["key"] == mes), None)
+    if entrada is None:
+        return {}
+    if entrada.get("recent"):
+        pts = raiz["pts"]
+    else:
+        with open(directorio / entrada["file"], encoding="utf-8") as fh:
+            pts = json.load(fh)["pts"]
+    # El recorte congelado de las pruebas puede no traer la columna.
+    nics = pts.get("nic") or []
+    return {i: nics[i] for i in posiciones if 0 <= i < len(nics)}
+
+
 def _leer_observaciones(directorio: Path, mes: str) -> list[str]:
     ruta = directorio / f"observaciones_{mes}.json"
     if not ruta.is_file():

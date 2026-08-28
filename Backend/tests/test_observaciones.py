@@ -130,13 +130,35 @@ async def test_el_desglose_por_estado_no_asume_que_la_mencion_es_una_falla(servi
 
 
 @pytest.mark.asyncio
-async def test_los_ejemplos_conservan_el_texto_original(service):
+async def test_los_casos_conservan_el_texto_original(service):
     """Se busca sobre el normalizado, pero al usuario se le enseña lo que escribió
     el técnico: con sus tildes y mayúsculas."""
-    r = await service.buscar_en_observaciones(texto="chilena", n_ejemplos=3)
-    assert len(r.ejemplos) == 3
-    assert any("RED CHILENA" in e for e in r.ejemplos)
-    assert any("qué va en chilena" in e for e in r.ejemplos)
+    r = await service.buscar_en_observaciones(texto="chilena", limite_casos=3)
+    actas = [c.acta for c in r.casos]
+    assert len(actas) == 3
+    assert any("RED CHILENA" in a for a in actas)
+    assert any("qué va en chilena" in a for a in actas)
+
+
+@pytest.mark.asyncio
+async def test_cada_caso_dice_de_qué_cliente_es(service):
+    """Un acta suelta no se puede ir a revisar; con el NIC sí.
+
+    Es lo que faltaba cuando se pedía «los clientes no cortables» y la respuesta
+    llegaba agrupada por barrio.
+    """
+    r = await service.buscar_en_observaciones(texto="chilena")
+    caso = r.casos[0]
+    assert caso.estado in ("Efectiva", "Fallida", "Perdida")
+    assert caso.mes and caso.barrio
+
+
+@pytest.mark.asyncio
+async def test_la_lista_de_casos_se_recorta_pero_el_total_no(service):
+    """Recortar sin decirlo haría pasar la muestra por la lista completa."""
+    r = await service.buscar_en_observaciones(texto="chilena", limite_casos=1)
+    assert len(r.casos) == 1
+    assert r.coincidencias == 3, "el conteo es de todas, no de las que se muestran"
 
 
 @pytest.mark.asyncio

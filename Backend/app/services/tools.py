@@ -171,8 +171,10 @@ TOOLS: list[dict[str, Any]] = [
             "name": "buscar_en_observaciones",
             "description": (
                 "Busca un término dentro del acta de visita que el técnico escribió "
-                "a mano, y dice en qué barrios aparece. Es lo ÚNICO que llega al texto "
-                "libre: el resto de herramientas solo ven campos codificados.\n"
+                "a mano. Devuelve las dos vistas: `barrios`, el agregado, y `casos`, "
+                "las órdenes una por una con el NIC del cliente y su acta. Es lo ÚNICO "
+                "que llega al texto libre: el resto de herramientas solo ven campos "
+                "codificados.\n"
                 "Úsala cuando pregunten por algo que no está en el catálogo de causas: "
                 "«red chilena», «oscilación de voltaje», «poste en mal estado», "
                 "«transformador», «perro», lo que sea. Antes de decir que no tienes un "
@@ -185,8 +187,11 @@ TOOLS: list[dict[str, Any]] = [
                 "No hace falta acortar: la búsqueda ya tolera las erratas del acta y "
                 "las de quien pregunta —«enrrejado» encuentra «enrejado»— y halla las "
                 "palabras en cualquier orden. Di siempre qué término buscaste.\n"
-                "OJO: cuenta MENCIONES, no causas. Que el acta nombre el término no "
-                "significa que la orden se cayera por eso; puede estar en una efectiva. "
+                "OJO: cuenta ÓRDENES CUYA ACTA NOMBRA el término, no órdenes que se "
+                "cayeran por eso. Habla siempre de «órdenes», nunca de «menciones»: "
+                "cada acta es una orden y el usuario razona en órdenes. Pero dilo "
+                "completo —«órdenes cuya acta dice X»—, porque «órdenes de X» afirma "
+                "una causa que aquí no tienes: el término puede estar en una efectiva. "
                 "Mira `por_estado` y el `tot` de cada barrio antes de sacar conclusiones."
             ),
             "parameters": {
@@ -782,12 +787,29 @@ class ToolRunner:
                 "di al final con cuál buscaste."
             )
         else:
+            # La aclaración se mantiene, pero como instrucción de redacción y no
+            # como texto para copiar: el modelo la pegaba tal cual al final, y
+            # cada respuesta terminaba con un párrafo de advertencia que nadie
+            # pidió. La distinción va dentro de la frase, donde se lee.
             salida["nota"] = (
-                f"Son menciones de «{texto}» en el acta, no una causa: dilo así, y di "
-                "qué término buscaste. El `tot` de cada barrio son sus órdenes en el "
-                "mismo recorte, para que se vea si el barrio encabeza por problema o "
-                "por volumen."
+                f"Son órdenes cuya acta nombra «{texto}», no órdenes que se cayeran "
+                "por eso. Di «órdenes», nunca «menciones», y di qué término buscaste; "
+                "NO agregues una nota al pie ni un párrafo de advertencia al final.\n"
+                "`casos` trae las órdenes una por una, con el NIC del cliente y su "
+                "acta: úsalo cuando pregunten por clientes. `barrios` es el agregado; "
+                "úsalo cuando pregunten por barrios. No cambies uno por el otro.\n"
+                "`n` son las órdenes que nombran el término y `tot` todas las que el "
+                "barrio tiene en el mismo recorte. No los confundas: el `tot` es lo "
+                "que deja ver si el barrio encabeza por problema o solo por volumen."
             )
+            if len(datos.casos) < datos.coincidencias:
+                # Callar el recorte lo haría pasar por la lista completa. Ya pasó
+                # con la búsqueda de barrios: mostraba 7 de 12 sin avisar.
+                salida["nota"] += (
+                    f"\nDe las {datos.coincidencias} órdenes se listan "
+                    f"{len(datos.casos)}: dilo, y sugiere filtrar por barrio o por "
+                    "mes para verlas todas."
+                )
         if datos.meses_sin_texto:
             # Callarlo daría un conteo parcial con pinta de completo.
             salida["aviso"] = (

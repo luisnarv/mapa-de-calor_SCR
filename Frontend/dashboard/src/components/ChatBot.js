@@ -104,6 +104,11 @@ const PENSANDO_MS = 2800;
 // come una palabra y no el resto del mensaje.
 const NEGRITA = /\*\*(.+?)\*\*/g;
 
+// El prompt le prohíbe los encabezados, pero a veces se le escapan y en la
+// burbuja se veían los `###` en crudo. Aquí se degradan a negrita en vez de
+// renderizarlos: en 300 píxeles de ancho un encabezado no titula nada.
+const ENCABEZADO = /^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*$/gm;
+
 /**
  * Pone en negrita los `**...**` que devuelve el modelo.
  *
@@ -111,7 +116,10 @@ const NEGRITA = /\*\*(.+?)\*\*/g;
  * y con `dangerouslySetInnerHTML` cualquier etiqueta que escupiera se ejecutaría.
  * Mientras llega el streaming, un `**` sin cerrar se ve literal hasta que cierra.
  */
-function conNegritas(texto) {
+function conNegritas(crudo) {
+  // Los encabezados pasan a negrita antes del recorrido, para no duplicar la
+  // lógica de troceado: a partir de aquí solo existe `**`.
+  const texto = crudo.replace(ENCABEZADO, "**$1**");
   const nodos = [];
   let cursor = 0;
 

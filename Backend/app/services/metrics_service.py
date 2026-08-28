@@ -20,6 +20,7 @@ from app.core.taxonomy import norm, norm_dato
 from app.schemas.metrics import (
     BusquedaObservaciones,
     CandidatoBarrio,
+    CasoMencion,
     Efectividad,
     FilaCausa,
     FilaMencion,
@@ -28,6 +29,7 @@ from app.schemas.metrics import (
 from app.services.payload_store import (
     Payload,
     leer_actas,
+    leer_nics,
     obtener,
     obtener_observaciones,
 )
@@ -384,7 +386,10 @@ class MetricsService:
         meses: Sequence[str] | None = None,
         etiqueta: str | None = None,
         limite: int = 10,
-        n_ejemplos: int = 3,
+        # Tope de casos con NIC. Una búsqueda amplia devuelve miles —«enrejado»
+        # pasa de 18.000— y ninguna respuesta puede listarlos: se recorta y se
+        # avisa cuántos quedaron fuera, para que se filtre por barrio o por mes.
+        limite_casos: int = 20,
     ) -> BusquedaObservaciones:
         """Busca un término dentro del acta de visita y lo agrupa por barrio.
 
@@ -407,7 +412,7 @@ class MetricsService:
         def vacio(sin_resolver: str | None = None) -> BusquedaObservaciones:
             return BusquedaObservaciones(
                 termino=texto, base=nombre, coincidencias=0, revisadas=0, pct=0.0,
-                por_estado={}, zonas=[], barrios=[], ejemplos=[],
+                por_estado={}, zonas=[], barrios=[], casos=[],
                 sin_resolver=sin_resolver,
             )
 
@@ -432,7 +437,9 @@ class MetricsService:
         tot_barrio: dict[int, int] = {}
         menciones_zona: dict[int, int] = {}
         tot_zona: dict[int, int] = {}
-        ejemplos_en: dict[str, list[int]] = {}
+        # mes -> [(posición en el mes, índice global, barrio)]
+        casos_en: dict[str, list[tuple[int, int, int]]] = {}
+        recogidos = 0
         sin_texto: list[str] = []
 
         for m, mes_key in enumerate(p.meses):
@@ -471,8 +478,9 @@ class MetricsService:
                 por_estado[("Efectiva", "Fallida", "Perdida")[E[i]]] += 1
                 menciones[bi] = menciones.get(bi, 0) + 1
                 menciones_zona[zi] = menciones_zona.get(zi, 0) + 1
-                if sum(len(v) for v in ejemplos_en.values()) < n_ejemplos:
-                    ejemplos_en.setdefault(mes_key, []).append(local)
+                if recogidos < limite_casos:
+                    casos_en.setdefault(mes_key, []).append((local, i, bi))
+                    recogidos += 1
 
         filas = [
             FilaMencion(
@@ -493,11 +501,24 @@ class MetricsService:
             for zi, n in sorted(menciones_zona.items(), key=lambda kv: kv[1], reverse=True)
         ]
 
-        ejemplos = [
-            acta
-            for mes_key, posiciones in ejemplos_en.items()
-            for acta in leer_actas(self.directorio, mes_key, posiciones).values()
-        ]
+        # El acta original y el NIC se leen del archivo del mes, solo para estas
+        # posiciones: cargarlos enteros costaría memoria en todas las peticiones
+        # para enseñar veinte filas.
+        casos: list[CasoMencion] = []
+        for mes_key, marcas in casos_en.items():
+            posiciones = [local for local, _, _ in marcas]
+            actas = leer_actas(self.directorio, mes_key, posiciones)
+            nics = leer_nics(self.directorio, mes_key, posiciones)
+            for local, i, bi in marcas:
+                casos.append(
+                    CasoMencion(
+                        nic=nics.get(local, ""),
+                        barrio=p.barrios[bi],
+                        estado=("Efectiva", "Fallida", "Perdida")[E[i]],
+                        mes=mes_key,
+                        acta=actas.get(local, ""),
+                    )
+                )
 
         return BusquedaObservaciones(
             termino=texto,
@@ -508,7 +529,7 @@ class MetricsService:
             por_estado={k: v for k, v in por_estado.items() if v},
             zonas=filas_zona,
             barrios=filas[:limite],
-            ejemplos=ejemplos,
+            casos=casos,
             meses_sin_texto=sin_texto,
         )
 
