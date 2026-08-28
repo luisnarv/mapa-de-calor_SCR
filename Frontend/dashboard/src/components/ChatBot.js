@@ -57,7 +57,20 @@ const MOTIVOS = [
   { id: "mal_redactado", txt: "Mal redactado" }
 ];
 
-const CHIPS = ["Barrios críticos", "Causas de pérdida", "Rendimiento por brigada"];
+const CHIPS = [
+  {
+    rotulo: "Barrios críticos",
+    pregunta: "¿Cuáles son los barrios con peor efectividad ajustada?"
+  },
+  {
+    rotulo: "Causas de pérdida",
+    pregunta: "¿En qué barrios se pierden más órdenes y por qué causas?"
+  },
+  {
+    rotulo: "Rendimiento por brigada",
+    pregunta: "¿Qué brigadas tienen mejor y peor efectividad ajustada?"
+  }
+];
 
 // Solo hojas de cálculo: el asistente trabaja sobre tablas de órdenes.
 // `accept` es una sugerencia del navegador, no una garantía —y el MIME de un
@@ -1028,13 +1041,14 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
                   <div className="cb-chips">
                     {CHIPS.map((c) => (
                       <button
-                        key={c}
+                        key={c.rotulo}
                         type="button"
                         className="cb-chip"
                         disabled={busy}
-                        onClick={() => send(c)}
+                        onClick={() => send(c.pregunta)}
+                        title={c.pregunta}
                       >
-                        {c}
+                        {c.rotulo}
                       </button>
                     ))}
                   </div>
@@ -1128,7 +1142,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
                       if (errorVoz) setErrorVoz(null); // si ya está escribiendo, sobra el aviso
                     }}
                     placeholder={
-                      escuchando ? "Escuchando…" : "Escribe una consulta sobre el mapa…"
+                      escuchando ? "Escuchando…" : "¿Cómo puedo ayudarte hoy?"
                     }
                     aria-label="Consulta para el asistente"
                     disabled={busy}
@@ -1180,7 +1194,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
                 <p className={`cb-legal ${errorVoz || errorArchivo ? "err" : ""}`}>
                   {errorVoz ||
                     errorArchivo ||
-                    "Las respuestas las genera un modelo de lenguaje. Verifica antes de operar."}
+                    "Las respuestas las genera un modelo IA. Verifica antes de operar."}
                 </p>
               </footer>
             </>
