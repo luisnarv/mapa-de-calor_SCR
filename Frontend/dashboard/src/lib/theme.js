@@ -78,6 +78,15 @@ export const BASEMAP = {
     waterway: "#AECFE2",
     park: "#DCEBD1",
     landcover_wood: "#D2E5C5"
+  },
+  // El estilo oscuro pinta los nombres de calle y de barrio en gris medio, y
+  // sobre el navy del tablero casi no se leen. Se suben a blanco, con halo del
+  // color del propio mapa: sin el halo, el texto se pierde encima de las
+  // manzanas claras y de las vías.
+  etiquetasOscuro: {
+    texto: "#F2F7FF",
+    halo: "#0A1A2F",
+    grosorHalo: 1.2
   }
 };
 

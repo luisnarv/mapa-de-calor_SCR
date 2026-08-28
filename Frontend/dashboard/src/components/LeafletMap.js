@@ -24,12 +24,32 @@ function ocultarFronteraMaritima(gl) {
   }
 }
 
+/** Aclara los nombres de calle y de barrio del estilo oscuro.
+ *
+ * Se recorren los símbolos del estilo en vez de nombrar las capas una por una:
+ * OpenFreeMap puede renombrarlas o agregar otras, y una lista fija dejaría
+ * etiquetas grises sin que nadie se entere. Se descartan los símbolos que no
+ * dibujan texto, que son solo icono.
+ */
+function aclararEtiquetas(gl) {
+  const estilo = gl.getStyle();
+  if (!estilo?.layers) return;
+  const { texto, halo, grosorHalo } = BASEMAP.etiquetasOscuro;
+  for (const capa of estilo.layers) {
+    if (capa.type !== "symbol" || !capa.layout?.["text-field"]) continue;
+    gl.setPaintProperty(capa.id, "text-color", texto);
+    gl.setPaintProperty(capa.id, "text-halo-color", halo);
+    gl.setPaintProperty(capa.id, "text-halo-width", grosorHalo);
+  }
+}
+
 // Los retoques de color se aplican sobre el estilo ya cargado en vez de
 // hospedar una copia propia del JSON: así OpenFreeMap sigue sirviendo el estilo
 // y nosotros solo pisamos los colores que nos interesan.
 function ajustarBasemap(gl, tema) {
   if (tema !== "light") {
     ocultarFronteraMaritima(gl);
+    aclararEtiquetas(gl);
     return;
   }
   for (const [capa, color] of Object.entries(BASEMAP.coloresClaro)) {
