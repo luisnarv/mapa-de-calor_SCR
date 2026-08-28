@@ -58,6 +58,13 @@ pedir que se lea.
   Cualquier cifra debe decir cuál está usando.
 - **El chat y el mapa leen la misma fuente**: los JSON del ETL. Nunca calcular
   las métricas por otro camino, o las dos pantallas empiezan a discrepar.
+- **Primero la casilla, después el acta: dan cifras distintas y la casilla es la
+  buena.** El payload trae 12 `causas` y **50 `subs`** (subacciones), y la tarifa
+  con el estrato. Ahí están «PREDIO ENREJADO», «RED CHILENA/CONFIG. ESPECIAL»,
+  «USUARIO AGRESIVO», «MINIMO VITAL». Buscarlas en el acta se queda corto cuando
+  el técnico no escribió el término y se pasa cuando lo nombró sin ser el motivo:
+  «red chilena» daba 1.487 por acta y 3.738 por casilla. El acta es para lo que
+  no tiene casilla —voltaje, bornera, sellos, autoreconexión, medios de pago—.
 - **Lo que el técnico escribe a mano vive en el acta, y solo el chat la lee.**
   `OBSERVACION` trae el acta de visita (`VS: ... VM: ... SS: ...`), y ahí quedan
   los detalles sin casilla propia: red chilena, voltaje, el estado del poste. El
@@ -87,6 +94,13 @@ pedir que se lea.
   herramienta o la redacción. El registro no lanza jamás —si la base está caída
   se pierde el pulgar, no la respuesta—, y por eso `interaccion_id` puede venir
   nulo. El voto en sí (`PATCH /api/v1/feedback/{id}`) sí falla hacia el cliente.
+- **Un filtro de catálogo (municipio, zona, subacción, tarifa...) que no resuelve
+  a un único valor lanza `FiltroNoResuelto`, no devuelve el total sin filtrar ni
+  vacía el cálculo en silencio.** El caso real: `municipio="Atlántico"` —el
+  departamento, no uno de los 25 municipios— vaciaba TODO `_agrupar`, incluido un
+  filtro de tarifa válido, y la nota de salida le echaba la culpa al mínimo de
+  órdenes pedido en vez de al filtro. `bkeys` y `meses` quedan fuera de esta
+  regla porque llegan pre-resueltos por `_recorte`/`expandir_meses`.
 - **`Backend/app/core/taxonomy.py` es un espejo de `Etl/etl/taxonomy.py`.** Si
   cambias una causa o una homologación, cámbiala en los dos. Hay una prueba que
   lo verifica, pero solo corre si pandas está instalado en el venv del backend.

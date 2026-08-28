@@ -50,6 +50,24 @@ class BarrioAmbiguo(Exception):
         self.candidatos = list(candidatos)
 
 
+class FiltroNoResuelto(Exception):
+    """Un filtro de catálogo (municipio, zona, tarifa...) no resolvió a un
+    único valor del payload: o no existe, o encaja en más de uno.
+
+    Antes esto hacía que `_agrupar` devolviera {} en silencio, y el llamador no
+    tenía forma de distinguirlo de «de verdad no hay órdenes»: el caso real fue
+    `municipio="Atlántico"` —el departamento, no un municipio— que vació TODO el
+    cálculo, incluido el filtro de tarifa que sí era válido, y el mensaje que
+    volvió le echó la culpa al mínimo de órdenes pedido en vez de al filtro.
+    """
+
+    def __init__(self, campo: str, valor: str, catalogo: Sequence[str]) -> None:
+        super().__init__(f"{campo}={valor!r} no está en el catálogo")
+        self.campo = campo
+        self.valor = valor
+        self.catalogo = list(catalogo)
+
+
 @dataclass
 class Conteo:
     """Acumulador por grupo. Espejo del `bump()` de page.js."""
@@ -279,6 +297,8 @@ class MetricsService:
         meses: Sequence[str] | None = None,
         tipo_os: str | None = None,
         brigada: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
         etiqueta: str | None = None,
     ) -> Efectividad:
         """Efectividad del recorte indicado. Sin filtros, de todo el histórico.
@@ -288,7 +308,7 @@ class MetricsService:
         """
         conteos = self._agrupar(
             bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
-            tipo_os=tipo_os, brigada=brigada,
+            tipo_os=tipo_os, brigada=brigada, subaccion=subaccion, tarifa=tarifa,
         )
         nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
         return _a_dto(conteos.get(0, Conteo()), nombre)
@@ -301,6 +321,8 @@ class MetricsService:
         municipio: str | None = None,
         meses: Sequence[str] | None = None,
         brigada: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
         min_ordenes: int = 10,
         limite: int = 10,
         ascendente: bool = False,
@@ -316,16 +338,20 @@ class MetricsService:
         ordena por órdenes perdidas, que son las que no se cobran; responderla con
         efectividad devuelve barrios sin una sola pérdida.
         """
-        if dimension not in ("brigada", "tecnico", "barrio"):
+        if dimension not in ("brigada", "tecnico", "barrio", "subaccion", "tarifa"):
             raise ValueError(f"Dimensión no soportada: {dimension}")
         if ordenar_por not in CRITERIOS:
             raise ValueError(f"Criterio no soportado: {ordenar_por}")
 
         p = self.datos
         conteos = self._agrupar(
-            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada, por=dimension
+            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada,
+            subaccion=subaccion, tarifa=tarifa, por=dimension,
         )
-        catalogo = {"brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios}[dimension]
+        catalogo = {
+            "brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios,
+            "subaccion": p.subs, "tarifa": p.tarifas,
+        }[dimension]
 
         # Las medias salen de TODO el recorte, incluidos los grupos que luego
         # descarta `min_ordenes`: son la referencia contra la que se compara cada
@@ -579,6 +605,42 @@ class MetricsService:
                 return i
         return None
 
+    def _indice_parcial(self, catalogo: list[str], valor: str | None) -> int | None:
+        """Como `_indice`, pero acepta el nombre a medias.
+
+        Los catálogos de tarifa y subacción tienen nombres largos que nadie
+        escribe enteros: se pregunta por «estrato 3», no por «RESIDENCIAL |
+        ESTRATO 3». Se intenta en tres pasadas, de la más estricta a la más laxa:
+
+        1. El nombre completo.
+        2. El último tramo, el que va después de la barra. Es lo que hace que
+           «estrato 6» encuentre «RESIDENCIAL | ESTRATO 6» y no se quede fuera por
+           existir también «ESTRATO 6 EXENTO»: son tramos distintos.
+        3. Subcadena, y solo si encaja en uno. Con dos candidatos se devuelve None
+           y el modelo tendrá que precisar: adivinar cuál es peor que no responder.
+        """
+        if valor is None:
+            return None
+        objetivo = norm_dato(valor)
+        if not objetivo:
+            return None
+
+        for i, nombre in enumerate(catalogo):
+            if norm_dato(nombre) == objetivo:
+                return i
+        for pasada in (
+            lambda n: norm_dato(n.split("|")[-1]) == objetivo,
+            lambda n: objetivo in norm_dato(n),
+        ):
+            candidatos = [i for i, n in enumerate(catalogo) if pasada(n)]
+            if len(candidatos) == 1:
+                return candidatos[0]
+            if candidatos:
+                # Dos o más: «comercial» está en NO REGULADO y en NO RESIDENCIAL,
+                # y devolver el primero daba 14 órdenes donde hay 12.871.
+                return None
+        return None
+
     def _indices_barrio(self, bkeys: Sequence[str]) -> set[int] | None:
         """Índices de los barrios pedidos. `None` si alguno no existe."""
         p = self.datos
@@ -599,6 +661,8 @@ class MetricsService:
         meses: Sequence[str] | None = None,
         tipo_os: str | None = None,
         brigada: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
         por: str | None = None,
     ) -> dict[int, Conteo]:
         """Recorre las órdenes una vez, filtrando y acumulando.
@@ -613,24 +677,44 @@ class MetricsService:
         f_zona = self._indice(p.zonas, zona)
         f_tipo = self._indice(p.tipos, tipo_os)
         f_brig = self._indice(p.brigs, brigada)
+        # Parcial: nadie escribe «RESIDENCIAL | ESTRATO 3» ni «RED CHILENA/CONFIG.
+        # ESPECIAL» enteros.
+        f_sub = self._indice_parcial(p.subs, subaccion)
+        f_tarifa = self._indice_parcial(p.tarifas, tarifa)
         # Conjunto y no índice: «todo 2026» son varios meses, no uno. Queda en
         # None si no se pidió ninguno, y vacío si ninguno de los pedidos existe
         # —que no es lo mismo y abajo se distinguen.
         f_meses = {p.meses.index(m) for m in meses if m in p.meses} if meses else None
 
-        # Un filtro que no resuelve a nada devolvería el total sin filtrar, que es
-        # peor que devolver vacío: el usuario creería que la cifra es de su barrio.
-        for pedido, resuelto in (
-            (bkeys, f_barrios), (municipio, f_muni), (zona, f_zona),
-            (tipo_os, f_tipo), (brigada, f_brig), (meses, f_meses or None),
-        ):
+        # `bkeys` y `meses` ya llegan resueltos por `_recorte`/`expandir_meses` en
+        # el camino normal: si de todos modos no calzan, el total sin filtrar
+        # sería peor que vacío —el usuario creería que la cifra es de su barrio—,
+        # así que aquí se quedan en el criterio silencioso de siempre.
+        for pedido, resuelto in ((bkeys, f_barrios), (meses, f_meses or None)):
             if pedido is not None and resuelto is None:
                 logger.info("Filtro sin coincidencia: %r", pedido)
                 return {}
 
-        B, C, E, MES, O, G = p.b, p.c, p.e, p.mes, p.o, p.g
+        # Estos seis SÍ llegan como texto libre del modelo, sin pasar por nada
+        # que los valide antes. Si no resuelven, no se puede seguir con el resto
+        # del cálculo como si ese filtro no existiera: hay que decirlo.
+        for campo, pedido, resuelto, catalogo in (
+            ("municipio", municipio, f_muni, p.munis),
+            ("zona", zona, f_zona, p.zonas),
+            ("tipo_os", tipo_os, f_tipo, p.tipos),
+            ("brigada", brigada, f_brig, p.brigs),
+            ("subaccion", subaccion, f_sub, p.subs),
+            ("tarifa", tarifa, f_tarifa, p.tarifas),
+        ):
+            if pedido is not None and resuelto is None:
+                raise FiltroNoResuelto(campo, str(pedido), catalogo)
+
+        B, C, E, MES, O, G, S, F = p.b, p.c, p.e, p.mes, p.o, p.g, p.s, p.f
         ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
-        grupo = {"brigada": p.g, "tecnico": p.t, "barrio": p.b}.get(por)
+        grupo = {
+            "brigada": p.g, "tecnico": p.t, "barrio": p.b,
+            "subaccion": p.s, "tarifa": p.f,
+        }.get(por)
 
         conteos: dict[int, Conteo] = {}
         for i in range(len(E)):
@@ -646,6 +730,10 @@ class MetricsService:
             if f_tipo is not None and O[i] != f_tipo:
                 continue
             if f_brig is not None and G[i] != f_brig:
+                continue
+            if f_sub is not None and S[i] != f_sub:
+                continue
+            if f_tarifa is not None and F[i] != f_tarifa:
                 continue
 
             clave = grupo[i] if grupo is not None else 0

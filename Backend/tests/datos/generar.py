@@ -27,7 +27,7 @@ NOMBRADOS = (
 TOPE_POR_PERDIDAS = 25
 TOPE_POR_VOLUMEN = 25
 
-COLUMNAS = ("b", "t", "g", "o", "c", "e", "nic")
+COLUMNAS = ("b", "t", "g", "o", "c", "e", "s", "f", "nic")
 
 # Las actas solo se copian del mes más reciente. Con los ocho meses el recorte
 # pasaría de 1 MB a ~10 MB, y las pruebas de búsqueda comparan un término contra

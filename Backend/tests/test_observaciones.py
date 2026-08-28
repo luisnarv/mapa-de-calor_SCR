@@ -39,6 +39,10 @@ def _pts(filas: list[tuple[int, int, str]]) -> dict:
         "b": [f[0] for f in filas],
         "e": [f[1] for f in filas],
         "t": [0] * n, "g": [0] * n, "o": [0] * n, "c": [0] * n,
+        # Subacción y tarifa: el payload real siempre las trae, y el cargador
+        # no las inventa a propósito —un cero por defecto etiquetaría todas
+        # las órdenes con la primera subacción del catálogo—.
+        "s": [0] * n, "f": [0] * n,
     }
 
 
@@ -66,6 +70,8 @@ def _montar(destino: Path, *, actas_enero: list[str] | None = None,
             "tecs": ["UN TECNICO"],
             "tipos": ["TO501"],
             "causas": ["Efectiva"],
+            "subs": ["SIN GESTION"],
+            "tarifas": ["RESIDENCIAL | ESTRATO 1"],
             "causa_ctrl": [1],
             "causa_fam": ["exito"],
             "b_muni": [0, 1],

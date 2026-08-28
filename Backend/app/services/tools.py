@@ -17,6 +17,7 @@ from app.core.taxonomy import norm_dato
 from app.services.carga_ordenes import Orden
 from app.services.cargue_store import CargueGuardado, CargueStore
 from app.services.metrics_service import (
+    FiltroNoResuelto,
     BarrioAmbiguo,
     BarrioNoEncontrado,
     MetricsService,
@@ -69,6 +70,27 @@ _TARIFA = {
     ),
 }
 
+_SUBACCION = {
+    "type": "string",
+    "description": (
+        "La casilla que marcó el técnico, el porqué fino. Basta el nombre a "
+        "medias: «predio enrejado», «red chilena», «usuario agresivo», «adulto "
+        "mayor», «minimo vital», «poste en mal estado», «medidor no encontrado», "
+        "«cliente autoreconectado», «sector peligroso», «arbol frondoso». "
+        "PREFIERE esto a buscar en el acta: la casilla dice por qué se cayó la "
+        "orden, el acta solo nombra el término y da otra cifra."
+    ),
+}
+_TARIFA = {
+    "type": "string",
+    "description": (
+        "Tarifa del suministro; es donde vive el estrato. Basta «estrato 3», "
+        "«comercial», «industrial», «oficial». Si el nombre encaja en dos —«estrato "
+        "5» está en «ESTRATO 5» y en «ESTRATO 5 EXENTO»— no se aplica el filtro: "
+        "pregunta cuál."
+    ),
+}
+
 TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -85,6 +107,7 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
                     "brigada": _BRIGADA, "tipo_os": _TIPO_OS,
+                    "subaccion": _SUBACCION, "tarifa": _TARIFA,
                 },
             },
         },
@@ -104,7 +127,7 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "dimension": {
                         "type": "string",
-                        "enum": ["brigada", "tecnico", "barrio"],
+                        "enum": ["brigada", "tecnico", "barrio", "subaccion", "tarifa"],
                         "description": "Qué se compara.",
                     },
                     "barrio": _BARRIO,
@@ -143,6 +166,7 @@ TOOLS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": "Mínimo de órdenes para entrar al ranking. Por defecto 10.",
                     },
+                    "subaccion": _SUBACCION, "tarifa": _TARIFA,
                 },
                 "required": ["dimension"],
             },
@@ -347,11 +371,17 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "agrupar_cargue",
             "description": (
-                "Reparte las órdenes cargadas por una dimensión y devuelve, de cada "
-                "grupo, cuántas son y cuánta deuda acumulan. Úsala para '¿cuántas son "
-                "de estrato 2?', '¿cómo se reparten por tipo de suspensión?' o '¿qué "
-                "barrio concentra más deuda?'. También sirve para ver qué valores "
-                "existen antes de filtrar con ordenes_cargadas."
+                "Reparte SOLO las órdenes que el usuario subió en un archivo —las "
+                "que están por ejecutar, nunca el histórico del SCR— por una "
+                "dimensión, y dice cuántas son y cuánta deuda acumulan. Úsala para "
+                "'¿cómo se reparte el archivo por tipo de suspensión?' o '¿qué "
+                "barrio del archivo concentra más deuda?'. También sirve para ver "
+                "qué valores existen antes de filtrar con ordenes_cargadas.\n"
+                "Si preguntan por el histórico —lo que YA pasó, sin que se haya "
+                "mencionado un archivo— usa `ranking` con la dimensión que toque "
+                "('tarifa' para estrato, 'subaccion' para la causa fina). Un "
+                "«¿cuántas son de estrato 2?» sin archivo cargado es sobre el "
+                "histórico, y esta herramienta sin archivo siempre falla."
             ),
             "parameters": {
                 "type": "object",
@@ -569,6 +599,25 @@ class ToolRunner:
                 "candidatos": [c.model_dump() for c in exc.candidatos],
                 "sugerencia": "Pregunta al usuario cuál de estos barrios quiso decir.",
             }, None
+        except FiltroNoResuelto as exc:
+            # El caso real: municipio="Atlántico" (el departamento, no un
+            # municipio) vaciaba TODO el cálculo —incluido un filtro de tarifa
+            # que sí era válido— y el mensaje de salida le echaba la culpa al
+            # mínimo de órdenes pedido. Aquí se nombra al filtro culpable.
+            return {
+                "error": "filtro_no_reconocido",
+                "campo": exc.campo,
+                "valor_pedido": exc.valor,
+                "valores_validos": exc.catalogo,
+                "sugerencia": (
+                    f"«{exc.valor}» no es un {exc.campo} de este sistema: no "
+                    "coincide con ninguno de `valores_validos`, o coincide con más "
+                    "de uno. NO es que falten datos ahí: el filtro nunca se aplicó, "
+                    "así que cualquier cifra que dieras sería de otro recorte. "
+                    "Elige uno de `valores_validos` y repite, o pregúntale al "
+                    "usuario cuál quiso decir."
+                ),
+            }, None
         except (TypeError, ValueError) as exc:
             # Argumentos que el modelo inventó: nombres de parámetro que no
             # existen (TypeError) o valores fuera del enum (ValueError). Vuelven
@@ -645,14 +694,27 @@ class ToolRunner:
         mes: str | None = None,
         brigada: str | None = None,
         tipo_os: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        if subaccion:
+            base += f" · {subaccion}"
+        if tarifa:
+            base += f" · {tarifa}"
+        # El tablero no tiene filtro de subacción ni de tarifa, así que un filtro
+        # con solo el municipio enseñaría un recorte más ancho que la respuesta:
+        # la cifra sería de estrato 3 y el mapa, de todos. Mejor no moverlo.
+        if subaccion or tarifa:
+            filtro = None
         datos = await self.metrics.efectividad(
             bkeys=bkeys,
             municipio=None if bkeys else municipio,
             meses=meses,
             brigada=brigada,
             tipo_os=tipo_os,
+            subaccion=subaccion,
+            tarifa=tarifa,
             etiqueta=base,
         )
 
@@ -692,8 +754,16 @@ class ToolRunner:
         peores: bool = False,
         min_ordenes: int = 10,
         ordenar_por: str = "ef_adj",
+        subaccion: str | None = None,
+        tarifa: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+
+        # Mismo motivo que en `_efectividad`: el tablero no sabe filtrar por estas
+        # dos, y moverlo a un recorte más ancho que la respuesta es peor que
+        # dejarlo quieto.
+        if subaccion or tarifa:
+            filtro = None
 
         # "Peor" se invierte según el criterio: con efectividad el peor es el de
         # menor valor, pero con pérdidas o fallidas el peor es el que más tiene.
@@ -704,6 +774,7 @@ class ToolRunner:
                 dimension=dimension, bkeys=en_barrios, municipio=en_municipio,
                 meses=meses, brigada=brigada, min_ordenes=minimo,
                 ascendente=ascendente, ordenar_por=ordenar_por,
+                subaccion=subaccion, tarifa=tarifa,
             )
 
         filas = await consultar(bkeys, None if bkeys else municipio, min_ordenes)

@@ -41,6 +41,10 @@ class Payload:
     tecs: list[str]
     tipos: list[str]
     causas: list[str]
+    # Las 50 subacciones: el detalle fino del porqué, la casilla que el técnico
+    # marca de verdad. Las 12 `causas` son su agrupación.
+    subs: list[str]
+    tarifas: list[str]  # incluye el estrato: "RESIDENCIAL | ESTRATO 3"
     causa_ctrl: list[int]  # 1 = controlable por la operación
     causa_fam: list[str]
     b_muni: list[int]  # barrio -> municipio
@@ -57,6 +61,8 @@ class Payload:
     g: array  # brigada
     o: array  # tipo de OS
     c: array  # causa
+    s: array  # subacción
+    f: array  # tarifa
     e: array  # estado: 0 Efectiva, 1 Fallida, 2 Perdida
     mes: array  # índice en `meses`
 
@@ -232,6 +238,14 @@ def _cargar(directorio: Path) -> Payload:
     columnas = {
         "b": array("h"), "t": array("h"), "g": array("b"),
         "o": array("b"), "c": array("b"), "e": array("b"), "mes": array("b"),
+        # Enteros pequeños, no cadenas: cuestan poco y evitan tener que buscar en
+        # el acta lo que el técnico ya marcó en una casilla.
+        #
+        # "h" y no "b" aunque hoy quepan de sobra (50 y 16): estos dos catálogos
+        # los define el origen, no nuestra taxonomía, y pasar de 127 valores haría
+        # que `extend` lanzara OverflowError. Eso no degrada nada: deja el payload
+        # sin cargar y el backend sin arrancar. Un byte más por orden lo evita.
+        "s": array("h"), "f": array("h"),
     }
 
     inicio_mes: list[int] = []
@@ -243,7 +257,7 @@ def _cargar(directorio: Path) -> Payload:
             logger.warning(
                 "El mes %s declara %s órdenes y trae %s.", mes["key"], mes["n"], n
             )
-        for clave in ("b", "t", "g", "o", "c", "e"):
+        for clave in ("b", "t", "g", "o", "c", "e", "s", "f"):
             columnas[clave].extend(pts[clave])
         columnas["mes"].extend([i] * n)
 
@@ -255,6 +269,8 @@ def _cargar(directorio: Path) -> Payload:
         tecs=dim["tecs"],
         tipos=dim["tipos"],
         causas=dim["causas"],
+        subs=dim["subs"],
+        tarifas=dim["tarifas"],
         causa_ctrl=dim["causa_ctrl"],
         causa_fam=dim["causa_fam"],
         b_muni=dim["b_muni"],

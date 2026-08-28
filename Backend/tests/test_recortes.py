@@ -18,7 +18,7 @@ import pytest
 
 from app.core.config import settings
 from app.schemas.chat import VistaTablero
-from app.services.metrics_service import MetricsService
+from app.services.metrics_service import FiltroNoResuelto, MetricsService
 from app.services.tools import ToolRunner
 
 DATOS = Path(__file__).resolve().parent / "datos"
@@ -445,3 +445,161 @@ def test_el_parametro_no_puede_pedir_lo_contrario_que_la_descripcion():
     assert "TODAS sus palabras" in parametro
     assert "no lo partas" in parametro
     assert "en su raíz. " not in parametro
+
+
+# --- Bug 8: se buscaba en el acta lo que ya tenía casilla ----------------------
+#
+# El caso real: «red chilena» se respondía buscando texto libre y daba 1.487 en
+# producción, cuando la casilla `RED CHILENA/CONFIG. ESPECIAL` tenía 3.738. El
+# acta se queda corta cuando el técnico no escribe el término, y se pasa cuando
+# lo nombra sin que sea el motivo. La casilla es la cifra buena.
+
+@pytest.mark.asyncio
+async def test_la_casilla_y_el_acta_no_cuentan_lo_mismo(metrics):
+    """Si coincidieran, una de las dos sobraría. Divergen, y hay que saber cuál usar."""
+    por_casilla = await metrics.efectividad(subaccion="red chilena")
+    por_acta = await metrics.buscar_en_observaciones(texto="chilena")
+
+    assert por_casilla.tot == 678
+    assert por_acta.coincidencias == 32
+    assert por_casilla.tot > por_acta.coincidencias, (
+        "el acta no nombra el término en todas las órdenes que lo tuvieron por causa"
+    )
+
+
+@pytest.mark.asyncio
+async def test_la_subaccion_se_pide_por_su_nombre_a_medias(metrics):
+    """Nadie escribe «RED CHILENA/CONFIG. ESPECIAL» entero."""
+    completo = await metrics.efectividad(subaccion="RED CHILENA/CONFIG. ESPECIAL")
+    a_medias = await metrics.efectividad(subaccion="red chilena")
+
+    assert completo.tot == a_medias.tot == 678
+
+
+@pytest.mark.asyncio
+async def test_el_estrato_se_puede_preguntar(metrics):
+    """Vive en la tarifa. Antes el prompt lo declaraba fuera de alcance."""
+    e = await metrics.efectividad(tarifa="estrato 3")
+    assert e.tot == 11_737
+
+
+@pytest.mark.asyncio
+async def test_los_seis_estratos_se_pueden_preguntar(metrics):
+    """«estrato 6» también existe como «ESTRATO 6 EXENTO».
+
+    Buscando por subcadena los dos encajaban, la búsqueda quedaba ambigua y los
+    estratos 5 y 6 eran imposibles de consultar. Se resuelve por el tramo que va
+    después de la barra, que es lo que la gente dice.
+    """
+    for estrato in range(1, 7):
+        e = await metrics.efectividad(tarifa=f"estrato {estrato}")
+        assert e.tot > 0, f"el estrato {estrato} quedó sin poder consultarse"
+
+
+@pytest.mark.asyncio
+async def test_un_nombre_que_encaja_en_dos_no_filtra_a_medias(metrics):
+    """«comercial» es el tramo final de NO REGULADO y de NO RESIDENCIAL.
+
+    Antes esto devolvía 14 órdenes donde hay 12.871: un número plausible y
+    equivocado, que es la peor clase de respuesta. Ahora ni siquiera se calcula:
+    avisa que el filtro no resolvió, en vez de fingir que sí.
+    """
+    with pytest.raises(FiltroNoResuelto):
+        await metrics.efectividad(tarifa="comercial")
+
+    preciso = await metrics.efectividad(tarifa="no residencial | comercial")
+    assert preciso.tot > 0
+
+
+@pytest.mark.asyncio
+async def test_se_puede_ordenar_por_estrato_y_por_subaccion(metrics):
+    """Dos dimensiones nuevas del ranking: antes solo brigada, técnico y barrio."""
+    por_tarifa = await metrics.ranking(dimension="tarifa", min_ordenes=100)
+    por_subaccion = await metrics.ranking(
+        dimension="subaccion", ordenar_por="perdidas", min_ordenes=1
+    )
+
+    assert por_tarifa[0].nombre == "RESIDENCIAL | ESTRATO 3"
+    assert por_subaccion[0].nombre == "MULTIFAMILIAR/MULTICOMERCIAL"
+
+
+@pytest.mark.asyncio
+async def test_un_recorte_que_el_tablero_no_sabe_mostrar_no_lo_mueve(metrics):
+    """El mapa no filtra por subacción ni tarifa.
+
+    Emitir el filtro igual dejaba la respuesta hablando de estrato 3 y el mapa
+    enseñando todos los estratos del municipio: un recorte más ancho que la
+    cifra, sin que nada avisara. Es el bug 5 otra vez, por una puerta nueva.
+    """
+    runner = ToolRunner(metrics)
+
+    _, con_tarifa = await runner.run(
+        "efectividad", {"municipio": "SOLEDAD", "tarifa": "estrato 3"}
+    )
+    _, sin_tarifa = await runner.run("efectividad", {"municipio": "SOLEDAD"})
+
+    assert con_tarifa is None, "no hay tablero que muestre solo el estrato 3"
+    assert sin_tarifa is not None, "sin el filtro nuevo, el mapa sí debe seguir a la respuesta"
+
+
+# --- Bug 9: un filtro inventado vaciaba todo y se le echaba la culpa al mínimo -
+#
+# El caso real: el modelo puso `municipio: "Atlántico"` —el departamento, no un
+# municipio— junto con `tarifa: "estrato 3"`. El municipio no resolvía a nada,
+# `_agrupar` devolvía {} en silencio, y el ranking salía vacío con la nota «sin
+# resultados con el mínimo pedido»: culpaba al umbral de 10 órdenes cuando en
+# realidad SÍ había barrios de estrato 3 con más de 10, solo que el filtro
+# nunca llegó a aplicarse. El modelo le creyó al mensaje y avisó de un problema
+# de datos que no existía.
+
+@pytest.mark.asyncio
+async def test_un_municipio_inventado_no_vacia_el_filtro_valido_en_silencio(runner):
+    """«Atlántico» es el departamento, no uno de los 25 municipios del payload."""
+    salida, filtro = await runner.run("ranking", {
+        "dimension": "barrio", "municipio": "Atlántico", "tarifa": "estrato 3",
+        "min_ordenes": 10, "ordenar_por": "ef_adj_pond",
+    })
+
+    assert salida["error"] == "filtro_no_reconocido"
+    assert salida["campo"] == "municipio"
+    assert salida["valor_pedido"] == "Atlántico"
+    assert "BARRANQUILLA" in salida["valores_validos"]
+    assert filtro is None
+
+
+@pytest.mark.asyncio
+async def test_el_mismo_ranking_sin_el_municipio_inventado_si_tiene_filas(runner):
+    """Prueba que el bug era el municipio, no el filtro de tarifa."""
+    salida, _ = await runner.run("ranking", {
+        "dimension": "barrio", "tarifa": "estrato 3",
+        "min_ordenes": 10, "ordenar_por": "ef_adj_pond",
+    })
+
+    assert salida["filas"], "sí existen barrios de estrato 3 con al menos 10 órdenes"
+
+
+@pytest.mark.asyncio
+async def test_un_ranking_genuinamente_vacio_sigue_avisando_del_minimo(runner):
+    """Regresión: cuando los filtros SÍ resuelven pero nada pasa el umbral, el
+    mensaje original sigue siendo el correcto."""
+    salida, _ = await runner.run("ranking", {"dimension": "barrio", "min_ordenes": 1_000_000})
+
+    assert "error" not in salida
+    assert "con el mínimo pedido" in salida["nota"]
+
+
+def test_agrupar_cargue_no_se_confunde_con_una_pregunta_del_historico():
+    """El caso real: «¿cuáles estratos tienen al menos 10 órdenes?», sin ningún
+    archivo cargado en la conversación, disparó `agrupar_cargue` en vez de
+    `ranking`. La descripción traía el ejemplo «¿cuántas son de estrato 2?» casi
+    calcado a la pregunta real, y el modelo pescó el ejemplo equivocado.
+    """
+    from app.services.tools import TOOLS
+
+    descripcion = next(
+        t["function"]["description"] for t in TOOLS if t["function"]["name"] == "agrupar_cargue"
+    )
+
+    assert "SOLO las órdenes que el usuario subió en un archivo" in descripcion
+    assert "usa `ranking`" in descripcion
+    assert "sin archivo cargado" in descripcion
