@@ -14,6 +14,7 @@ ENCONTRADO = {
     "probabilidad_pago_sin_intervencion": 0.99651,
     "probabilidad_pago_con_intervencion": 0.406848,
     "indice_pagador": "PAGADOR EN OBSERVACION",
+    "dia_promedio_pago": 26.0,
     "motivo": None,
     "historico": [{"periodo": 202605, "pago": True, "tipo_os": "TO501", "fecha_cierre": "2026-05-28"}],
 }
@@ -90,7 +91,20 @@ async def test_el_runner_devuelve_las_dos_probabilidades_tal_cual():
     assert salida["probabilidad_sin_intervencion"] == 0.99651
     assert salida["probabilidad_con_intervencion"] == 0.406848
     assert salida["indice_pagador"] == "PAGADOR EN OBSERVACION"
+    assert salida["dia_promedio_pago"] == 26.0
     assert salida["nic"] == "1071979"
+
+
+@pytest.mark.asyncio
+async def test_el_dia_promedio_de_pago_puede_venir_nulo():
+    """Un cliente sin pagos con fecha en su historial no tiene de dónde sacarlo."""
+    sin_dia = {**ENCONTRADO, "dia_promedio_pago": None}
+
+    salida, _ = await runner_con(lambda r: httpx.Response(200, json=sin_dia)).run(
+        "propension_pago", {"nic": "1071979"}
+    )
+
+    assert salida["dia_promedio_pago"] is None
 
 
 @pytest.mark.asyncio

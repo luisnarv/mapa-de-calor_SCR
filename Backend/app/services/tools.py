@@ -441,6 +441,10 @@ TOOLS: list[dict[str, Any]] = [
                 "ventanas de tiempo son distintas a propósito, así que la resta no es un "
                 "efecto causal limpio. Sirve para ordenar clientes entre sí, no para "
                 "decir cuánto cambia la probabilidad por intervenir.\n"
+                "También devuelve `dia_promedio_pago`: el día del mes en que ese cliente "
+                "suele pagar, en promedio. Úsalo para '¿qué día suele pagar?' o "
+                "'¿cuándo paga normalmente?'. Puede venir null si su historial no trae "
+                "pagos con fecha.\n"
                 "El cliente puede no tener datos (`encontrado: false`, con el motivo) o "
                 "el servicio puede estar caído: dilo tal cual, no es un 0% de "
                 "probabilidad."
@@ -1248,6 +1252,7 @@ class ToolRunner:
             "probabilidad_sin_intervencion": datos.get("probabilidad_pago_sin_intervencion"),
             "probabilidad_con_intervencion": datos.get("probabilidad_pago_con_intervencion"),
             "indice_pagador": datos.get("indice_pagador"),
+            "dia_promedio_pago": datos.get("dia_promedio_pago"),
             "historico": historico,
         }, None
 
