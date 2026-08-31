@@ -4,11 +4,7 @@ se sustituye el transporte HTTP por uno falso (`httpx.MockTransport`)."""
 import httpx
 import pytest
 
-from app.services.propension_service import (
-    PropensionService,
-    PropensionServiceError,
-    TIPOS_SUSPENSION,
-)
+from app.services.propension_service import PropensionService, PropensionServiceError
 
 # Formas reales, verificadas contra el servicio corriendo — no las del README,
 # que documenta una `encontrado` que la API nunca manda y un 200 donde en
@@ -74,21 +70,6 @@ async def test_el_servicio_caido_se_reporta_como_error_de_negocio():
         await servicio(handler).consultar("1")
 
 
-def test_una_orden_de_suspension_hace_confiable_la_de_con_intervencion():
-    for tipo in TIPOS_SUSPENSION:
-        assert PropensionService.cual_es_confiable(tipo) == "con_intervencion"
-
-
-def test_una_reconexion_hace_confiable_la_de_sin_intervencion():
-    """TO502 (reconexión) no es orden de suspensión: el dominio confiable es el otro."""
-    assert PropensionService.cual_es_confiable("TO502") == "sin_intervencion"
-
-
-def test_sin_historico_tambien_resuelve_algo():
-    """Un cliente encontrado pero sin historico[0] no debe reventar al calcular cuál es confiable."""
-    assert PropensionService.cual_es_confiable(None) == "sin_intervencion"
-
-
 # --- A través del ToolRunner ----------------------------------------------
 
 from app.services.tools import ToolRunner  # noqa: E402
@@ -99,14 +80,16 @@ def runner_con(handler) -> ToolRunner:
 
 
 @pytest.mark.asyncio
-async def test_el_runner_dice_cual_probabilidad_es_confiable():
+async def test_el_runner_devuelve_las_dos_probabilidades_tal_cual():
     salida, filtro = await runner_con(lambda r: httpx.Response(200, json=ENCONTRADO)).run(
         "propension_pago", {"nic": "1071979"}
     )
 
     assert filtro is None
-    assert salida["confiable"] == "con_intervencion", "TO501 es orden de suspensión"
+    assert "confiable" not in salida, "se pidió quitar esa distinción de la respuesta"
+    assert salida["probabilidad_sin_intervencion"] == 0.99651
     assert salida["probabilidad_con_intervencion"] == 0.406848
+    assert salida["indice_pagador"] == "PAGADOR EN OBSERVACION"
     assert salida["nic"] == "1071979"
 
 

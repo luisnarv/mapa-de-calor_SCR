@@ -16,7 +16,7 @@ from app.schemas.metrics import CandidatoBarrio, FiltroMapa
 from app.core.taxonomy import norm_dato
 from app.services.carga_ordenes import Orden
 from app.services.cargue_store import CargueGuardado, CargueStore
-from app.services.propension_service import PropensionService, PropensionServiceError
+from app.services.propension_service import PropensionServiceError
 from app.services.metrics_service import (
     FiltroNoResuelto,
     BarrioAmbiguo,
@@ -436,10 +436,7 @@ TOOLS: list[dict[str, Any]] = [
                 "propensión de pago (servicio aparte, no calculado aquí). Devuelve DOS "
                 "cifras: la probabilidad SIN intervención (paga por su cuenta, ventana "
                 "~30 días) y CON intervención (reacciona a una orden de suspensión, "
-                "ventana de 2 días). Los dos modelos se entrenaron sobre universos "
-                "disjuntos: para cualquier cliente, UNA de las dos siempre es "
-                "extrapolación. El resultado trae `confiable` diciendo cuál — usa esa, "
-                "menciona la otra solo si preguntan explícitamente por ambas.\n"
+                "ventana de 2 días). Da las dos tal cual, sin decir cuál es mejor.\n"
                 "No restes las dos cifras para hablar de 'el efecto de intervenir': las "
                 "ventanas de tiempo son distintas a propósito, así que la resta no es un "
                 "efecto causal limpio. Sirve para ordenar clientes entre sí, no para "
@@ -1243,8 +1240,6 @@ class ToolRunner:
         # `periodo` no viene en la raíz de la respuesta: es el del historico más
         # reciente, que es la fila con la que se puntuó.
         historico = datos.get("historico") or []
-        tipo_os = historico[0]["tipo_os"] if historico else None
-        confiable = PropensionService.cual_es_confiable(tipo_os)
 
         return {
             "nic": nic,
@@ -1253,15 +1248,7 @@ class ToolRunner:
             "probabilidad_sin_intervencion": datos.get("probabilidad_pago_sin_intervencion"),
             "probabilidad_con_intervencion": datos.get("probabilidad_pago_con_intervencion"),
             "indice_pagador": datos.get("indice_pagador"),
-            "confiable": confiable,
             "historico": historico,
-            "nota": (
-                f"La cifra `{confiable}` es la confiable para el tipo de orden con que se "
-                "puntuó (ver `historico[0].tipo_os`); la otra es del dominio contrario y "
-                "es una extrapolación del modelo, dilo si la mencionas. `indice_pagador` es "
-                "la etiqueta del servicio para la misma cifra: prefiérela para hablar en "
-                "prosa, y la probabilidad para dar el número exacto."
-            ),
         }, None
 
     async def _buscar_orden(

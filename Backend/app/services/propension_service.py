@@ -24,12 +24,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Los cuatro tipos de OS que son orden de suspensión, iguales a los que declara
-# el propio servicio (ver su GET /modelos, campo tipos_orden_suspension). Se
-# duplican aquí a propósito, con la misma advertencia que trae su README: son
-# cuatro códigos estables, y si cambian allá hay que cambiarlos aquí también.
-TIPOS_SUSPENSION = frozenset({"TO501", "TO503", "TO504", "TO506"})
-
 
 class PropensionServiceError(Exception):
     """El servicio no respondió. Nunca deja caído al chat: se atrapa y se
@@ -80,19 +74,6 @@ class PropensionService:
         datos = resp.json()
         datos["encontrado"] = True
         return datos
-
-    @staticmethod
-    def cual_es_confiable(tipo_os: str | None) -> str:
-        """Cuál de las dos probabilidades del servicio no es extrapolación.
-
-        Los dos modelos se entrenaron sobre universos disjuntos (el propio
-        `TIENE_ORDEN` los separa): para cualquier fila, uno de los dos siempre
-        está extrapolando. Sin decir esto, el modelo del chat presenta las dos
-        cifras como igual de confiables, y no lo son.
-        """
-        if tipo_os in TIPOS_SUSPENSION:
-            return "con_intervencion"
-        return "sin_intervencion"
 
 
 @lru_cache
