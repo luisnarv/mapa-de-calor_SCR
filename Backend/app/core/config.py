@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     CARGUE_MAXIMOS: int = 20
     CORS_ORIGINS: str = "http://localhost:3000"
 
+    # Servicio Modelo Propensión de Pago
+    PROPENSION_SERVICE_URL: str = "http://127.0.0.1:8001"
+    PROPENSION_TIMEOUT_SECONDS: float = 8.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

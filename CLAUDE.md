@@ -104,6 +104,28 @@ pedir que se lea.
 - **`Backend/app/core/taxonomy.py` es un espejo de `Etl/etl/taxonomy.py`.** Si
   cambias una causa o una homologación, cámbiala en los dos. Hay una prueba que
   lo verifica, pero solo corre si pandas está instalado en el venv del backend.
+- **El chat consume el "Modelo Propensión de Pago Service" por HTTP, como un
+  proveedor externo más.** Vive en otro repositorio, con su propio venv
+  (`catboost`) y sus modelos `.cbm`. La herramienta `propension_pago` le manda
+  el NIC como si fuera la cuenta —son el mismo número, verificado contra la
+  base: 206.575 de 206.576 NICs coinciden exactos con una cuenta, misma
+  dirección de cliente— porque no existe ninguna tabla que los una en
+  `dbanalitica`. **Su comportamiento real no coincide con su propio README**:
+  un cliente sin datos responde 404, no `200` con `encontrado: false`, y un
+  cliente encontrado no trae ninguna clave `encontrado` que haya que inferir
+  del código. `PropensionService.consultar()` normaliza eso. Si el README se
+  actualiza, hay que volver a probar contra el servicio corriendo, no fiarse
+  del texto. El servicio nunca puede tumbar el chat: si está caído o en modo
+  degradado (503), se convierte en un resultado de herramienta.
+- **`recomendar_tecnicos` cruza el archivo cargado con el histórico, todo en
+  Python dentro de una sola llamada.** Para cada barrio del archivo (por orden
+  pendiente descendente) busca quién rindió mejor ahí, reutilizando el mismo
+  "ampliar al municipio" de `ranking`. No se hace llamando `ranking` una vez
+  por barrio desde el modelo: un archivo de 100+ barrios agotaría las 4 rondas
+  de tool calling en el primer intento. Es una recomendación por desempeño
+  pasado, no una asignación óptima: no reparte carga ni conoce disponibilidad;
+  por eso reporta cuánto tiene YA ese técnico en el archivo completo, para que
+  se note si el mismo nombre sale repetido y corre riesgo de saturarse.
 - **`Backend/app/core/etl_sql.py` no se usa.** Es la réplica en SQL de las reglas
   del ETL, guardada como base de una futura vista materializada.
 

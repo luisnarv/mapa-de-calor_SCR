@@ -12,6 +12,7 @@ from app.core.database import SessionLocal
 from app.services.cargue_store import CargueStore
 from app.services.feedback_service import FeedbackService
 from app.services.geolocalizacion import Geolocalizador
+from app.services.propension_service import PropensionService, get_propension_service
 from app.services.metrics_service import MetricsService
 from app.services.openai_service import OpenAIService, get_openai_service
 from app.services.tools import ToolRunner
@@ -60,9 +61,12 @@ def get_geolocalizador() -> Geolocalizador:
 GeolocalizadorDep = Annotated[Geolocalizador, Depends(get_geolocalizador)]
 
 
-def get_tool_runner(metrics: MetricsDep, store: CargueStoreDep) -> ToolRunner:
+def get_tool_runner(
+    metrics: MetricsDep, store: CargueStoreDep,
+    propension: Annotated[PropensionService, Depends(get_propension_service)],
+) -> ToolRunner:
     """Las herramientas que el modelo puede invocar, atadas a la sesión de esta petición."""
-    return ToolRunner(metrics, cargues=store)
+    return ToolRunner(metrics, cargues=store, propension=propension)
 
 
 @lru_cache

@@ -16,6 +16,7 @@ from app.schemas.metrics import CandidatoBarrio, FiltroMapa
 from app.core.taxonomy import norm_dato
 from app.services.carga_ordenes import Orden
 from app.services.cargue_store import CargueGuardado, CargueStore
+from app.services.propension_service import PropensionService, PropensionServiceError
 from app.services.metrics_service import (
     FiltroNoResuelto,
     BarrioAmbiguo,
@@ -426,6 +427,72 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "propension_pago",
+            "description": (
+                "Probabilidad de que un cliente pague, según el modelo externo de "
+                "propensión de pago (servicio aparte, no calculado aquí). Devuelve DOS "
+                "cifras: la probabilidad SIN intervención (paga por su cuenta, ventana "
+                "~30 días) y CON intervención (reacciona a una orden de suspensión, "
+                "ventana de 2 días). Los dos modelos se entrenaron sobre universos "
+                "disjuntos: para cualquier cliente, UNA de las dos siempre es "
+                "extrapolación. El resultado trae `confiable` diciendo cuál — usa esa, "
+                "menciona la otra solo si preguntan explícitamente por ambas.\n"
+                "No restes las dos cifras para hablar de 'el efecto de intervenir': las "
+                "ventanas de tiempo son distintas a propósito, así que la resta no es un "
+                "efecto causal limpio. Sirve para ordenar clientes entre sí, no para "
+                "decir cuánto cambia la probabilidad por intervenir.\n"
+                "El cliente puede no tener datos (`encontrado: false`, con el motivo) o "
+                "el servicio puede estar caído: dilo tal cual, no es un 0% de "
+                "probabilidad."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nic": {
+                        "type": "string",
+                        "description": "NIC del cliente. Es el mismo número que su cuenta de facturación.",
+                    },
+                },
+                "required": ["nic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recomendar_tecnicos",
+            "description": (
+                "Para los barrios con más órdenes pendientes del archivo cargado, "
+                "qué técnico ha rendido mejor ahí en el histórico del SCR. Úsala para "
+                "'¿qué técnico asignar en cada barrio?' o '¿quién debería ir a X?'.\n"
+                "Es una recomendación ESTADÍSTICA por desempeño pasado, no una "
+                "asignación óptima: no reparte carga entre técnicos ni conoce su "
+                "disponibilidad de hoy. Dilo así, y fíjate en "
+                "`ordenes_del_tecnico_en_el_archivo`: si el mismo nombre sale "
+                "recomendado muchas veces, puede estar sobrecargado."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limite": {
+                        "type": "integer",
+                        "description": "Cuántos barrios del archivo evaluar, por orden pendiente descendente. Por defecto 10.",
+                    },
+                    "min_ordenes": {
+                        "type": "integer",
+                        "description": "Mínimo de órdenes históricas del técnico en ese barrio para contar como referencia. Por defecto 5.",
+                    },
+                    "barrio": {
+                        "type": "string",
+                        "description": "Para pedir la recomendación de un solo barrio del archivo, en vez de los de mayor volumen.",
+                    },
+                },
+            },
+        },
+    },
 ]
 
 
@@ -506,6 +573,7 @@ class ToolRunner:
         metrics: MetricsService,
         vista: VistaTablero | None = None,
         cargues: CargueStore | None = None,
+        propension: PropensionService | None = None,
     ) -> None:
         self.metrics = metrics
         self.vista = vista
@@ -513,6 +581,7 @@ class ToolRunner:
         # cuerpo de cada turno, igual que la vista, así que se asigna después.
         self.cargues = cargues
         self.cargue_id: str | None = None
+        self.propension = propension
 
     def cargue_actual(self) -> CargueGuardado | None:
         """El archivo cargado en esta conversación, o None si no hay ninguno.
@@ -617,6 +686,12 @@ class ToolRunner:
                     "Elige uno de `valores_validos` y repite, o pregúntale al "
                     "usuario cuál quiso decir."
                 ),
+            }, None
+        except PropensionServiceError as exc:
+            return {
+                "error": "propension_no_disponible",
+                "detalle": exc.message,
+                "sugerencia": "Dilo tal cual: el servicio externo no respondió, no es que el cliente tenga 0% de probabilidad.",
             }, None
         except (TypeError, ValueError) as exc:
             # Argumentos que el modelo inventó: nombres de parámetro que no
@@ -1060,6 +1135,134 @@ class ToolRunner:
                 "primeros. Dilo si presentas la lista."
             )
         return salida, None
+
+    async def _recomendar_tecnicos(
+        self,
+        limite: int = 10,
+        min_ordenes: int = 5,
+        barrio: str | None = None,
+    ) -> tuple[dict[str, Any], None]:
+        """Cruza dos cosas que hoy nadie combinaba: los barrios con más órdenes
+        pendientes en el archivo, y quién ha rendido mejor ahí en el histórico.
+
+        Todo el cruce ocurre aquí, en Python, en una sola llamada. La alternativa
+        —que el modelo llamara `ranking` una vez por barrio— no cabe en las 4
+        rondas de tool calling del turno, y un archivo de 125 barrios la agotaría
+        con solo 4.
+        """
+        ordenes = self._ordenes()
+        if ordenes is None:
+            return self.SIN_CARGUE, None
+
+        por_barrio = [g for g in _conteo(ordenes, lambda o: o.bkey, tope=len(ordenes)) if g["valor"]]
+        if barrio:
+            objetivo = norm_dato(barrio)
+            por_barrio = [g for g in por_barrio if objetivo in norm_dato(g["valor"])]
+            if not por_barrio:
+                return {
+                    "error": "barrio_sin_ordenes_en_el_archivo",
+                    "sugerencia": "Ese barrio no tiene órdenes en el archivo cargado.",
+                }, None
+        objetivos = por_barrio[: max(1, min(limite, MAX_ORDENES))]
+
+        # Carga de cada técnico en TODO el archivo, no solo en el barrio que se
+        # esté evaluando: es lo que deja ver si al que más se recomienda ya lo
+        # tienen saturado en otro lado.
+        carga: dict[str, int] = {}
+        for o in ordenes:
+            clave = norm_dato(o.tecnico)
+            if clave:
+                carga[clave] = carga.get(clave, 0) + 1
+
+        recomendaciones: list[dict[str, Any]] = []
+        sin_historial: list[str] = []
+        for g in objetivos:
+            bkey = g["valor"]
+            salida_ranking, _ = await self._ranking(
+                dimension="tecnico", barrio=bkey, min_ordenes=min_ordenes, ordenar_por="ef_adj",
+            )
+            filas = salida_ranking.get("filas") or []
+            if not filas:
+                sin_historial.append(bkey)
+                continue
+            mejor = filas[0]
+            recomendaciones.append({
+                "barrio": bkey,
+                "ordenes_pendientes_en_el_archivo": g["ordenes"],
+                "tecnico_recomendado": mejor["nombre"],
+                "efectividad_ajustada_historica": mejor["ef_adj"],
+                "ordenes_del_tecnico_en_el_archivo": carga.get(norm_dato(mejor["nombre"]), 0),
+                "ampliado_al_municipio": bool(salida_ranking.get("ampliado")),
+            })
+
+        nota = (
+            "Recomendación por desempeño histórico, no una asignación óptima: no "
+            "reparte carga entre técnicos ni conoce su disponibilidad de hoy. "
+            "`ordenes_del_tecnico_en_el_archivo` es lo que YA tiene asignado ese "
+            "técnico en todo el archivo, no solo en este barrio — si un mismo "
+            "nombre se repite mucho en la lista, dilo, puede estar sobrecargado. "
+            "`ampliado_al_municipio` en true significa que el barrio no tenía "
+            "historial propio suficiente y se usó el del municipio completo."
+        )
+        if sin_historial:
+            nota += (
+                f" {len(sin_historial)} barrio(s) no tienen ningún técnico con "
+                f"{min_ordenes} órdenes históricas o más, ni siquiera ampliando al "
+                "municipio: sin recomendación confiable ahí."
+            )
+
+        salida: dict[str, Any] = {
+            "base": f"{len(ordenes)} órdenes del archivo, {len(objetivos)} barrio(s) evaluados",
+            "recomendaciones": recomendaciones,
+            "nota": nota,
+        }
+        if sin_historial:
+            salida["sin_historial_suficiente"] = sin_historial
+        return salida, None
+
+    async def _propension_pago(self, nic: str) -> tuple[dict[str, Any], None]:
+        if self.propension is None:
+            return {
+                "error": "servicio_no_disponible",
+                "sugerencia": "El servicio de propensión de pago no está configurado en este backend.",
+            }, None
+
+        datos = await self.propension.consultar(nic)
+
+        if not datos.get("encontrado"):
+            return {
+                "nic": nic,
+                "encontrado": False,
+                "motivo": datos.get("motivo"),
+                "nota": (
+                    "No hay datos de propensión para este cliente. Dilo tal cual: no es "
+                    "0% de probabilidad, es que no hay con qué calcularla."
+                ),
+            }, None
+
+        # `periodo` no viene en la raíz de la respuesta: es el del historico más
+        # reciente, que es la fila con la que se puntuó.
+        historico = datos.get("historico") or []
+        tipo_os = historico[0]["tipo_os"] if historico else None
+        confiable = PropensionService.cual_es_confiable(tipo_os)
+
+        return {
+            "nic": nic,
+            "encontrado": True,
+            "periodo": historico[0]["periodo"] if historico else None,
+            "probabilidad_sin_intervencion": datos.get("probabilidad_pago_sin_intervencion"),
+            "probabilidad_con_intervencion": datos.get("probabilidad_pago_con_intervencion"),
+            "indice_pagador": datos.get("indice_pagador"),
+            "confiable": confiable,
+            "historico": historico,
+            "nota": (
+                f"La cifra `{confiable}` es la confiable para el tipo de orden con que se "
+                "puntuó (ver `historico[0].tipo_os`); la otra es del dominio contrario y "
+                "es una extrapolación del modelo, dilo si la mencionas. `indice_pagador` es "
+                "la etiqueta del servicio para la misma cifra: prefiérela para hablar en "
+                "prosa, y la probabilidad para dar el número exacto."
+            ),
+        }, None
 
     async def _buscar_orden(
         self, orden: str | None = None, nic: str | None = None
