@@ -4,12 +4,16 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api.deps import CargueStoreDep, GeolocalizadorDep
+from app.api.deps import CargueStoreDep, GeolocalizadorDep, MetricsDep
 from app.core.config import settings
 from app.schemas.ordenes import (
+    CandidatoRecomendado,
     OrdenSinUbicar,
     PuntoOrden,
     PuntosCargue,
+    RecomendacionBatchRequest,
+    RecomendacionBatchResponse,
+    RecomendacionResponse,
     ResumenCargue,
 )
 from app.services.carga_ordenes import ArchivoInvalido, leer_ordenes
@@ -93,4 +97,47 @@ async def puntos(
         por_origen=estado.por_origen,
         puntos=[PuntoOrden(**asdict(p)) for p in estado.puntos.values()],
         no_ubicadas=[OrdenSinUbicar(**asdict(o)) for o in estado.no_ubicadas],
+    )
+
+
+@router.get(
+    "/recomendar/{nic}",
+    response_model=RecomendacionResponse,
+)
+async def recomendar(
+    nic: str,
+    metrics: MetricsDep,
+) -> RecomendacionResponse:
+    """Recomienda técnicos y brigadas para un NIC según desempeño histórico (Wilson)."""
+    from app.services.metrics_service import NicNoEncontrado
+
+    try:
+        return await metrics.recomendar(nic=nic)
+    except NicNoEncontrado as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/recomendar",
+    response_model=RecomendacionBatchResponse,
+)
+async def recomendar_batch(
+    body: RecomendacionBatchRequest,
+    metrics: MetricsDep,
+) -> RecomendacionBatchResponse:
+    """Recomienda técnicos y brigadas para un lote de NICs."""
+    from app.services.metrics_service import NicNoEncontrado
+
+    resultados: list[RecomendacionResponse] = []
+    no_encontrados: list[str] = []
+
+    for nic in body.nics:
+        try:
+            resultados.append(await metrics.recomendar(nic=nic))
+        except NicNoEncontrado:
+            no_encontrados.append(nic)
+
+    return RecomendacionBatchResponse(
+        resultados=resultados,
+        no_encontrados=no_encontrados,
     )

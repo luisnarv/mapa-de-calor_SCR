@@ -52,10 +52,10 @@ class Settings(BaseSettings):
     CARGUE_MAX_MB: int = 10
     CARGUE_TTL_MINUTOS: int = 120
     CARGUE_MAXIMOS: int = 20
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str
 
     # Servicio Modelo Propensión de Pago
-    PROPENSION_SERVICE_URL: str = "http://127.0.0.1:8001"
+    PROPENSION_SERVICE_URL: str
     PROPENSION_TIMEOUT_SECONDS: float = 8.0
 
     @property

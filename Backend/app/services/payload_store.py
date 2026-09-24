@@ -66,6 +66,9 @@ class Payload:
     e: array  # estado: 0 Efectiva, 1 Fallida, 2 Perdida
     mes: array  # índice en `meses`
 
+    m: array  # minutos desde fecha_min
+    fecha_min: str  # YYYY-MM-DD
+
     generado: str
 
     def __len__(self) -> int:
@@ -94,8 +97,18 @@ class Ubicaciones:
     via: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class IndiceNic:
+    """NIC → índice de barrio y posiciones globales de sus órdenes."""
+
+    barrio_de: dict[str, int]
+    ordenes_de: dict[str, list[int]]
+
+
 _payload: Payload | None = None
 _firma: tuple | None = None
+_indice_nic: IndiceNic | None = None
+_firma_nic: tuple | None = None
 _ubicaciones: Ubicaciones | None = None
 _firma_ubi: tuple | None = None
 _lock = Lock()
@@ -131,6 +144,41 @@ def obtener(directorio: Path) -> Payload:
             _payload = _cargar(directorio)
             _firma = firma
         return _payload
+
+
+def obtener_indice_nic(directorio: Path) -> IndiceNic:
+    """Índice NIC → barrio, cacheado con la misma firma que el payload."""
+    global _indice_nic, _firma_nic
+
+    try:
+        firma = _firma_de(directorio)
+    except OSError as exc:
+        raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
+
+    with _lock:
+        if _indice_nic is None or firma != _firma_nic:
+            _indice_nic = _construir_indice_nic(directorio)
+            _firma_nic = firma
+        return _indice_nic
+
+
+def _construir_indice_nic(directorio: Path) -> IndiceNic:
+    """Recorre los meses y construye NIC → último barrio + posiciones globales."""
+    raiz = _leer_raiz(directorio)
+    barrio_de: dict[str, int] = {}
+    ordenes_de: dict[str, list[int]] = {}
+    offset = 0
+    for _mes, pts in _iter_meses(directorio, raiz):
+        nics = pts.get("nic") or []
+        barrios = pts.get("b") or []
+        estados = pts.get("e") or []
+        for j, (nic_val, b_val) in enumerate(zip(nics, barrios)):
+            if nic_val:
+                barrio_de[nic_val] = b_val
+                ordenes_de.setdefault(nic_val, []).append(offset + j)
+        offset += len(estados)
+    logger.info("Índice NIC→barrio: %s entradas.", f"{len(barrio_de):,}")
+    return IndiceNic(barrio_de=barrio_de, ordenes_de=ordenes_de)
 
 
 def _leer_raiz(directorio: Path) -> dict:
@@ -246,6 +294,7 @@ def _cargar(directorio: Path) -> Payload:
         # que `extend` lanzara OverflowError. Eso no degrada nada: deja el payload
         # sin cargar y el backend sin arrancar. Un byte más por orden lo evita.
         "s": array("h"), "f": array("h"),
+        "m": array("i"),  # minutos desde fecha_min (signed 32-bit)
     }
 
     inicio_mes: list[int] = []
@@ -257,7 +306,7 @@ def _cargar(directorio: Path) -> Payload:
             logger.warning(
                 "El mes %s declara %s órdenes y trae %s.", mes["key"], mes["n"], n
             )
-        for clave in ("b", "t", "g", "o", "c", "e", "s", "f"):
+        for clave in ("b", "t", "g", "o", "c", "e", "s", "f", "m"):
             columnas[clave].extend(pts[clave])
         columnas["mes"].extend([i] * n)
 
@@ -277,6 +326,7 @@ def _cargar(directorio: Path) -> Payload:
         b_zona=dim["b_zona"],
         meses=meses,
         inicio_mes=inicio_mes,
+        fecha_min=meta.get("fecha_min", ""),
         generado=meta.get("generated", ""),
         **columnas,
     )

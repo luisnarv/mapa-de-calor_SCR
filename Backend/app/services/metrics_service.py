@@ -11,8 +11,10 @@ que no hace falta caché ni precalentado.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -26,15 +28,30 @@ from app.schemas.metrics import (
     FilaMencion,
     FilaZona,
 )
+from app.schemas.ordenes import (
+    CandidatoRecomendado,
+    CausaFrecuente,
+    FranjaHoraria,
+    HistorialNic,
+    MejorHorario,
+    RecomendacionResponse,
+)
 from app.services.payload_store import (
     Payload,
     leer_actas,
     leer_nics,
     obtener,
+    obtener_indice_nic,
     obtener_observaciones,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class NicNoEncontrado(Exception):
+    def __init__(self, nic: str) -> None:
+        super().__init__(f"El NIC {nic} no aparece en el histórico.")
+        self.nic = nic
 
 
 class BarrioNoEncontrado(Exception):
@@ -95,6 +112,18 @@ class Conteo:
 
 def _pct(x: int, y: int) -> float:
     return round(x / y * 100, 1) if y else 0.0
+
+
+def _wilson_lower(exitos: int, n: int) -> float:
+    """Límite inferior de Wilson al 95%, espejo de page.js:884."""
+    if not n:
+        return 0.0
+    z = 1.96
+    p = exitos / n
+    d = 1 + (z * z) / n
+    c = p + (z * z) / (2 * n)
+    m = z * math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))
+    return max(0.0, (c - m) / d)
 
 
 # Criterios por los que se puede ordenar un ranking. `perdidas` son las órdenes
@@ -565,6 +594,252 @@ class MetricsService:
     async def meses_disponibles(self) -> list[str]:
         """Meses con datos, del más reciente al más antiguo."""
         return list(reversed(self.datos.meses))
+
+    # --- Recomendador (espejo de page.js:recommend) ----------------------------
+
+    async def recomendar(self, *, nic: str) -> RecomendacionResponse:
+        """Recomienda técnicos y brigadas para un NIC, replicando la lógica
+        Wilson del tab Recomendador del frontend."""
+        p = self.datos
+        indice = obtener_indice_nic(self.directorio)
+        b_idx = indice.barrio_de.get(nic)
+        if b_idx is None:
+            raise NicNoEncontrado(nic)
+
+        bkey = p.barrios[b_idx]
+        muni_idx = p.b_muni[b_idx]
+        zona_idx = p.b_zona[b_idx]
+
+        tecnicos = self._wilson(b_idx, muni_idx, zona_idx, None, "tec")
+        brigadas = self._wilson(b_idx, muni_idx, zona_idx, None, "brig")
+        horario = self._mejor_horario(b_idx, None)
+        causas = self._causas_fallo(b_idx, None)
+        historial = self._historial_nic(nic, indice)
+
+        return RecomendacionResponse(
+            nic=nic,
+            barrio=bkey,
+            municipio=p.munis[muni_idx],
+            tecnicos_recomendados=tecnicos,
+            brigadas_recomendadas=brigadas,
+            mejor_horario=horario,
+            causas_fallo=causas,
+            historial_nic=historial,
+        )
+
+    _TOPE_TECNICOS = 4
+    _TOPE_BRIGADAS = 3
+    _TOPE_CAUSAS = 5
+
+    def _causas_fallo(self, b_idx: int, f_tipo: int | None) -> list[CausaFrecuente]:
+        p = self.datos
+        B, O, E, C = p.b, p.o, p.e, p.c
+        ctrl = p.causa_ctrl
+
+        conteo: dict[int, int] = {}
+        for i in range(len(E)):
+            if B[i] != b_idx:
+                continue
+            if f_tipo is not None and O[i] != f_tipo:
+                continue
+            if E[i] == 0:
+                continue
+            conteo[C[i]] = conteo.get(C[i], 0) + 1
+
+        total_no_ef = sum(conteo.values())
+        if total_no_ef == 0:
+            return []
+
+        ordenadas = sorted(conteo.items(), key=lambda x: x[1], reverse=True)
+        return [
+            CausaFrecuente(
+                causa=p.causas[c_idx],
+                ordenes=n,
+                porcentaje=f"{round(n / total_no_ef * 100, 1)}%",
+            )
+            for c_idx, n in ordenadas[:self._TOPE_CAUSAS]
+        ]
+
+    def _historial_nic(self, nic: str, indice: object) -> HistorialNic:
+        p = self.datos
+        posiciones = indice.ordenes_de.get(nic, [])
+
+        total = len(posiciones)
+        efectivas = sum(1 for i in posiciones if p.e[i] == 0)
+        fallidas = sum(1 for i in posiciones if p.e[i] == 1)
+        perdidas = sum(1 for i in posiciones if p.e[i] == 2)
+
+        ef_pct = round(efectivas / total * 100, 1) if total > 0 else 0.0
+
+        ultima: str | None = None
+        if posiciones and p.fecha_min:
+            d0 = datetime.strptime(p.fecha_min, "%Y-%m-%d")
+            max_min = max(p.m[i] for i in posiciones)
+            ultima = (d0 + timedelta(minutes=max_min)).strftime("%Y-%m-%d")
+
+        return HistorialNic(
+            total_visitas=total,
+            efectivas=efectivas,
+            fallidas=fallidas,
+            perdidas=perdidas,
+            efectividad=f"{ef_pct}%",
+            ultima_visita=ultima,
+        )
+
+    _FRANJAS = [
+        (6, 8), (8, 10), (10, 12), (12, 14), (14, 16), (16, 18),
+    ]
+    _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+    def _mejor_horario(self, b_idx: int, f_tipo: int | None) -> MejorHorario:
+        p = self.datos
+        B, O, E, C, M = p.b, p.o, p.e, p.c, p.m
+        ctrl = p.causa_ctrl
+
+        if not p.fecha_min:
+            return MejorHorario(mejor_dia=None, franjas=[])
+
+        d0 = datetime.strptime(p.fecha_min, "%Y-%m-%d")
+
+        # Acumuladores por franja: [total, efectivas, no_controlables]
+        por_franja: dict[tuple[int, int], list[int]] = {f: [0, 0, 0] for f in self._FRANJAS}
+        # Acumuladores por día de la semana: [total, efectivas, no_controlables]
+        por_dia: dict[int, list[int]] = {d: [0, 0, 0] for d in range(7)}
+
+        for i in range(len(E)):
+            if B[i] != b_idx:
+                continue
+            if f_tipo is not None and O[i] != f_tipo:
+                continue
+
+            minutos = M[i]
+            hora = (minutos % 1440) // 60
+            dia_semana = (d0 + timedelta(minutes=minutos)).weekday()
+
+            for inicio, fin in self._FRANJAS:
+                if inicio <= hora < fin:
+                    acc = por_franja[(inicio, fin)]
+                    acc[0] += 1
+                    if E[i] == 0:
+                        acc[1] += 1
+                    if E[i] != 0 and ctrl[C[i]] == 0:
+                        acc[2] += 1
+                    break
+
+            acc_dia = por_dia[dia_semana]
+            acc_dia[0] += 1
+            if E[i] == 0:
+                acc_dia[1] += 1
+            if E[i] != 0 and ctrl[C[i]] == 0:
+                acc_dia[2] += 1
+
+        franjas: list[tuple[float, FranjaHoraria]] = []
+        for (inicio, fin), (tot, ef, noctrl) in por_franja.items():
+            den = tot - noctrl
+            if den < 3:
+                continue
+            ef_adj = round(ef / den * 100, 1)
+            franjas.append((ef_adj, FranjaHoraria(
+                franja=f"{inicio:02d}:00–{fin:02d}:00",
+                efectividad=f"{ef_adj}%",
+                ordenes=tot,
+            )))
+
+        franjas.sort(key=lambda t: t[0], reverse=True)
+
+        mejor_dia: str | None = None
+        mejor_ef_dia = -1.0
+        for d, (tot, ef, noctrl) in por_dia.items():
+            den = tot - noctrl
+            if den < 3:
+                continue
+            ef_adj = ef / den * 100
+            if ef_adj > mejor_ef_dia:
+                mejor_ef_dia = ef_adj
+                mejor_dia = self._DIAS[d]
+
+        return MejorHorario(
+            mejor_dia=mejor_dia,
+            franjas=[f for _, f in franjas],
+        )
+
+    def _wilson(
+        self,
+        b_idx: int,
+        muni_idx: int,
+        zona_idx: int,
+        f_tipo: int | None,
+        kind: str,
+    ) -> list[CandidatoRecomendado]:
+        p = self.datos
+        B, T, G, O, E, C, M = p.b, p.t, p.g, p.o, p.e, p.c, p.m
+        ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
+        n_total = len(E)
+
+        niveles = [
+            ("este barrio y este tipo de orden",
+             lambda i: B[i] == b_idx and (f_tipo is None or O[i] == f_tipo)),
+            ("este barrio (todos los tipos)",
+             lambda i: B[i] == b_idx),
+            ("este municipio y este tipo de orden",
+             lambda i: b_muni[B[i]] == muni_idx and (f_tipo is None or O[i] == f_tipo)),
+            ("esta zona y este tipo de orden",
+             lambda i: b_zona[B[i]] == zona_idx and (f_tipo is None or O[i] == f_tipo)),
+        ]
+
+        catalogo = p.tecs if kind == "tec" else p.brigs
+        columna = T if kind == "tec" else G
+
+        for nombre_nivel, test in niveles:
+            agg: dict[int, list[int]] = {}
+            for i in range(n_total):
+                if not test(i):
+                    continue
+                key = columna[i]
+                if key not in agg:
+                    agg[key] = [0, 0, 0, 0, 0, -1]  # n, ef, fa, noCtrl, pe, last
+                o = agg[key]
+                o[0] += 1
+                if E[i] == 0:
+                    o[1] += 1
+                elif E[i] == 1:
+                    o[2] += 1
+                elif E[i] == 2:
+                    o[4] += 1
+                if E[i] != 0 and ctrl[C[i]] == 0:
+                    o[3] += 1
+                if M[i] > o[5]:
+                    o[5] = M[i]
+
+            filas: list[CandidatoRecomendado] = []
+            for key, (n, ef, fa, noctrl, pe, last_m) in agg.items():
+                den = n - noctrl
+                if den < 3:
+                    continue
+                w = _wilson_lower(ef, den)
+                ef_adj = round(ef / den * 100, 1) if den else 0.0
+                score = round(w * 100, 1)
+
+                ultima: str | None = None
+                if last_m >= 0 and p.fecha_min:
+                    d0 = datetime.strptime(p.fecha_min, "%Y-%m-%d")
+                    ultima = (d0 + timedelta(minutes=last_m)).strftime("%Y-%m-%d")
+
+                filas.append((score, CandidatoRecomendado(
+                    nombre=catalogo[key],
+                    efectividad_ajustada=f"{ef_adj}%",
+                    efectivas=ef,
+                    fallidas=fa,
+                    perdidas=pe,
+                    ultima_orden=ultima,
+                )))
+
+            if len(filas) >= 2:
+                filas.sort(key=lambda t: t[0], reverse=True)
+                tope = self._TOPE_TECNICOS if kind == "tec" else self._TOPE_BRIGADAS
+                return [c for _, c in filas[:tope]]
+
+        return []
 
     # --- Interno --------------------------------------------------------------
 

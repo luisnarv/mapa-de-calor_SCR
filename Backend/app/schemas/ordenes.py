@@ -65,6 +65,77 @@ class OrdenSinUbicar(BaseModel):
     municipio: str | None = None
 
 
+class CandidatoRecomendado(BaseModel):
+    """Un técnico o brigada recomendado según efectividad histórica."""
+
+    nombre: str
+    efectividad_ajustada: str = Field(description="Efectivas / (total − no controlables), e.g. '87.2%'.")
+    efectivas: int
+    fallidas: int
+    perdidas: int
+    ultima_orden: str | None = Field(description="Fecha de la orden más reciente (YYYY-MM-DD).")
+
+
+class FranjaHoraria(BaseModel):
+    """Franja horaria con su efectividad histórica."""
+
+    franja: str = Field(description="Rango horario, e.g. '06:00–08:00'.")
+    efectividad: str = Field(description="Efectividad ajustada en esa franja, e.g. '85.3%'.")
+    ordenes: int = Field(description="Órdenes ejecutadas en esa franja.")
+
+
+class MejorHorario(BaseModel):
+    """Franjas horarias del barrio ordenadas por efectividad."""
+
+    mejor_dia: str | None = Field(description="Día de la semana con mejor efectividad, o null si no hay datos.")
+    franjas: list[FranjaHoraria]
+
+
+class CausaFrecuente(BaseModel):
+    """Causa de fallo frecuente en el barrio."""
+
+    causa: str
+    ordenes: int = Field(description="Órdenes no efectivas con esta causa.")
+    porcentaje: str = Field(description="Sobre el total de no efectivas, e.g. '40.0%'.")
+
+
+class HistorialNic(BaseModel):
+    """Resumen de visitas históricas a un NIC."""
+
+    total_visitas: int
+    efectivas: int
+    fallidas: int
+    perdidas: int
+    efectividad: str = Field(description="Efectividad cruda (efectivas/total), e.g. '60.0%'.")
+    ultima_visita: str | None = Field(description="Fecha de la última visita (YYYY-MM-DD).")
+
+
+class RecomendacionResponse(BaseModel):
+    """Técnicos y brigadas recomendados para un NIC."""
+
+    nic: str
+    barrio: str
+    municipio: str
+    tecnicos_recomendados: list[CandidatoRecomendado]
+    brigadas_recomendadas: list[CandidatoRecomendado]
+    mejor_horario: MejorHorario
+    causas_fallo: list[CausaFrecuente]
+    historial_nic: HistorialNic
+
+
+class RecomendacionBatchRequest(BaseModel):
+    """Lote de NICs para recomendar."""
+
+    nics: list[str] = Field(description="Lista de NICs a consultar.")
+
+
+class RecomendacionBatchResponse(BaseModel):
+    """Resultado del lote de recomendaciones."""
+
+    resultados: list[RecomendacionResponse]
+    no_encontrados: list[str] = Field(description="NICs que no aparecen en el histórico.")
+
+
 class PuntosCargue(BaseModel):
     """Las órdenes del cargue situadas en el mapa.
 
