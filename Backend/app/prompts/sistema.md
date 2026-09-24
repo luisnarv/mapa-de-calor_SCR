@@ -36,6 +36,15 @@ MAYOR/MENOR DE EDAD», «MINIMO VITAL», «PROTEGIDO CONSTITUCIONALMENTE», «PO
 ESTADO», «MEDIDOR NO ENCONTRADO», «CLIENTE AUTORECONECTADO», «SECTOR PELIGROSO».
 Si encaja, filtra por `subaccion` en `efectividad` o agrupa con `ranking`.
 
+**Traduce la pregunta al nombre de la casilla — nadie pregunta con el nombre exacto.**
+Pasó de verdad: preguntaron por «clientes no cortables por condiciones médicas» tres
+veces y las tres declinó sin buscar nada, porque «condiciones médicas» no aparece
+igual en ningún catálogo. Sí existe, con otro nombre: «salud», «condiciones médicas»,
+«no cortable», «cliente no se puede cortar» → subacción `MINIMO VITAL`, `ADULTO
+MAYOR/MENOR DE EDAD` o `PROTEGIDO CONSTITUCIONALMENTE`, según cuál encaje. Antes de
+concluir que algo no está en ningún catálogo, intenta con el nombre de subacción más
+cercano — no solo con las palabras literales que usó quien pregunta.
+
 Las dos fuentes dan cifras DISTINTAS y la casilla es la buena: el acta se queda corta
 cuando el técnico no escribió el término, y se pasa cuando lo nombra sin que fuera el
 motivo. En producción «red chilena» daba 1.487 por acta y 3.738 por casilla.

@@ -603,3 +603,63 @@ def test_agrupar_cargue_no_se_confunde_con_una_pregunta_del_historico():
     assert "SOLO las órdenes que el usuario subió en un archivo" in descripcion
     assert "usa `ranking`" in descripcion
     assert "sin archivo cargado" in descripcion
+
+
+# --- Bug 10: «condiciones médicas» no aparece con ese nombre en ningún catálogo ---
+#
+# El caso real, tomado del feedback: «dame un listado de clientes no cortables
+# por condiciones médicas» se preguntó tres veces el mismo día y las tres se
+# declinó sin llamar a ninguna herramienta. La causa no era el prompt de
+# declinar sin buscar —eso ya estaba resuelto—: era que el vocabulario que
+# traducía «condiciones médicas» a una subacción real (MINIMO VITAL, ADULTO
+# MAYOR/MENOR DE EDAD) se borró sin querer al reescribir esta misma sección
+# para priorizar la casilla sobre el acta, y nadie lo notó hasta revisar la
+# traza de producción.
+
+def test_el_prompt_traduce_condiciones_medicas_a_una_subaccion_real():
+    """Sin esta traducción, el modelo busca «condiciones médicas» literal, no
+    encuentra nada en ningún catálogo, y declina en vez de intentar con el
+    nombre real de la subacción."""
+    prompt = settings.OPENAI_SYSTEM_PROMPT
+
+    assert "condiciones médicas" in prompt
+    assert "MINIMO VITAL" in prompt
+    assert "ADULTO" in prompt and "MAYOR" in prompt
+
+
+@pytest.mark.asyncio
+async def test_las_subacciones_de_salud_que_promete_el_prompt_existen_con_datos(runner):
+    """Que el prompt las nombre no basta: si alguna no resuelve a nada, el
+    modelo seguiría sin poder responder aunque siguiera la instrucción al pie
+    de la letra."""
+    for subaccion in ("minimo vital", "adulto mayor", "protegido constitucionalmente"):
+        salida, _ = await runner.run("efectividad", {"subaccion": subaccion})
+        assert salida["metricas"]["tot"] > 0, f"«{subaccion}» no tiene órdenes en el recorte"
+
+
+# --- Bug 11: causas_no_efectivas no filtraba por subacción ni tarifa ---------
+#
+# El caso real: preguntar «causas de no efectividad en estrato 3» ignoraba el
+# estrato en silencio y devolvía las causas de todo el Atlántico. `efectividad`
+# y `ranking` ya habían recibido este mismo filtro (Bug 8); a esta se le quedó
+# fuera al hacerlo.
+
+@pytest.mark.asyncio
+async def test_causas_no_efectivas_filtra_por_tarifa(runner):
+    con_filtro, filtro_mapa = await runner.run("causas_no_efectivas", {"tarifa": "estrato 3"})
+    sin_filtro, _ = await runner.run("causas_no_efectivas", {})
+
+    assert "estrato 3" in con_filtro["base"]
+    assert con_filtro["causas"] != sin_filtro["causas"]
+    assert filtro_mapa is None, "el tablero no sabe filtrar por tarifa; no debe moverse"
+
+
+@pytest.mark.asyncio
+async def test_causas_no_efectivas_filtra_por_subaccion(runner):
+    """«Predio enrejado» es en sí una subacción de imposibilidad técnica: filtrar
+    por ella tiene que dar 100% de esa causa, no la mezcla de todo el histórico."""
+    salida, _ = await runner.run("causas_no_efectivas", {"subaccion": "predio enrejado"})
+
+    assert len(salida["causas"]) == 1
+    assert salida["causas"][0]["causa"] == "Imposibilidad tecnica"
+    assert salida["causas"][0]["pct"] == 100.0

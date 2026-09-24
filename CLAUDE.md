@@ -104,6 +104,15 @@ pedir que se lea.
 - **`Backend/app/core/taxonomy.py` es un espejo de `Etl/etl/taxonomy.py`.** Si
   cambias una causa o una homologación, cámbiala en los dos. Hay una prueba que
   lo verifica, pero solo corre si pandas está instalado en el venv del backend.
+- **En `tools.py`, cada herramienta tiene su propio parámetro para lo mismo, y
+  no comparten variable aunque se llamen igual.** Pasó de verdad: `_TARIFA` (del
+  histórico, se niega a filtrar si el nombre es ambiguo) y la tarifa de
+  `ordenes_cargadas` (del archivo, coincide por subcadena y avisa cuáles
+  incluyó) se llamaban las dos `_TARIFA`; la segunda definición tapó a la
+  primera en silencio y `ordenes_cargadas` le mostró al modelo el
+  comportamiento de la otra herramienta durante semanas. Por eso la del cargue
+  se llama `_TARIFA_CARGUE`. Antes de reutilizar una constante de parámetro
+  entre dos herramientas, confirma que de verdad se comportan igual.
 - **El chat consume el "Modelo Propensión de Pago Service" por HTTP, como un
   proveedor externo más.** Vive en otro repositorio, con su propio venv
   (`catboost`) y sus modelos `.cbm`. La herramienta `propension_pago` le manda
@@ -155,9 +164,11 @@ cd Etl && python run_etl.py
   `ChatRequest.model` es libre: el cliente elige con qué modelo se le responde.
 - Los endpoints de lectura del feedback (`GET /api/v1/feedback`) tampoco tienen
   autenticación, y ahí sí hay conversaciones completas de usuarios.
-- Nadie ha revisado feedback todavía: el ciclo de la fase 4 —leer los votos
-  negativos, diagnosticarlos con la traza y convertirlos en casos de
-  `test_recortes.py`— está montado pero sin estrenar.
+- El ciclo de leer votos, diagnosticar con la traza y convertirlos en casos de
+  `test_recortes.py` sí se corrió una vez (Bug 10), pero con las 105
+  interacciones sin calificar que había en la tabla: nadie ha dado un pulgar
+  todavía en la interfaz real. Sin votos genuinos no hay forma de saber si el
+  chat mejora, solo si no repite los errores ya encontrados a mano.
 
 ---
 

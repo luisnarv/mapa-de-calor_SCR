@@ -61,7 +61,13 @@ _BRIGADA = {
     ),
 }
 _TIPO_OS = {"type": "string", "description": "Tipo de orden de servicio."}
-_TARIFA = {
+# Del archivo cargado: coincide por subcadena y siempre dice cuáles tarifas
+# incluyó (ver `_filtrar`), a diferencia de `_TARIFA` (más abajo), que es del
+# histórico y se niega a filtrar cuando el nombre es ambiguo. Nombre propio a
+# propósito: antes las dos se llamaban `_TARIFA` y la segunda tapaba a la
+# primera en silencio, así que `ordenes_cargadas` mostraba el comportamiento
+# de la otra herramienta.
+_TARIFA_CARGUE = {
     "type": "string",
     "description": (
         "Tarifa o estrato, completo o parcial ('estrato 2'). Cuidado: hay variantes "
@@ -186,6 +192,7 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
                     "brigada": _BRIGADA,
+                    "subaccion": _SUBACCION, "tarifa": _TARIFA,
                 },
             },
         },
@@ -337,7 +344,7 @@ TOOLS: list[dict[str, Any]] = [
                             "'MUNICIPIO | BARRIO'."
                         ),
                     },
-                    "tarifa": _TARIFA,
+                    "tarifa": _TARIFA_CARGUE,
                     "estado": {
                         "type": "string",
                         "description": "Estado de la orden: Pendiente, Asignada, Comprometida…",
@@ -887,10 +894,22 @@ class ToolRunner:
         municipio: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        if subaccion:
+            base += f" · {subaccion}"
+        if tarifa:
+            base += f" · {tarifa}"
+        # Mismo motivo que en `_efectividad` y `_ranking`: el tablero no sabe
+        # filtrar por estas dos, y moverlo a un recorte más ancho que la
+        # respuesta es peor que dejarlo quieto.
+        if subaccion or tarifa:
+            filtro = None
         filas = await self.metrics.causas(
-            bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses, brigada=brigada
+            bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses,
+            brigada=brigada, subaccion=subaccion, tarifa=tarifa,
         )
         return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
 

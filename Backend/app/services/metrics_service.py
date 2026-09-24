@@ -381,12 +381,15 @@ class MetricsService:
         municipio: str | None = None,
         meses: Sequence[str] | None = None,
         brigada: str | None = None,
+        subaccion: str | None = None,
+        tarifa: str | None = None,
         limite: int = 6,
     ) -> list[FilaCausa]:
         """Causas de las órdenes NO efectivas, de mayor a menor."""
         p = self.datos
         conteo = self._agrupar(
-            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada
+            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada,
+            subaccion=subaccion, tarifa=tarifa,
         ).get(0, Conteo())
 
         total = sum(conteo.causas.values())

@@ -307,6 +307,25 @@ async def test_el_estrato_exacto_no_arrastra_al_otro(cargue_variado):
     assert resultado["total"] == 1
 
 
+def test_la_descripcion_de_tarifa_no_es_la_del_historico():
+    """Bug real: `ordenes_cargadas` y `efectividad` tenían cada una su propio
+    parámetro de tarifa, pero los dos se llamaban `_TARIFA` en el código —el
+    segundo tapaba al primero en silencio— y `ordenes_cargadas` terminaba
+    mostrándole al modelo el comportamiento de la OTRA herramienta: que ante un
+    nombre ambiguo no se aplica el filtro, cuando en realidad `ordenes_cargadas`
+    sí lo aplica y avisa cuáles tarifas incluyó (ver el test de arriba).
+    """
+    from app.services.tools import TOOLS
+
+    descripcion = next(
+        t["function"]["parameters"]["properties"]["tarifa"]
+        for t in TOOLS if t["function"]["name"] == "ordenes_cargadas"
+    )["description"]
+
+    assert "dice siempre cuáles incluyó" in descripcion
+    assert "no se aplica el filtro" not in descripcion
+
+
 @pytest.mark.asyncio
 async def test_agrupar_por_tarifa_cuenta_y_suma_cada_grupo(cargue_variado):
     resultado, _ = await cargue_variado.run("agrupar_cargue", {"agrupar_por": "tarifa"})
