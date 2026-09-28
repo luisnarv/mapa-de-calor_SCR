@@ -1,12 +1,12 @@
-# Endpoint de Recomendación por NIC
-
-## `GET /api/v1/ordenes/recomendar/{nic}`
-
-Recomienda técnicos y brigadas para un NIC según desempeño histórico.
+# API de Recomendación
 
 **Base URL:** `http://52.88.48.137`
 
 ---
+
+## 1. Individual — `GET /api/v1/ordenes/recomendar/{nic}`
+
+Recomienda técnicos y brigadas para un NIC según desempeño histórico.
 
 ### Parámetro de ruta
 
@@ -20,22 +20,72 @@ Recomienda técnicos y brigadas para un NIC según desempeño histórico.
 curl http://52.88.48.137/api/v1/ordenes/recomendar/7502057
 ```
 
+### Respuesta 200 — `RecomendacionResponse`
+
+→ Ver [esquemas de respuesta](#esquemas-de-respuesta) más abajo.
+
+### NIC no encontrado → 404
+
+```json
+{"detail": "NIC 9999999 no encontrado en el histórico."}
+```
+
 ---
 
-### Respuesta 200 — `RecomendacionResponse`
+## 2. Por lotes — `POST /api/v1/ordenes/recomendar`
+
+Misma lógica Wilson, pero procesa una lista de NICs en una sola petición (sin límite).
+
+### Request body
+
+| Campo | Tipo | Req | Descripción |
+|-------|------|-----|-------------|
+| `nics` | `string[]` | sí | Lista de NICs a consultar |
+
+### Ejemplo
+
+```bash
+curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
+  -H "Content-Type: application/json" \
+  -d '{"nics": ["7502057", "2313797", "7798002"]}'
+```
+
+### Respuesta 200 — `RecomendacionBatchResponse`
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `resultados` | `RecomendacionResponse[]` | Recomendaciones de los NICs encontrados |
+| `no_encontrados` | `string[]` | NICs que no aparecen en el histórico |
+
+> Los NICs que no existen **no hacen fallar** la petición: aparecen en `no_encontrados` y el resto se procesa normal.
+
+---
+
+## Diferencias entre endpoints
+
+| | Individual | Lote |
+|---|---|---|
+| Método | `GET /recomendar/{nic}` | `POST /recomendar` |
+| Entrada | Un NIC en la ruta | Lista de NICs en el body |
+| NIC no encontrado | Responde 404 | Lo agrega a `no_encontrados` |
+| Límite | 1 NIC | Sin límite |
+
+---
+
+## Esquemas de respuesta
+
+### RecomendacionResponse
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `nic` | `string` | NIC consultado |
 | `barrio` | `string` | Barrio (BKEY: `"MUNICIPIO \| BARRIO"`) |
 | `municipio` | `string` | Municipio |
-| `tecnicos_recomendados` | `CandidatoRecomendado[]` | Top 3 técnicos por Wilson |
+| `tecnicos_recomendados` | `CandidatoRecomendado[]` | Top 4 técnicos por Wilson |
 | `brigadas_recomendadas` | `CandidatoRecomendado[]` | Top 3 brigadas por Wilson |
 | `mejor_horario` | `MejorHorario` | Mejor día de la semana por efectividad |
 | `causas_fallo` | `CausaFrecuente[]` | Top 5 causas de fallo en el barrio |
 | `historial_nic` | `HistorialNic` | Resumen de visitas históricas al NIC |
-
----
 
 ### CandidatoRecomendado
 
@@ -84,7 +134,7 @@ curl http://52.88.48.137/api/v1/ordenes/recomendar/7502057
 
 ---
 
-### Niveles de alcance
+## Niveles de alcance (Wilson)
 
 El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 candidatos con ≥3 órdenes comparables:
 
@@ -95,7 +145,7 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
 
 ---
 
-### Ejemplo de respuesta
+## Ejemplo de respuesta (individual)
 
 ```json
 {
@@ -143,16 +193,8 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
     "franjas": []
   },
   "causas_fallo": [
-    {
-      "causa": "PREDIO CERRADO",
-      "ordenes": 45,
-      "porcentaje": "38.1%"
-    },
-    {
-      "causa": "PREDIO ENREJADO",
-      "ordenes": 22,
-      "porcentaje": "18.6%"
-    }
+    {"causa": "PREDIO CERRADO", "ordenes": 45, "porcentaje": "38.1%"},
+    {"causa": "PREDIO ENREJADO", "ordenes": 22, "porcentaje": "18.6%"}
   ],
   "historial_nic": {
     "total_visitas": 8,
@@ -162,5 +204,52 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
     "efectividad": "62.5%",
     "ultima_visita": "2026-08-26"
   }
+}
+```
+
+## Ejemplo de respuesta (lote)
+
+```json
+{
+  "resultados": [
+    {
+      "nic": "7502057",
+      "barrio": "PUERTO COLOMBIA | LAS MARGARITAS",
+      "municipio": "PUERTO COLOMBIA",
+      "tecnicos_recomendados": [
+        {
+          "nombre": "DAIRO JOSE PACHECO CANTILLO",
+          "efectividad_ajustada": "99.1%",
+          "efectivas": 108,
+          "fallidas": 1,
+          "perdidas": 1,
+          "ultima_orden": "2026-08-26"
+        }
+      ],
+      "brigadas_recomendadas": [
+        {
+          "nombre": "Brigada Tipo Pesada",
+          "efectividad_ajustada": "96.5%",
+          "efectivas": 250,
+          "fallidas": 23,
+          "perdidas": 7,
+          "ultima_orden": "2026-08-28"
+        }
+      ],
+      "mejor_horario": {"mejor_dia": "domingo", "franjas": []},
+      "causas_fallo": [
+        {"causa": "PREDIO CERRADO", "ordenes": 45, "porcentaje": "38.1%"}
+      ],
+      "historial_nic": {
+        "total_visitas": 8,
+        "efectivas": 5,
+        "fallidas": 2,
+        "perdidas": 1,
+        "efectividad": "62.5%",
+        "ultima_visita": "2026-08-26"
+      }
+    }
+  ],
+  "no_encontrados": ["9999999"]
 }
 ```
