@@ -16,6 +16,9 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 
+# ===== SALIDA ETL (intermedia; los JSON se copian a su destino real) =====
+Etl/salida/
+
 # ===== DATOS TABULARES =====
 *.csv
 *.xlsx

@@ -157,9 +157,6 @@ cd Etl && python run_etl.py
 
 ## Pendientes conocidos
 
-- Repartir la salida del ETL a `Frontend/dashboard/public/` y `Backend/app/data/`
-  sigue siendo manual. Los `observaciones_*.json` son la excepción: van solo al
-  backend. Copiarlos al frontend sería peso muerto en cada visita al tablero.
 - El endpoint del chat no tiene autenticación ni límite de peticiones. Y
   `ChatRequest.model` es libre: el cliente elige con qué modelo se le responde.
 - Los endpoints de lectura del feedback (`GET /api/v1/feedback`) tampoco tienen
