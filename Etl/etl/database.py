@@ -12,7 +12,7 @@ from typing import Iterator
 import pandas as pd
 import psycopg2
 
-from .config import QUERY_ESTADOS, QUERY_HISTORICO
+from .config import QUERY_ESTADOS
 from .logging_conf import get_logger
 from .text import norm_dato
 
@@ -65,14 +65,14 @@ class Database:
         finally:
             cur.close()
 
-    def fetch_ordenes(self) -> pd.DataFrame:
-        """Trae todas las órdenes de historico_mo como DataFrame."""
-        log.info("Consultando dbanalitica.historico_mo…")
+    def fetch_ordenes(self, query: str) -> pd.DataFrame:
+        """Trae órdenes como DataFrame usando la query proporcionada."""
+        log.info("Consultando la base de datos…")
         with self._cursor() as cur:
-            cur.execute(QUERY_HISTORICO)
+            cur.execute(query)
             columns = [desc[0] for desc in cur.description]
             df = pd.DataFrame(cur.fetchall(), columns=columns)
-        log.info("Cargadas %s filas desde historico_mo.", f"{len(df):,}")
+        log.info("Cargadas %s filas.", f"{len(df):,}")
         return df
 
     def fetch_estado_map(self) -> dict[str, str]:

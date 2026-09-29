@@ -65,10 +65,20 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
-    """Filtra a filas con Estado + GPS + fecha válidos y arma BKEY."""
+    """Filtra a filas con Estado + GPS + fecha válidos y arma BKEY.
+
+    Solo conserva el año en curso (el del registro más reciente), igual que SCR.
+    """
     d = df[df["Estado"].notna() & df["LATITUD"].notna() & df["LONGITUD"].notna()].copy()
     d["dt"] = pd.to_datetime(d["FECHA_EJECUCION"], errors="coerce")
     d = d[d["dt"].notna()].sort_values("dt").reset_index(drop=True)
+
+    anio_actual = d["dt"].max().year
+    antes = len(d)
+    d = d[d["dt"].dt.year == anio_actual].reset_index(drop=True)
+    if len(d) < antes:
+        log.info("Filtro año %d: %s descartadas -> quedan %s",
+                 anio_actual, f"{antes - len(d):,}", f"{len(d):,}")
 
     d["MUNICIPIO"] = d["MUNICIPIO"].fillna("SIN MUNICIPIO")
     d["LOCALIDAD/BARRIO"] = d["LOCALIDAD/BARRIO"].fillna("SIN BARRIO")

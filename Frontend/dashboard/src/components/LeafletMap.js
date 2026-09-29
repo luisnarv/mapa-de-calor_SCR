@@ -74,7 +74,8 @@ export default function LeafletMap({
   onSelectNic,
   onFilterChange,
   dayLabel,
-  ordenes
+  ordenes,
+  V = {}
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -312,7 +313,7 @@ export default function LeafletMap({
         .setLatLng([st.lat(i), st.lon(i)])
         .setContent(`
           <div class="op-h" style="border-color:${PC.st[e]}">
-            <b>Orden ${st.ORD_raw[i] || "—"}</b>
+            <b>${V.orden || "Orden"} ${st.ORD_raw[i] || "—"}</b>
             <span class="op-e" style="color:${PC.stText[e]}">${dim.estados[e]}</span>
           </div>
           <table class="op-t">
@@ -321,10 +322,10 @@ export default function LeafletMap({
               <tr><td>Causa</td><td>${dim.causas[st.C_raw[i]]} ${
                 ctrl ? "" : '<em class="op-nc">no controlable</em>'
               }</td></tr>
-              <tr><td>Subacción</td><td>${dim.subs[st.S_raw[i]]}</td></tr>
-              <tr><td>Técnico</td><td>${dim.tecs[st.T_raw[i]]}</td></tr>
-              <tr><td>Brigada</td><td>${dim.brigs[st.G_raw[i]]}</td></tr>
-              <tr><td>Tipo OS</td><td>${dim.tipos[st.O_raw[i]]}</td></tr>
+              <tr><td>${V.subaccion || "Subacción"}</td><td>${dim.subs[st.S_raw[i]]}</td></tr>
+              <tr><td>${V.tecnico || "Técnico"}</td><td>${dim.tecs[st.T_raw[i]]}</td></tr>
+              <tr><td>${V.brigada || "Brigada"}</td><td>${dim.brigs[st.G_raw[i]]}</td></tr>
+              <tr><td>${V.tipoOs || "Tipo OS"}</td><td>${dim.tipos[st.O_raw[i]]}</td></tr>
               <tr><td>Suspensión</td><td>${dim.susps[st.U_raw[i]]}</td></tr>
               <tr><td>Tarifa</td><td>${dim.tarifas[st.F_raw[i]]}</td></tr>
               <tr><td>Barrio</td><td>${barrioName(st.B_raw[i])} · ${barrioMuni(st.B_raw[i])}</td></tr>
@@ -336,7 +337,7 @@ export default function LeafletMap({
             <button class="op-b" data-b="${st.B_raw[i]}">Ver análisis de ${barrioName(
               st.B_raw[i]
             )}</button>
-            <button class="op-n" data-nic="${st.NIC_raw ? st.NIC_raw[i] : ""}">Ver historial de órdenes de este NIC</button>
+            <button class="op-n" data-nic="${st.NIC_raw ? st.NIC_raw[i] : ""}">Ver historial de este NIC</button>
           </div>
         `)
         .openOn(map);
@@ -524,7 +525,7 @@ export default function LeafletMap({
                 ? `<span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${
                     o.risk ?? "—"
                   }</span>
-                <span>${num(o.tot)} órdenes · ${pct(o.efPct)}% efectividad</span>` +
+                <span>${num(o.tot)} ${V.ordenMin || "orden"}es · ${pct(o.efPct)}% efectividad</span>` +
                   (distinto
                     ? `<span class="tt-l">datos bajo el nombre <b>${barrioName(
                         p.b
@@ -533,7 +534,7 @@ export default function LeafletMap({
                   (dudoso
                     ? `<span class="tt-w">enlace dudoso · solo ${Math.round(
                         p.cf * 100
-                      )}% de sus órdenes caen aquí</span>`
+                      )}% de sus ${V.ordenMin || "orden"}es caen aquí</span>`
                     : "")
                 : ""),
             { sticky: true, className: "tt" }
@@ -561,7 +562,7 @@ export default function LeafletMap({
           renderer: vecRenderer
         })
           .bindTooltip(
-            `<b>${p.n}</b><span class="tt-m">${p.m} · sin órdenes registradas</span>`,
+            `<b>${p.n}</b><span class="tt-m">${p.m} · sin ${V.ordenMin || "orden"}es registradas</span>`,
             { sticky: true, className: "tt" }
           )
           .addTo(hullLayerRef.current);
@@ -648,7 +649,7 @@ export default function LeafletMap({
           const tip =
             `<b>${barrioName(b)}</b><span class="tt-m">${barrioMuni(b)}</span>
             <span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${o.risk ?? "—"}</span>
-            <span>${num(o.tot)} órdenes · ${pct(o.efPct)}% efectividad</span>
+            <span>${num(o.tot)} ${V.ordenMin || "orden"}es · ${pct(o.efPct)}% efectividad</span>
             <span>${num(o.pe)} perdidas · ${num(o.fa)} fallidas</span>` +
             (n !== o.tot ? `<span class="tt-p">mostrando ${num(n)} de ${num(o.tot)} en el filtro actual</span>` : "");
 
@@ -835,7 +836,7 @@ export default function LeafletMap({
         .bindPopup(
           `
           <div class="op-h" style="border-color:${color}">
-            <b>Orden ${o.orden}</b>
+            <b>${V.orden || "Orden"} ${o.orden}</b>
             <span class="op-e" style="color:${P.cargueText}">Por ejecutar</span>
           </div>
           <table class="op-t">
@@ -845,8 +846,8 @@ export default function LeafletMap({
               <tr><td>Barrio</td><td>${o.barrio || "—"}${
                 o.municipio ? ` · ${o.municipio}` : ""
               }</td></tr>
-              <tr><td>Técnico</td><td>${o.tecnico || "—"}</td></tr>
-              <tr><td>Tipo OS</td><td>${o.tipo_os || "—"}</td></tr>
+              <tr><td>${V.tecnico || "Técnico"}</td><td>${o.tecnico || "—"}</td></tr>
+              <tr><td>${V.tipoOs || "Tipo OS"}</td><td>${o.tipo_os || "—"}</td></tr>
               <tr><td>Ubicación</td><td>${precision[o.origen] || "—"}</td></tr>
             </tbody>
           </table>
@@ -888,8 +889,8 @@ export default function LeafletMap({
     <div id="mapwrap">
       <div ref={mapContainerRef} id="map" style={{ height: "100%", width: "100%" }} />
       <div id="mapEmpty" style={{ display: mapaVacio ? "block" : "none" }}>
-        <b>Ninguna orden seleccionada</b>
-        <p>Marca al menos un tipo de orden — perdidas, fallidas o efectivas — para dibujarlas en el mapa.</p>
+        <b>Ninguna {V.ordenMin || "orden"} seleccionada</b>
+        <p>Marca al menos un tipo de {V.ordenMin || "orden"} — perdidas, fallidas o efectivas — para dibujarlas en el mapa.</p>
       </div>
     </div>
   );

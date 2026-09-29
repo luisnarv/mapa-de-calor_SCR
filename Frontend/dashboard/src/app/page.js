@@ -40,7 +40,7 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
 //
 // No hay un interruptor de encendido: apagar los cuatro modos ya deja la capa sin
 // dibujar, así que una casilla más solo daba dos formas de hacer lo mismo.
-function CapasCargue({ layers, onLayers }) {
+function CapasCargue({ layers, onLayers, V = {} }) {
   const casilla = (clave, texto) => (
     <label className="lay">
       <input
@@ -54,7 +54,7 @@ function CapasCargue({ layers, onLayers }) {
 
   return (
     <div className="lgrp">
-      <h4>Órdenes por ejecutar</h4>
+      <h4>{V.ordenes || "Órdenes"} por ejecutar</h4>
       {casilla("cargueMarkers", "Marcadores por barrio")}
       {casilla("cargueHeat", "Mapa de calor")}
       {casilla("cargueGps", "GPS reales")}
@@ -73,6 +73,21 @@ export default function Home() {
   const { palette: P } = useTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [proceso, setProceso] = useState("scr");
+
+  const V = useMemo(() => proceso === "cobros" ? {
+    tecnico: "Gestor", tecnicos: "Gestores", tecnicoMin: "gestor",
+    brigada: "Plan", brigadas: "Planes", brigadaMin: "plan",
+    tipoOs: "Gestión", tiposOs: "Gestiones", tipoOsMin: "gestión",
+    orden: "Gestión", ordenes: "Gestiones", ordenMin: "gestión",
+    subaccion: "Línea de acción", subacciones: "Líneas de acción",
+  } : {
+    tecnico: "Técnico", tecnicos: "Técnicos", tecnicoMin: "técnico",
+    brigada: "Brigada", brigadas: "Brigadas", brigadaMin: "brigada",
+    tipoOs: "Tipo OS", tiposOs: "Tipos de OS", tipoOsMin: "tipo de orden",
+    orden: "Orden", ordenes: "Órdenes", ordenMin: "orden",
+    subaccion: "Subacción", subacciones: "Subacciones",
+  }, [proceso]);
 
   // Controla si el panel de capas está desplegado u oculto
   const [layersCollapsed, setLayersCollapsed] = useState(false);
@@ -162,9 +177,15 @@ export default function Home() {
 
     setSt((prev) => ({
       ...prev,
+      zona: "",
+      muni: "",
+      brig: "",
+      tipo: "",
       d0: 0,
       d1: maxD,
       selBarrio: null,
+      selTec: null,
+      selNic: null,
       months: recent ? [recent.label] : []
     }));
   };
@@ -175,11 +196,14 @@ export default function Home() {
   // se descargan perezosamente al seleccionarlos.
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setData(null);
     (async () => {
-      let resData = await cacheGet("data.json");
+      const cacheKey = `${proceso}/data.json`;
+      let resData = await cacheGet(cacheKey);
       if (!resData) {
-        resData = await fetch("/data.json").then((r) => r.json());
-        cachePut("data.json", resData);
+        resData = await fetch(`/${proceso}/data.json`).then((r) => r.json());
+        cachePut(cacheKey, resData);
       }
       if (cancelled) return;
       applyEntryData(resData);
@@ -190,7 +214,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [proceso]);
 
   // Lazy month loader: whenever the selection includes a month that is not yet
   // loaded, download its file and merge it into `data`.
@@ -215,12 +239,12 @@ export default function Home() {
 
     Promise.all(
       need.map(async (m) => {
-        // Caché local primero (IndexedDB, TTL 1h); si no, red + guardar.
-        let pts = await cacheGet(m.file);
+        const cacheKey = `${proceso}/${m.file}`;
+        let pts = await cacheGet(cacheKey);
         if (!pts) {
-          const j = await fetch("/" + m.file).then((r) => r.json());
+          const j = await fetch(`/${proceso}/${m.file}`).then((r) => r.json());
           pts = j.pts;
-          cachePut(m.file, pts);
+          cachePut(cacheKey, pts);
         }
         return { m, pts };
       })
@@ -315,10 +339,20 @@ export default function Home() {
     const idx = new Int16Array(N);
     const keyToIdx = new Map();
     const D0 = new Date(data.meta.fecha_min + "T00:00:00");
+
+    // Precalcular etiqueta por día único (~270) en vez de por punto (688K).
+    const dayToLabel = new Map();
     for (let i = 0; i < N; i++) {
-      const x = new Date(D0.getTime() + DAY[i] * 86400000);
-      const k = x.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
-      const cap = k.charAt(0).toUpperCase() + k.slice(1);
+      const d = DAY[i];
+      if (!dayToLabel.has(d)) {
+        const x = new Date(D0.getTime() + d * 86400000);
+        const k = x.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+        dayToLabel.set(d, k.charAt(0).toUpperCase() + k.slice(1));
+      }
+    }
+
+    for (let i = 0; i < N; i++) {
+      const cap = dayToLabel.get(DAY[i]);
       let mi = keyToIdx.get(cap);
       if (mi === undefined) {
         mi = keyToIdx.size;
@@ -334,12 +368,17 @@ export default function Home() {
   // etiqueta legible para mantener compatibilidad con st.months y monthMap.
   const availableMonths = useMemo(() => {
     if (!data || !data.meta.months) return [];
-    return data.meta.months.map((m) => ({
-      key: m.label,
-      ym: m.key,
-      n: m.n,
-      recent: !!m.recent
-    }));
+    const all = data.meta.months;
+    const rec = all.find((m) => m.recent);
+    const anio = rec ? rec.key.slice(0, 4) : null;
+    return all
+      .filter((m) => !anio || m.key.startsWith(anio))
+      .map((m) => ({
+        key: m.label,
+        ym: m.key,
+        n: m.n,
+        recent: !!m.recent
+      }));
   }, [data]);
 
   const lat = (i) => {
@@ -766,10 +805,10 @@ export default function Home() {
         t: "Solicitar acompañamiento policial o gestor social",
         d: `<b>${n0(
           f("seguridad")
-        )}</b> órdenes se perdieron por resistencia o agresión del cliente (${n1(
+        )}</b> ${V.ordenMin}es se perdieron por resistencia o agresión del cliente (${n1(
           share("seguridad")
         )}% de las no efectivas).
-            Reasignar el técnico <b>no resuelve esto</b>: la causa es de seguridad, no de competencia. Programa estas visitas con acompañamiento.`
+            Reasignar al ${V.tecnicoMin} <b>no resuelve esto</b>: la causa es de seguridad, no de competencia. Programa estas visitas con acompañamiento.`
       });
     }
     if (share("comercial") >= 35) {
@@ -778,7 +817,7 @@ export default function Home() {
         t: "Sincronizar cartera antes del despacho",
         d: `<b>${n0(
           f("comercial")
-        )}</b> órdenes fallaron porque el cliente ya había pagado. Son visitas evitables:
+        )}</b> ${V.ordenMin}es fallaron porque el cliente ya había pagado. Son visitas evitables:
             depurar la cartera el mismo día del despacho liberaría cerca de <b>${n0(
               f("comercial")
             )}</b> desplazamientos en este barrio.`
@@ -790,7 +829,7 @@ export default function Home() {
         t: "Programar reintentos en franja alterna",
         d: `<b>${n0(
           f("acceso")
-        )}</b> órdenes con acceso impedido o difícil. Reprograma en horario distinto y coordina ingreso
+        )}</b> ${V.ordenMin}es con acceso impedido o difícil. Reprograma en horario distinto y coordina ingreso
             con portería o administración en multifamiliares.`
       });
     }
@@ -800,37 +839,37 @@ export default function Home() {
         t: "Revisar direcciones en catastro",
         d: `<b>${n0(
           f("datos")
-        )}</b> órdenes no se ubicaron (suministro no encontrado, servicio inexistente o predio demolido).
+        )}</b> ${V.ordenMin}es no se ubicaron (suministro no encontrado, servicio inexistente o predio demolido).
             Enviar a validación de datos antes de volver a despachar.`
       });
     }
     if (share("infra") >= 15) {
       acts.push({
         lvl: "warn",
-        t: "Reforzar con brigada especializada",
+        t: `Reforzar con ${V.brigadaMin} especializada`,
         d: `<b>${n0(
           f("infra")
-        )}</b> órdenes con imposibilidad técnica o sin medidor. Asigna brigada pesada o cuadrilla con canasta
-            en lugar de brigada liviana.`
+        )}</b> ${V.ordenMin}es con imposibilidad técnica o sin medidor. Asigna ${V.brigadaMin} pesada o cuadrilla con canasta
+            en lugar de ${V.brigadaMin} liviana.`
       });
     }
     if (o.efAdj < z.efAdj - 8 && o.tot >= st.minOrders) {
       acts.push({
         lvl: "crit",
-        t: "Redistribuir carga entre técnicos",
+        t: `Redistribuir carga entre ${V.tecnicoMin}s`,
         d: `La efectividad ajustada del barrio (<b>${n1(
           o.efAdj
         )}%</b>) está <b>${n1(
           z.efAdj - o.efAdj
         )} pp</b> por debajo de su zona.
-            Aquí sí hay margen operativo: revisa el ranking y reasigna a los técnicos con mejor desempeño ajustado.`
+            Aquí sí hay margen operativo: revisa el ranking y reasigna a los ${V.tecnicoMin}s con mejor desempeño ajustado.`
       });
     }
     if (o.trend > 5) {
       acts.push({
         lvl: "crit",
         t: "Priorizar intervención: deterioro sostenido",
-        d: `Las órdenes no efectivas subieron <b>${n1(
+        d: `Las ${V.ordenMin}es no efectivas subieron <b>${n1(
           o.trend
         )} pp</b> en la segunda mitad del período. Interviene antes de que el barrio
             se consolide como crítico.`
@@ -839,12 +878,12 @@ export default function Home() {
     if (o.tec.size <= 2 && o.tot >= 40) {
       acts.push({
         lvl: "info",
-        t: "Ampliar cobertura de técnicos",
+        t: `Ampliar cobertura de ${V.tecnicoMin}s`,
         d: `Solo <b>${
           o.tec.size
-        }</b> técnico(s) atienden <b>${n0(
+        }</b> ${V.tecnicoMin}(s) atienden <b>${n0(
           o.tot
-        )}</b> órdenes. Un único punto de falla: amplía el pool asignado.`
+        )}</b> ${V.ordenMin}es. Un único punto de falla: amplía el pool asignado.`
       });
     }
     if (!acts.length) {
@@ -867,16 +906,16 @@ export default function Home() {
 
     const levels = [
       {
-        name: "este barrio y este tipo de orden",
+        name: `este barrio y este ${V.tipoOsMin}`,
         test: (i) => B[i] === bIdx && (tipoIdx < 0 || O[i] === tipoIdx)
       },
       { name: "este barrio (todos los tipos)", test: (i) => B[i] === bIdx },
       {
-        name: "este municipio y este tipo de orden",
+        name: `este municipio y este ${V.tipoOsMin}`,
         test: (i) => data.dim.b_muni[B[i]] === muni && (tipoIdx < 0 || O[i] === tipoIdx)
       },
       {
-        name: "esta zona y este tipo de orden",
+        name: `esta zona y este ${V.tipoOsMin}`,
         test: (i) => data.dim.b_zona[B[i]] === zona && (tipoIdx < 0 || O[i] === tipoIdx)
       }
     ];
@@ -1009,19 +1048,18 @@ export default function Home() {
       const next = { ...prev, [key]: value };
 
       if (key === "months") {
-        const D0 = new Date((data ? data.meta.fecha_min : "2026-05-01") + "T00:00:00");
+        const selIdx = new Set(
+          value.map((k) => monthMap.keyToIdx.get(k)).filter((v) => v !== undefined)
+        );
         let minD = 99999;
         let maxD = 0;
-        const rawDayArr = rawArrays.DAY;
-        const N = rawDayArr.length;
+        const DAY = rawArrays.DAY;
+        const MI = monthMap.idx;
+        const N = DAY.length;
         for (let i = 0; i < N; i++) {
-          const d = rawDayArr[i];
-          const x = new Date(D0.getTime() + d * 86400000);
-          const mKey = x.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
-          const capitalized = mKey.charAt(0).toUpperCase() + mKey.slice(1);
-          if (value.includes(capitalized)) {
-            if (d < minD) minD = d;
-            if (d > maxD) maxD = d;
+          if (selIdx.has(MI[i])) {
+            if (DAY[i] < minD) minD = DAY[i];
+            if (DAY[i] > maxD) maxD = DAY[i];
           }
         }
         if (minD !== 99999) {
@@ -1087,6 +1125,7 @@ export default function Home() {
       zona: nombre(dim.zonas, st.zona),
       brigada: nombre(dim.brigs, st.brig),
       tipo_os: nombre(dim.tipos, st.tipo),
+      proceso,
       meses: (st.months || []).map((l) => porEtiqueta.get(l)).filter(Boolean)
     };
   };
@@ -1105,7 +1144,7 @@ export default function Home() {
 
     (async () => {
       try {
-        const res = await fetch(`${api}/api/v1/ordenes/${cargue.id}/puntos`, {
+        const res = await fetch(`${api}/api/v1/ordenes/${cargue.id}/puntos?proceso=${proceso}`, {
           signal: controller.signal
         });
         if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
@@ -1209,10 +1248,10 @@ export default function Home() {
     try {
       await cacheClear();
       setLoadingMonths([]);
-      const resData = await fetch("/data.json?t=" + Date.now(), {
+      const resData = await fetch(`/${proceso}/data.json?t=` + Date.now(), {
         cache: "no-store"
       }).then((r) => r.json());
-      cachePut("data.json", resData);
+      cachePut(`${proceso}/data.json`, resData);
       applyEntryData(resData);
       setRefreshResult("ok");
     } catch (err) {
@@ -1296,6 +1335,7 @@ export default function Home() {
               handleSelectBarrio(b);
               handleFilterChange("activeTab", "detalle");
             }}
+            V={V}
           />
         </aside>
       );
@@ -1316,6 +1356,7 @@ export default function Home() {
             onFilterChange={handleFilterChange}
             onSelectBarrio={handleSelectBarrio}
             onSelectNic={handleSelectNic}
+            V={V}
           />
         </aside>
       );
@@ -1345,6 +1386,7 @@ export default function Home() {
               handleSelectBarrio(b);
               handleFilterChange("activeTab", "detalle");
             }}
+            V={V}
           />
         </div>
       );
@@ -1363,6 +1405,8 @@ export default function Home() {
           onRefresh={handleRefresh}
           refreshing={refreshing}
           refreshResult={refreshResult}
+          proceso={proceso}
+          onProceso={setProceso}
         />
 
         <main id="main" className="v4-main" style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -1428,6 +1472,7 @@ export default function Home() {
                 onFilterChange={handleFilterChange}
                 dayLabel={dayLabel}
                 ordenes={ordenes}
+                V={V}
               />
 
               {st.selBarrio != null && (
@@ -1501,7 +1546,7 @@ export default function Home() {
 
                   {!layersCollapsed && (
                     <>
-                      <h4>Órdenes a mostrar</h4>
+                      <h4>{V.ordenes} a mostrar</h4>
                       <label className="lay">
                         <input
                           type="checkbox"
@@ -1546,6 +1591,7 @@ export default function Home() {
   <CapasCargue
     layers={st.layers}
     onLayers={(layers) => handleFilterChange("layers", layers)}
+    V={V}
   />
 )}
 
@@ -1596,7 +1642,7 @@ export default function Home() {
                           Ubicaciones aproximadas
                         </label>
                         <p className="lay-nota">
-                          Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los <b>puntos GPS</b> son órdenes sueltas (clic → detalle de la orden).
+                          Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los <b>puntos GPS</b> son {V.ordenMin}es sueltas (clic → detalle).
                         </p>
                       </div>
 
@@ -1652,7 +1698,7 @@ export default function Home() {
                           Barrios sin visitar
                         </label>
                         <p className="lay-nota">
-                          Barrios (polígonos) sin ninguna orden registrada. Se resaltan en amarillo fuerte.
+                          Barrios (polígonos) sin ninguna {V.ordenMin || "orden"} registrada. Se resaltan en amarillo fuerte.
                         </p>
                       </div>
 
@@ -1683,7 +1729,7 @@ export default function Home() {
           {rightPanelContent}
         </main>
 
-        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} />
+        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
       </div>
     );
   }
@@ -1702,6 +1748,8 @@ export default function Home() {
         onRefresh={handleRefresh}
         refreshing={refreshing}
         refreshResult={refreshResult}
+        proceso={proceso}
+        onProceso={setProceso}
       />
 
 
@@ -1712,6 +1760,7 @@ export default function Home() {
           dim={data.dim}
           onFilterChange={handleFilterChange}
           onSelectBarrio={handleSelectBarrio}
+          V={V}
         />
 
         <section id="center">
@@ -1725,6 +1774,7 @@ export default function Home() {
             onFilterChange={handleFilterChange}
             dayLabel={dayLabel}
             ordenes={ordenes}
+            V={V}
           />
 
           {st.selBarrio != null && (
@@ -1797,7 +1847,7 @@ export default function Home() {
 
             {!layersCollapsed && (
             <>
-            <h4>Órdenes a mostrar</h4>
+            <h4>{V.ordenes} a mostrar</h4>
             <label className="lay">
               <input
                 type="checkbox"
@@ -1842,6 +1892,7 @@ export default function Home() {
   <CapasCargue
     layers={st.layers}
     onLayers={(layers) => handleFilterChange("layers", layers)}
+    V={V}
   />
 )}
 
@@ -1893,7 +1944,7 @@ export default function Home() {
               </label>
               <p className="lay-nota">
                 Los <b>marcadores</b> resumen cada barrio (clic → análisis). Los{" "}
-                <b>puntos GPS</b> son órdenes sueltas (clic → detalle de la orden).
+                <b>puntos GPS</b> son {V.ordenMin}es sueltas (clic → detalle).
               </p>
             </div>
 
@@ -1949,7 +2000,7 @@ export default function Home() {
                 Barrios sin visitar
               </label>
               <p className="lay-nota">
-                Barrios (polígonos) sin ninguna orden registrada. Se resaltan en amarillo fuerte.
+                Barrios (polígonos) sin ninguna {V.ordenMin || "orden"} registrada. Se resaltan en amarillo fuerte.
               </p>
             </div>
 
@@ -1977,6 +2028,7 @@ export default function Home() {
             dayLabel={dayLabel}
             onFilterChange={handleFilterChange}
             onSelectBarrio={handleSelectBarrio}
+            V={V}
           />
         </section>
 
@@ -1994,10 +2046,11 @@ export default function Home() {
           onFilterChange={handleFilterChange}
           onSelectBarrio={handleSelectBarrio}
           onSelectNic={handleSelectNic}
+          V={V}
         />
       </main>
 
-      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} />
+      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
     </div>
   );
 }

@@ -4,10 +4,10 @@ import logging
 from functools import lru_cache
 from typing import Annotated, AsyncIterator
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import PROCESOS_VALIDOS, settings
 from app.core.database import SessionLocal
 from app.services.cargue_store import CargueStore
 from app.services.feedback_service import FeedbackService
@@ -36,8 +36,19 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
-def get_metrics_service() -> MetricsService:
-    return MetricsService(settings.DATA_DIR)
+def _validar_proceso(proceso: str) -> str:
+    if proceso not in PROCESOS_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Proceso inválido: {proceso!r}. Válidos: {', '.join(PROCESOS_VALIDOS)}",
+        )
+    return proceso
+
+
+def get_metrics_service(
+    proceso: str = Query("scr", description="Proceso: scr o cobros"),
+) -> MetricsService:
+    return MetricsService(settings.DATA_DIR / _validar_proceso(proceso))
 
 
 MetricsDep = Annotated[MetricsService, Depends(get_metrics_service)]
@@ -52,10 +63,16 @@ def get_cargue_store() -> CargueStore:
 CargueStoreDep = Annotated[CargueStore, Depends(get_cargue_store)]
 
 
-@lru_cache
-def get_geolocalizador() -> Geolocalizador:
-    """Uno por proceso: conserva el avance de la geolocalización entre peticiones."""
-    return Geolocalizador(settings.DATA_DIR)
+_geolocalizadores: dict[str, Geolocalizador] = {}
+
+
+def get_geolocalizador(
+    proceso: str = Query("scr", description="Proceso: scr o cobros"),
+) -> Geolocalizador:
+    p = _validar_proceso(proceso)
+    if p not in _geolocalizadores:
+        _geolocalizadores[p] = Geolocalizador(settings.DATA_DIR / p)
+    return _geolocalizadores[p]
 
 
 GeolocalizadorDep = Annotated[Geolocalizador, Depends(get_geolocalizador)]
@@ -78,4 +95,12 @@ def get_feedback_service() -> FeedbackService:
 FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
 
 ToolRunnerDep = Annotated[ToolRunner, Depends(get_tool_runner)]
-OpenAIServiceDep = Annotated[OpenAIService, Depends(get_openai_service)]
+
+
+def _get_openai(
+    proceso: str = Query("scr", description="Proceso: scr o cobros"),
+) -> OpenAIService:
+    return get_openai_service(_validar_proceso(proceso))
+
+
+OpenAIServiceDep = Annotated[OpenAIService, Depends(_get_openai)]

@@ -25,7 +25,7 @@ from openai import (
 from app.core.config import settings
 from app.schemas.chat import ChatRequest, VistaTablero
 from app.schemas.metrics import FiltroMapa
-from app.services.tools import TOOLS, ToolRunner
+from app.services.tools import TOOLS, tools_para_proceso, ToolRunner
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +90,14 @@ class OpenAIServiceError(Exception):
 
 class OpenAIService:
     def __init__(
-        self, client: AsyncOpenAI, default_model: str, system_prompt: str = ""
+        self, client: AsyncOpenAI, default_model: str, system_prompt: str = "",
+        proceso: str = "scr",
     ) -> None:
         self._client = client
         self._default_model = default_model
         self._system_prompt = system_prompt
+        self._proceso = proceso
+        self._tools = tools_para_proceso(proceso)
 
     # --- API pública ---------------------------------------------------------
 
@@ -162,7 +165,7 @@ class OpenAIService:
             for ronda in range(MAX_RONDAS):
                 texto, llamadas = "", {}
 
-                extra = {"tools": TOOLS, "tool_choice": "auto"} if runner else {}
+                extra = {"tools": self._tools, "tool_choice": "auto"} if runner else {}
                 stream = await self._client.chat.completions.create(
                     model=model,
                     messages=mensajes,
@@ -241,7 +244,7 @@ class OpenAIService:
         Se le pasan las herramientas igualmente porque el historial ya contiene
         `tool_calls`; sin declararlas, la API rechaza la conversacion.
         """
-        extra = {"tools": TOOLS, "tool_choice": "none"} if con_tools else {}
+        extra = {"tools": self._tools, "tool_choice": "none"} if con_tools else {}
         texto = ""
         try:
             stream = await self._client.chat.completions.create(
@@ -368,8 +371,7 @@ class OpenAIService:
             f"{muestras}"
         )
 
-    @staticmethod
-    def _cargue(runner: Any) -> str:
+    def _cargue(self, runner: Any) -> str:
         """El archivo de órdenes que subió el usuario, si hay alguno vigente.
 
         Sin este bloque el modelo no sabe que existe y nunca llama a sus
@@ -380,25 +382,22 @@ class OpenAIService:
         guardado = runner.cargue_actual() if runner is not None else None
         if guardado is None:
             return ""
+        es_cobros = self._proceso == "cobros"
+        orden_pl = "gestiones" if es_cobros else "órdenes"
+        agente = "gestor" if es_cobros else "técnico"
         return (
             f"ARCHIVO CARGADO — «{guardado.archivo}»: "
-            f"{len(guardado.cargue.ordenes)} órdenes POR EJECUTAR, ya asignadas a un técnico.\n"
+            f"{len(guardado.cargue.ordenes)} {orden_pl} POR EJECUTAR, ya asignadas a un {agente}.\n"
             "Están pendientes: no se han hecho, no tienen resultado y no aparecen en el "
             "histórico ni en el mapa. Para hablar de ellas usa resumen_cargue y "
             "ordenes_cargadas; para lo que ya pasó, las herramientas del histórico.\n"
             "Nunca sumes ni promedies las dos cosas en una misma cifra. Cruzarlas sí "
-            "—qué efectividad tiene históricamente el barrio de una orden pendiente—, "
+            f"—qué efectividad tiene históricamente el barrio de una {orden_pl[:-1]} pendiente—, "
             "siempre que digas cuál es cuál.\n"
-            # La regla «no tienes deuda, estrato ni NIC» es del histórico, y sin esta
-            # excepción el modelo la aplicaba también al archivo: declinaba con la
-            # frase de fuera de alcance preguntas cuyo dato tenía delante.
             "TODA pregunta sobre este archivo está DENTRO de tu alcance, incluidas las "
-            "de deuda, tarifa o estrato, NIC, dirección y antigüedad: de estas órdenes "
+            f"de deuda, tarifa o estrato, NIC, dirección y antigüedad: de estas {orden_pl} "
             "sí tienes esos datos. Nunca respondas a una pregunta sobre este archivo "
             "con la frase de fuera de alcance.\n"
-            # Sin el «después de intentarlo», el modelo se acogía a esta salida sin
-            # llegar a llamar a ninguna herramienta y daba por imposible lo que sí
-            # estaba: una escapatoria fácil se usa siempre.
             "Si después de intentarlo con las herramientas la cuenta que te piden no "
             "sale, dilo así: «eso no lo puedo calcular con lo que tengo», y ofrece lo "
             "más cercano que sí puedas. Nunca lo digas sin haberlo intentado."
@@ -462,12 +461,21 @@ class OpenAIService:
         return OpenAIServiceError("Error inesperado al consultar el modelo.", 502)
 
 
-@lru_cache
-def get_openai_service() -> OpenAIService:
-    """Un solo cliente por proceso: reutiliza el pool de conexiones HTTP."""
-    client = AsyncOpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        timeout=settings.OPENAI_TIMEOUT_SECONDS,
-        max_retries=settings.OPENAI_MAX_RETRIES,
-    )
-    return OpenAIService(client, settings.OPENAI_MODEL, settings.OPENAI_SYSTEM_PROMPT)
+_openai_services: dict[str, OpenAIService] = {}
+
+
+def get_openai_service(proceso: str = "scr") -> OpenAIService:
+    """Una instancia por proceso: comparten el pool HTTP pero tienen distinto prompt."""
+    if proceso not in _openai_services:
+        client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=settings.OPENAI_TIMEOUT_SECONDS,
+            max_retries=settings.OPENAI_MAX_RETRIES,
+        )
+        prompt = (
+            settings.OPENAI_SYSTEM_PROMPT
+            if proceso == "scr"
+            else settings.OPENAI_SYSTEM_PROMPT_COBROS
+        )
+        _openai_services[proceso] = OpenAIService(client, settings.OPENAI_MODEL, prompt, proceso)
+    return _openai_services[proceso]

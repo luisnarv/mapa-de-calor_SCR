@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .config import Settings
+from .config import QUERY_COBROS, QUERY_HISTORICO, Settings
 from .database import Database
 from .logging_conf import get_logger
 from .payload import build_and_write
@@ -30,14 +30,16 @@ def run(settings: Settings) -> dict[str, Any]:
     """
     inicio = time.perf_counter()
     log.info("=" * 60)
-    log.info("ETL SCR — regeneración del payload del dashboard")
+    log.info("ETL %s — regeneración del payload del dashboard", settings.proceso.upper())
     log.info("=" * 60)
 
-    with Database(settings.database_url) as db:
-        df_crudo = db.fetch_ordenes()
-        estado_map = db.fetch_estado_map()
+    query = QUERY_HISTORICO if settings.proceso == "scr" else QUERY_COBROS
 
-    df = enrich(df_crudo, estado_map)
+    with Database(settings.database_url) as db:
+        df_crudo = db.fetch_ordenes(query)
+        estado_map = db.fetch_estado_map() if settings.proceso == "scr" else None
+
+    df = enrich(df_crudo, estado_map, proceso=settings.proceso)
 
     if settings.write_csv and settings.csv_path is not None:
         settings.csv_path.parent.mkdir(parents=True, exist_ok=True)

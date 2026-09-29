@@ -105,12 +105,12 @@ class IndiceNic:
     ordenes_de: dict[str, list[int]]
 
 
-_payload: Payload | None = None
-_firma: tuple | None = None
-_indice_nic: IndiceNic | None = None
-_firma_nic: tuple | None = None
-_ubicaciones: Ubicaciones | None = None
-_firma_ubi: tuple | None = None
+_payloads: dict[Path, Payload] = {}
+_firmas: dict[Path, tuple] = {}
+_indices_nic: dict[Path, IndiceNic] = {}
+_firmas_nic: dict[Path, tuple] = {}
+_ubicaciones_cache: dict[Path, Ubicaciones] = {}
+_firmas_ubi: dict[Path, tuple] = {}
 _lock = Lock()
 
 
@@ -132,34 +132,30 @@ def _firma_de(directorio: Path) -> tuple:
 
 def obtener(directorio: Path) -> Payload:
     """Devuelve el payload cacheado, recargándolo si los archivos cambiaron."""
-    global _payload, _firma
-
     try:
         firma = _firma_de(directorio)
     except OSError as exc:
         raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
 
     with _lock:
-        if _payload is None or firma != _firma:
-            _payload = _cargar(directorio)
-            _firma = firma
-        return _payload
+        if directorio not in _payloads or firma != _firmas.get(directorio):
+            _payloads[directorio] = _cargar(directorio)
+            _firmas[directorio] = firma
+        return _payloads[directorio]
 
 
 def obtener_indice_nic(directorio: Path) -> IndiceNic:
     """Índice NIC → barrio, cacheado con la misma firma que el payload."""
-    global _indice_nic, _firma_nic
-
     try:
         firma = _firma_de(directorio)
     except OSError as exc:
         raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
 
     with _lock:
-        if _indice_nic is None or firma != _firma_nic:
-            _indice_nic = _construir_indice_nic(directorio)
-            _firma_nic = firma
-        return _indice_nic
+        if directorio not in _indices_nic or firma != _firmas_nic.get(directorio):
+            _indices_nic[directorio] = _construir_indice_nic(directorio)
+            _firmas_nic[directorio] = firma
+        return _indices_nic[directorio]
 
 
 def _construir_indice_nic(directorio: Path) -> IndiceNic:
@@ -214,18 +210,16 @@ def _iter_meses(directorio: Path, raiz: dict) -> Iterator[tuple[dict, dict]]:
 
 def obtener_ubicaciones(directorio: Path) -> Ubicaciones:
     """Índice de ubicaciones conocidas, cacheado igual que el payload."""
-    global _ubicaciones, _firma_ubi
-
     try:
         firma = _firma_de(directorio)
     except OSError as exc:
         raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
 
     with _lock:
-        if _ubicaciones is None or firma != _firma_ubi:
-            _ubicaciones = _cargar_ubicaciones(directorio)
-            _firma_ubi = firma
-        return _ubicaciones
+        if directorio not in _ubicaciones_cache or firma != _firmas_ubi.get(directorio):
+            _ubicaciones_cache[directorio] = _cargar_ubicaciones(directorio)
+            _firmas_ubi[directorio] = firma
+        return _ubicaciones_cache[directorio]
 
 
 def _cargar_ubicaciones(directorio: Path) -> Ubicaciones:
@@ -354,8 +348,8 @@ def _cargar(directorio: Path) -> Payload:
 # dentro de una conversación; guardar las dos versiones costaba el doble de
 # memoria. Los extractos que se le muestran al usuario salen de `leer_actas`,
 # que relee el archivo para las pocas posiciones que hagan falta.
-_observaciones: dict[str, list[str]] = {}
-_firma_obs: tuple | None = None
+_observaciones: dict[tuple[Path, str], list[str]] = {}
+_firmas_obs: dict[Path, tuple] = {}
 
 
 def obtener_observaciones(directorio: Path, mes: str) -> list[str]:
@@ -365,21 +359,22 @@ def obtener_observaciones(directorio: Path, mes: str) -> list[str]:
     Devuelve `[]` si ese mes todavía no tiene archivo: hasta que no corra el ETL
     nuevo no existe ninguno, y buscar sin resultados es mejor que caerse.
     """
-    global _firma_obs
-
     try:
         firma = _firma_de(directorio)
     except OSError as exc:
         raise PayloadNoDisponible(f"No se pudo leer {directorio}: {exc}") from exc
 
     with _lock:
-        if firma != _firma_obs:
-            _observaciones.clear()
-            _firma_obs = firma
-        if mes not in _observaciones:
+        if firma != _firmas_obs.get(directorio):
+            claves_viejas = [k for k in _observaciones if k[0] == directorio]
+            for k in claves_viejas:
+                del _observaciones[k]
+            _firmas_obs[directorio] = firma
+        clave = (directorio, mes)
+        if clave not in _observaciones:
             crudas = _leer_observaciones(directorio, mes)
-            _observaciones[mes] = [norm(t) for t in crudas]
-        return _observaciones[mes]
+            _observaciones[clave] = [norm(t) for t in crudas]
+        return _observaciones[clave]
 
 
 def leer_actas(directorio: Path, mes: str, posiciones: Sequence[int]) -> dict[int, str]:

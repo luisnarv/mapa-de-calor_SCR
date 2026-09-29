@@ -54,9 +54,12 @@ export default function Topbar({
   loadingMonths = [],
   onRefresh,
   refreshing = false,
-  refreshResult = null
+  refreshResult = null,
+  proceso = "scr",
+  onProceso
 }) {
   const { theme, toggle } = useTheme();
+  const esCobros = proceso === "cobros";
 
   const [monthsOpen, setMonthsOpen] = React.useState(false);
   const mesesRef = React.useRef(null);
@@ -146,7 +149,15 @@ export default function Topbar({
     <header id="top">
       {/* Una sola fila: identidad, filtros y utilidades. */}
       <div className="hd-id">
-        <div className="hd-badge" aria-hidden="true">SCR</div>
+        <select
+          className="hd-badge hd-proceso"
+          value={proceso}
+          onChange={(e) => onProceso?.(e.target.value)}
+          title="Cambiar proceso"
+        >
+          <option value="scr">SCR</option>
+          <option value="cobros">COBROS</option>
+        </select>
         <div className="hd-title">
           <b>Centro operativo</b>
           <span>ISES · Air-E</span>
@@ -154,7 +165,7 @@ export default function Topbar({
 
         <div className="hd-ctx">
           {dim.barrios.length.toLocaleString("es-CO")} barrios ·{" "}
-          {dim.tecs.length.toLocaleString("es-CO")} técnicos ·{" "}
+          {dim.tecs.length.toLocaleString("es-CO")} {esCobros ? "gestores" : "técnicos"} ·{" "}
           {diaCorto(st.fechaMin)} – {diaCorto(st.fechaMax)}
         </div>
 
@@ -177,18 +188,22 @@ export default function Topbar({
             vacio={`Todos los municipios (${avail.muni.size})`}
           />
           <FiltroPildora
-            etiqueta="Brigada"
+            etiqueta={esCobros ? "Plan" : "Brigada"}
             valor={st.brig}
             opciones={opcionesDe(dim.brigs, avail.brig)}
             onElegir={(v) => onFilterChange("brig", v)}
-            vacio={`Todas las brigadas (${avail.brig.size})`}
+            vacio={esCobros
+              ? `Todos los planes (${avail.brig.size})`
+              : `Todas las brigadas (${avail.brig.size})`}
           />
           <FiltroPildora
-            etiqueta="Tipo OS"
+            etiqueta={esCobros ? "Gestión" : "Tipo OS"}
             valor={st.tipo}
             opciones={opcionesDe(dim.tipos, avail.tipo)}
             onElegir={(v) => onFilterChange("tipo", v)}
-            vacio={`Todos los tipos (${avail.tipo.size})`}
+            vacio={esCobros
+              ? `Todas las gestiones (${avail.tipo.size})`
+              : `Todos los tipos (${avail.tipo.size})`}
           />
 
           <div className="hd-f" ref={mesesRef}>

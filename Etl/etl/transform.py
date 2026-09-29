@@ -16,7 +16,14 @@ import pandas as pd
 
 from .config import BBOX, COLS_TEXTO
 from .logging_conf import get_logger
-from .taxonomy import causa_for_norm_key, homolog_brigada
+from .taxonomy import (
+    RESULTADOS_EFECTIVOS,
+    RESULTADOS_PERDIDOS,
+    causa_cobros_for_norm_key,
+    causa_for_norm_key,
+    homolog_brigada,
+    homolog_linea_accion,
+)
 from .text import RE_VS, norm, norm_dato
 
 log = get_logger()
@@ -49,29 +56,33 @@ def _map_por_unico(serie: pd.Series, fn) -> pd.Series:
     return serie.map(tabla)
 
 
-def enrich(df: pd.DataFrame, estado_map: dict[str, str]) -> pd.DataFrame:
+def enrich(
+    df: pd.DataFrame,
+    estado_map: dict[str, str] | None,
+    *,
+    proceso: str = "scr",
+) -> pd.DataFrame:
     """Aplica todos los filtros y campos derivados del ETL.
 
     Args:
-        df: DataFrame crudo tal cual sale de historico_mo.
-        estado_map: {subacción normalizada -> Estado}.
+        df: DataFrame crudo con los alias de columna del pipeline.
+        estado_map: {subacción normalizada -> Estado}. Solo para SCR;
+            COBROS pasa ``None`` y deriva el estado de ``AV/RESULTADO``.
+        proceso: ``"scr"`` o ``"cobros"``.
 
     Returns:
         DataFrame enriquecido, deduplicado por ORDEN, con las columnas
         `COLS_OBJETIVO + COLS_DERIVADAS`.
-
-    Raises:
-        RuntimeError: si el cruce de Estado deja TODAS las filas sin estado
-            (indicaría un problema con maestro_tarifas).
     """
     df = df.copy()
     df["Estado"] = None
 
-    # --- Solo órdenes con acta de visita (OBSERVACION que empieza con "VS:") ---
-    antes = len(df)
-    df = df[df["OBSERVACION"].astype(str).str.match(RE_VS, na=False)].copy()
-    log.info("Filtro VS: %s descartadas de %s -> quedan %s",
-             f"{antes - len(df):,}", f"{antes:,}", f"{len(df):,}")
+    # --- Solo órdenes con acta de visita (SCR filtra por "VS:") ---
+    if proceso == "scr":
+        antes = len(df)
+        df = df[df["OBSERVACION"].astype(str).str.match(RE_VS, na=False)].copy()
+        log.info("Filtro VS: %s descartadas de %s -> quedan %s",
+                 f"{antes - len(df):,}", f"{antes:,}", f"{len(df):,}")
 
     # --- Identificadores como texto (sin el ".0" que pandas pega a floats) ---
     for col in COLS_TEXTO:
@@ -100,26 +111,43 @@ def enrich(df: pd.DataFrame, estado_map: dict[str, str]) -> pd.DataFrame:
     dt = pd.to_datetime(df["FECHA_CIERRE"], errors="coerce")
     df["FECHA_EJECUCION"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    # --- Homologación de brigada (una vez por valor único) ---
-    df["TIPO BRIGADA"] = _map_por_unico(df["TIPO BRIGADA"], homolog_brigada)
+    # --- Homologaciones por proceso ---
+    if proceso == "scr":
+        df["TIPO BRIGADA"] = _map_por_unico(df["TIPO BRIGADA"], homolog_brigada)
+    else:
+        df["SUBACCION/SUBANOMALIA"] = _map_por_unico(
+            df["SUBACCION/SUBANOMALIA"], homolog_linea_accion,
+        )
 
-    # --- Estado (cruce con maestro_tarifas por subacción normalizada) ---
-    df["Estado"] = _map_por_unico(
-        df["SUBACCION/SUBANOMALIA"],
-        lambda s: estado_map.get(norm_dato(s)) if pd.notna(s) else None,
-    )
+    # --- Estado ---
+    if proceso == "scr":
+        df["Estado"] = _map_por_unico(
+            df["SUBACCION/SUBANOMALIA"],
+            lambda s: estado_map.get(norm_dato(s)) if pd.notna(s) else None,
+        )
+    else:
+        def _resultado_a_estado(r: object) -> str | None:
+            if pd.isna(r):
+                return None
+            txt = str(r).strip().upper()
+            if txt in RESULTADOS_EFECTIVOS:
+                return "Efectiva"
+            if txt in RESULTADOS_PERDIDOS:
+                return "Perdida"
+            return "Fallida"
+        df["Estado"] = _map_por_unico(df["AV/RESULTADO"], _resultado_a_estado)
+
     asignados = int(df["Estado"].notna().sum())
     if asignados == 0:
-        raise RuntimeError(
-            "'Estado' quedó vacío en TODAS las filas. Revisa dbanalitica.maestro_tarifas."
-        )
+        raise RuntimeError("'Estado' quedó vacío en TODAS las filas.")
     log.info("Estado: %s asignados, %s sin match.",
              f"{asignados:,}", f"{int(df['Estado'].isna().sum()):,}")
 
     # --- CAUSA / FAMILIA_CAUSA / CONTROLABLE (vectorizado) ---
+    _classify = causa_for_norm_key if proceso == "scr" else causa_cobros_for_norm_key
     accion_norm = _map_por_unico(df["ACCION"], lambda a: norm(a).upper())
     unicas = pd.unique(accion_norm)
-    causa_lut = {k: causa_for_norm_key(k) for k in unicas}
+    causa_lut = {k: _classify(k) for k in unicas}
     df["CAUSA"] = accion_norm.map({k: v[0] for k, v in causa_lut.items()})
     df["FAMILIA_CAUSA"] = accion_norm.map({k: v[1] for k, v in causa_lut.items()})
     df["CONTROLABLE"] = accion_norm.map({k: v[2] for k, v in causa_lut.items()})

@@ -160,6 +160,9 @@ h2,h3,h4{font-family:var(--ff);font-weight:700;letter-spacing:.01em;color:var(--
   background:var(--hd-badge-bg);color:var(--hd-badge-tx);display:flex;
   align-items:center;justify-content:center;font:500 12px var(--ff);
   letter-spacing:.06em}
+select.hd-proceso{width:auto;min-width:60px;flex:0 0 auto;padding:0 4px;
+  border:none;cursor:pointer;appearance:auto;-webkit-appearance:auto;
+  text-align:center}
 .hd-title{min-width:0;display:flex;flex-direction:column}
 .hd-title b{font:500 14px var(--ff);color:var(--hd-id-tx);line-height:1.2}
 .hd-title span{font-size:12px;color:var(--hd-id-sub);line-height:1.3}

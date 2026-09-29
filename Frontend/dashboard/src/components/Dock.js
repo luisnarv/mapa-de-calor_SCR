@@ -11,7 +11,8 @@ export default function Dock({
   dim,
   dayLabel,
   onFilterChange,
-  onSelectBarrio
+  onSelectBarrio,
+  V = {}
 }) {
   const [gran, setGran] = useState("dia");
   const { palette: P } = useTheme();
@@ -161,7 +162,7 @@ export default function Dock({
           {card("Tasa fallida", R1.fa, R2.fa, false)}
           <div className="tc">
             <span>Volumen</span>
-            <b>{num(R2.t)} órdenes</b>
+            <b>{num(R2.t)} {V.ordenMin || "orden"}es</b>
             <span className={`tc-d ${volD >= 0 ? "ok" : "bad"}`}>
               {volD >= 0 ? (
                 <TrendingUp size={12} strokeWidth={2.4} aria-hidden="true" />
@@ -182,7 +183,7 @@ export default function Dock({
                 key={i}
                 className="tb"
                 style={{ width: `${100 / series.length}%` }}
-                title={`${label(s.k)} · ${num(s.t)} órdenes · ${pct(
+                title={`${label(s.k)} · ${num(s.t)} ${V.ordenMin || "orden"}es · ${pct(
                   seg(0)
                 )}% efectividad · ${num(s.v[1])} fallidas · ${num(
                   s.v[2]
@@ -243,7 +244,7 @@ export default function Dock({
             </div>
           );
         })}
-        {!causes.length && <p className="empty">Sin órdenes no efectivas.</p>}
+        {!causes.length && <p className="empty">Sin {V.ordenMin || "orden"}es no efectivas.</p>}
       </div>
     );
   };
@@ -289,7 +290,7 @@ export default function Dock({
       </tr>
     );
 
-    const H = ["", "Órdenes", "Efect. aj.", "Efect. bruta", "Fallidas", "Perdidas"];
+    const H = ["", V.ordenes || "Órdenes", "Efect. aj.", "Efect. bruta", "Fallidas", "Perdidas"];
 
     const best = T.slice()
       .sort((a, b) => b[1].efAdj - a[1].efAdj)
@@ -309,35 +310,35 @@ export default function Dock({
         <div className="dock-row rk-grid">
           <div>
             <h4>
-              Técnicos · mayor efectividad ajustada{" "}
-              <span className="hint">≥{minN} órdenes</span>
+              {V.tecnicos || "Técnicos"} · mayor efectividad ajustada{" "}
+              <span className="hint">≥{minN} {V.ordenMin || "orden"}es</span>
             </h4>
-            {tbl(best, ["Técnico", ...H.slice(1)], tecRow)}
+            {tbl(best, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div>
-            <h4>Técnicos · menor efectividad ajustada</h4>
-            {tbl(worst, ["Técnico", ...H.slice(1)], tecRow)}
+            <h4>{V.tecnicos || "Técnicos"} · menor efectividad ajustada</h4>
+            {tbl(worst, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div>
-            <h4>Técnicos · más órdenes perdidas</h4>
-            {tbl(lost, ["Técnico", ...H.slice(1)], tecRow)}
+            <h4>{V.tecnicos || "Técnicos"} · más {V.ordenMin || "orden"}es perdidas</h4>
+            {tbl(lost, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div>
-            <h4>Técnicos · mayor volumen</h4>
-            {tbl(vol, ["Técnico", ...H.slice(1)], tecRow)}
+            <h4>{V.tecnicos || "Técnicos"} · mayor volumen</h4>
+            {tbl(vol, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div className="wide">
-            <h4>Brigadas · desempeño</h4>
+            <h4>{V.brigadas || "Brigadas"} · desempeño</h4>
             {tbl(
               Bg.sort((a, b) => b[1].efAdj - a[1].efAdj),
-              ["Brigada", ...H.slice(1)],
+              [V.brigada || "Brigada", ...H.slice(1)],
               brigRow
             )}
           </div>
         </div>
         <p className="hint" style={{ marginTop: "12px" }}>
-          El ranking ordena por <b>efectividad ajustada</b>. Ordenar por efectividad bruta penalizaría a los técnicos que
-          recibieron más órdenes de clientes que ya habían pagado — algo que no depende de ellos.
+          El ranking ordena por <b>efectividad ajustada</b>. Ordenar por efectividad bruta penalizaría a los {V.tecnicoMin || "técnico"}s que
+          recibieron más {V.ordenMin || "orden"}es de clientes que ya habían pagado — algo que no depende de ellos.
         </p>
       </>
     );
@@ -356,13 +357,13 @@ export default function Dock({
           <tr>
             <th>Barrio</th>
             <th>Municipio</th>
-            <th className="num">Órdenes</th>
+            <th className="num">{V.ordenes || "Órdenes"}</th>
             <th className="num">Efect.</th>
             <th className="num ok">Efect. aj.</th>
             <th className="num warn">Fallidas</th>
             <th className="num bad">Perdidas</th>
-            <th className="num">Técnicos</th>
-            <th className="num">Brigadas</th>
+            <th className="num">{V.tecnicos || "Técnicos"}</th>
+            <th className="num">{V.brigadas || "Brigadas"}</th>
             <th className="num">Riesgo</th>
           </tr>
         </thead>
@@ -445,10 +446,10 @@ export default function Dock({
             <tr>
               <th>Barrio</th>
               <th>Municipio</th>
-              <th className="num">Órdenes</th>
+              <th className="num">{V.ordenes || "Órdenes"}</th>
               <th className="num ok">Efectividad</th>
-              <th className="num">Técnicos</th>
-              <th className="num">Brigadas</th>
+              <th className="num">{V.tecnicos || "Técnicos"}</th>
+              <th className="num">{V.brigadas || "Brigadas"}</th>
               <th></th>
             </tr>
           </thead>
@@ -482,8 +483,8 @@ export default function Dock({
           <table className="mt rk">
             <thead>
               <tr>
-                <th>Brigada</th>
-                <th className="num">Órdenes</th>
+                <th>{V.brigada || "Brigada"}</th>
+                <th className="num">{V.ordenes || "Órdenes"}</th>
                 <th className="num">Participación</th>
                 <th></th>
               </tr>
@@ -529,7 +530,7 @@ export default function Dock({
             <div className="jer-tec-h" style={{ borderBottom: "none", paddingBottom: 0 }}>
               <b>{dim.tecs[t]}</b>
               <span className="jer-tec-m">
-                {num(s.tot)} órdenes &middot;{" "}
+                {num(s.tot)} {V.ordenMin || "orden"}es &middot;{" "}
                 <em className="ok">{s.ef} ef</em> &middot;{" "}
                 <em className="warn">{s.fa} fa</em> &middot;{" "}
                 <em className="bad">{s.pe} pe</em> &middot; {pct((s.ef / s.tot) * 100)}% efect.

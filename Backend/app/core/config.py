@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = BACKEND_ROOT / "app" / "prompts"
+PROCESOS_VALIDOS: tuple[str, ...] = ("scr", "cobros")
 
 
 def leer_prompt(nombre: str) -> str:
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     OPENAI_TIMEOUT_SECONDS: float = 60.0
     OPENAI_MAX_RETRIES: int = 2
     OPENAI_SYSTEM_PROMPT: str = leer_prompt("sistema.md")
+    OPENAI_SYSTEM_PROMPT_COBROS: str = leer_prompt("sistema_cobros.md")
 
     CARGUE_MAX_MB: int = 10
     CARGUE_TTL_MINUTOS: int = 120

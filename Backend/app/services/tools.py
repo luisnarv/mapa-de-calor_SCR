@@ -506,6 +506,61 @@ TOOLS: list[dict[str, Any]] = [
 
 NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in TOOLS)
 
+
+def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
+    """Devuelve TOOLS con descripciones adaptadas al proceso."""
+    if proceso == "scr":
+        return TOOLS
+
+    import copy
+    import re
+
+    _REEMPLAZOS: list[tuple[str, str]] = [
+        ("el técnico", "el gestor"),
+        ("al técnico", "al gestor"),
+        ("del técnico", "del gestor"),
+        ("un técnico", "un gestor"),
+        ("técnicos", "gestores"),
+        ("técnico", "gestor"),
+        ("brigadas", "planes"),
+        ("Tipo de brigada", "Plan de gestión"),
+        ("brigada", "plan"),
+        ("Brigada Tipo Pesada", "Cobro Persuasivo"),
+        ("Brigada Tipo Liviana", "Multifamiliar"),
+        ("Tipo de orden de servicio", "Tipo de gestión"),
+        ("órdenes", "gestiones"),
+        ("Órdenes", "Gestiones"),
+        ("orden de servicio", "gestión"),
+        ("del SCR", "del histórico"),
+        ("del histórico del histórico", "del histórico"),
+        ("«predio enrejado»", "«pago parcial»"),
+        ("«red chilena»", "«acuerdo de pago»"),
+        ("«usuario agresivo»", "«cliente no ubicado»"),
+        ("«adulto mayor»", "«predio cerrado»"),
+        ("«minimo vital»", "«dirección errada»"),
+        ("«poste en mal estado»", "«amenaza»"),
+        ("«medidor no encontrado»", "«cliente agresivo»"),
+        ("«cliente autoreconectado»", "«cambio de dirección»"),
+        ("«sector peligroso»", "«zona de riesgo»"),
+        ("«arbol frondoso»", "«cliente ausente»"),
+    ]
+
+    def _aplicar(texto: str) -> str:
+        for viejo, nuevo in _REEMPLAZOS:
+            texto = texto.replace(viejo, nuevo)
+        # "orden" como sustantivo suelto, sin atrapar "ordenar/ordenadas/ordenados"
+        texto = re.sub(r"\borden\b(?!a)", "gestión", texto)
+        return texto
+
+    tools_cobros = copy.deepcopy(TOOLS)
+    for tool in tools_cobros:
+        fn = tool["function"]
+        fn["description"] = _aplicar(fn.get("description", ""))
+        params = fn.get("parameters", {}).get("properties", {})
+        for param in params.values():
+            param["description"] = _aplicar(param.get("description", ""))
+    return tools_cobros
+
 # Criterios donde un valor alto es malo, no bueno.
 MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas"})
 

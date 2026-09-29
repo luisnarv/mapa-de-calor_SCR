@@ -29,9 +29,9 @@ const DRAG_SLOP = 4;
 const CLOSE_MS = 160; 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-const STREAM_ENDPOINT = `${API_URL}/api/v1/openai/chat/stream`;
+const STREAM_ENDPOINT = (p) => `${API_URL}/api/v1/openai/chat/stream?proceso=${p}`;
 const VOTO_ENDPOINT = (id) => `${API_URL}/api/v1/feedback/${id}`;
-const CARGA_ENDPOINT = `${API_URL}/api/v1/ordenes/cargar`;
+const CARGA_ENDPOINT = (p) => `${API_URL}/api/v1/ordenes/cargar?proceso=${p}`;
 const HEALTH_ENDPOINT = `${API_URL}/health`;
 
 // Cada cuánto se vuelve a comprobar el backend. También con el chat cerrado,
@@ -57,20 +57,18 @@ const MOTIVOS = [
   { id: "mal_redactado", txt: "Mal redactado" }
 ];
 
-const CHIPS = [
-  {
-    rotulo: "Barrios críticos",
-    pregunta: "¿Cuáles son los barrios con peor efectividad ajustada?"
-  },
-  {
-    rotulo: "Causas de pérdida",
-    pregunta: "¿En qué barrios se pierden más órdenes y por qué causas?"
-  },
-  {
-    rotulo: "Rendimiento por brigada",
-    pregunta: "¿Qué brigadas tienen mejor y peor efectividad ajustada?"
-  }
-];
+const CHIPS = {
+  scr: [
+    { rotulo: "Barrios críticos", pregunta: "¿Cuáles son los barrios con peor efectividad ajustada?" },
+    { rotulo: "Causas de pérdida", pregunta: "¿En qué barrios se pierden más órdenes y por qué causas?" },
+    { rotulo: "Rendimiento por brigada", pregunta: "¿Qué brigadas tienen mejor y peor efectividad ajustada?" },
+  ],
+  cobros: [
+    { rotulo: "Barrios críticos", pregunta: "¿Cuáles son los barrios con peor efectividad ajustada?" },
+    { rotulo: "Causas de pérdida", pregunta: "¿En qué barrios se pierden más gestiones y por qué causas?" },
+    { rotulo: "Rendimiento por plan", pregunta: "¿Qué planes tienen mejor y peor efectividad ajustada?" },
+  ],
+};
 
 // Solo hojas de cálculo: el asistente trabaja sobre tablas de órdenes.
 // `accept` es una sugerencia del navegador, no una garantía —y el MIME de un
@@ -93,7 +91,7 @@ const SALUDO = {
 const PENSANDO = [
   "Pensando…",
   "Analizando la consulta…",
-  "Revisando las órdenes…",
+  "Revisando los datos…",
   "Cruzando los datos del tablero…",
   "Redactando la respuesta…",
   "Sigo en ello, dame un momento…"
@@ -372,7 +370,7 @@ function Pensando() {
  *   `vista` es una función —no un objeto— para leer los filtros en el momento de
  *   enviar: si fuera un valor, el envío usaría el de la última renderización.
  */
-export default function ChatBot({ onAccion, vista, onCargue }) {
+export default function ChatBot({ onAccion, vista, onCargue, proceso = "scr" }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -544,7 +542,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
     try {
       const cuerpo = new FormData();
       cuerpo.append("archivo", f);
-      const res = await fetch(CARGA_ENDPOINT, {
+      const res = await fetch(CARGA_ENDPOINT(proceso), {
         method: "POST",
         body: cuerpo,
         signal: controller.signal
@@ -745,7 +743,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
         );
 
       try {
-        const res = await fetch(STREAM_ENDPOINT, {
+        const res = await fetch(STREAM_ENDPOINT(proceso), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -957,8 +955,8 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          aria-label="Abrir el asistente SCR"
-          title="Asistente SCR"
+          aria-label={`Abrir el asistente ${proceso.toUpperCase()}`}
+          title={`Asistente ${proceso.toUpperCase()}`}
         >
           <MessageSquare size={22} strokeWidth={2} aria-hidden="true" />
           <span
@@ -976,7 +974,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
           } ${minimized ? "min" : ""}`}
           style={panelStyle()}
           role="dialog"
-          aria-label="Asistente SCR"
+          aria-label={`Asistente ${proceso.toUpperCase()}`}
         >
           <header
             className={`cb-head ${pinned ? "pinned" : ""} ${panelDragging ? "dragging" : ""}`}
@@ -990,7 +988,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
               <Bot size={18} strokeWidth={2} />
             </span>
             <div className="cb-head-t">
-              <b>Asistente SCR</b>
+              <b>Asistente {proceso.toUpperCase()}</b>
               {/* El estado es el del backend, no el del navegador: "Escribiendo…"
                   solo se muestra si además hay conexión comprobada. */}
               <span role="status">
@@ -1047,7 +1045,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
               <div className="cb-body" ref={bodyRef} aria-live="polite">
                 {messages.length === 1 && (
                   <div className="cb-chips">
-                    {CHIPS.map((c) => (
+                    {(CHIPS[proceso] || CHIPS.scr).map((c) => (
                       <button
                         key={c.rotulo}
                         type="button"
@@ -1120,7 +1118,7 @@ export default function ChatBot({ onAccion, vista, onCargue }) {
                         {subiendo
                           ? "Leyendo el archivo…"
                           : cargue
-                            ? `${cifra(cargue.cargadas)} órdenes con técnico, de ${cifra(cargue.leidas)}`
+                            ? `${cifra(cargue.cargadas)} ${proceso === "cobros" ? "gestiones con gestor" : "órdenes con técnico"}, de ${cifra(cargue.leidas)}`
                             : ""}
                       </span>
                     </div>

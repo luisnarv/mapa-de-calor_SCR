@@ -86,3 +86,78 @@ CAUSAS_NORM: dict[str, tuple[str, str, int]] = {
 BBOX: tuple[float, float, float, float] = (10.0, 11.35, -75.45, -74.35)
 
 ESTADOS: tuple[str, ...] = ("Efectiva", "Fallida", "Perdida")
+
+
+# ====================== COBROS ======================
+
+CAUSAS_COBROS: dict[str, tuple[str, str, int]] = {
+    "COMPROMISO":                          ("Compromiso de pago",          "gestion",   1),
+    "CLIENTE NO TIENE VOLUNTAD DE PAGO":   ("Sin voluntad de pago",        "gestion",   1),
+    "NO ES EL TITULAR DE LA DEUDA":        ("No es el titular",            "datos",     0),
+    "NO ES POSIBLE CONTACTAR AL CLIENTE EN EL PREDIO": ("Cliente no contactable", "acceso", 1),
+    "PAGO TOTAL":                          ("Pago total",                  "exito",     1),
+    "FINANCIACION":                        ("Financiación",                "acuerdo",   1),
+    "PREDIO DESOCUPADO":                   ("Predio desocupado",           "acceso",    0),
+    "INCONFORMIDAD CONSUMOS":              ("Inconformidad consumos",      "comercial", 0),
+    "ABONO":                               ("Abono",                       "exito",     1),
+    "RECLAMO EN TRAMITE":                  ("Reclamo en trámite",          "normativo", 0),
+    "DIRECCION ERRADA":                    ("Dirección errada",            "datos",     1),
+    "PREDIO DEMOLIDO / INEXISTENTE":       ("Predio demolido/inexistente", "datos",     0),
+    "SECTOR PELIGROSO":                    ("Sector peligroso",            "seguridad", 0),
+    "SITUACION VULNERABLE":                ("Situación vulnerable",        "normativo", 0),
+    "NINGUNA":                             ("Sin anomalía",                "otros",     1),
+    "DOBLE FACTURADO":                     ("Doble facturado",             "proceso",   0),
+    "DEUDA ANTERIOR OPERADOR":             ("Deuda anterior operador",     "normativo", 0),
+    "DIFICIL ACCESO A LA LOCALIDAD POR VIA EN MAL ESTAD": ("Vía en mal estado", "acceso", 0),
+    "NO RECIBIO FACTURA":                  ("No recibió factura",          "proceso",   0),
+    "DIFICIL ACCESO A LA LOCALIDAD POR ORDEN PUBLICO": ("Orden público",  "seguridad", 0),
+    "TRANSPORTE Y EQUIPOS":                ("Transporte y equipos",        "logistica", 0),
+    "CONDICIONES CLIMATICAS":              ("Condiciones climáticas",      "logistica", 0),
+}
+
+CAUSA_DEFECTO_COBROS: tuple[str, str, int] = ("Otras anomalías", "otros", 1)
+
+CAUSAS_COBROS_NORM: dict[str, tuple[str, str, int]] = {
+    norm(k).upper(): v for k, v in CAUSAS_COBROS.items()
+}
+
+RESULTADOS_EFECTIVOS: frozenset[str] = frozenset({
+    "REALIZO PAGO", "REALIZO ACUERDO DE PAGO", "PRE-ACUERDO",
+})
+RESULTADOS_PERDIDOS: frozenset[str] = frozenset({
+    "CONTACTO NO EFECTIVO", "NO CONTESTA", "BUZON DE MENSAJES",
+    "TELEFONO EQUIVOCADO", "TELEFONO ERRADO", "CLIENTE CUELGA LLAMADA",
+})
+
+HOMOLOG_LINEA_ACCION: dict[str, str] = {
+    "cobro persuasivo":                "Cobro Persuasivo",
+    "multifamiliar":                   "Multifamiliar",
+    "multfamiliar":                    "Multifamiliar",
+    "multifamiliar cierre":            "Multifamiliar Cierre",
+    "visita personalizada":            "Visita Personalizada",
+    "visita personalizada cierre":     "Visita Personalizada Cierre",
+    "corredores comerciales":          "Comercial",
+    "corredor comercial":              "Comercial",
+    "comercial":                       "Comercial",
+    "comercial est":                   "Comercial",
+    "comerciales":                     "Comercial",
+    "seguimiento palc":                "Seguimiento PalC",
+    "seguimient palc":                 "Seguimiento PalC",
+    "seg palc":                        "Seguimiento PalC",
+    "personalizada palc":              "Seguimiento PalC",
+    "opotunidad normalizacion":        "Normalización",
+    "oportunidad normalizacion":       "Normalización",
+    "normalizacion mayores a 1000 k":  "Normalización",
+    "saneamiento":                     "Normalización",
+    "acu fuera plan":                  "Acuerdo Fuera de Plan",
+    "acu fuera de plan":               "Acuerdo Fuera de Plan",
+    "acuerdo fuera del plan":          "Acuerdo Fuera de Plan",
+    "mtto acuerdo":                    "Mantenimiento Acuerdo",
+    "plan piloto opf":                 "Plan OPF",
+    "piloto opf":                      "Plan OPF",
+    "plan opf":                        "Plan OPF",
+    "f4":                              "F4",
+    "contingencia f4":                 "F4",
+    "atlantico gs":                    "Atlántico GS",
+    "top multi":                       "Top Multi",
+}

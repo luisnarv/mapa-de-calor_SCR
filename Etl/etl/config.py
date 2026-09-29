@@ -45,7 +45,7 @@ MESES_ES: tuple[str, ...] = (
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 )
 
-# Consulta principal: alias a los nombres que el resto del ETL espera.
+# Consulta principal SCR: alias a los nombres que el resto del ETL espera.
 QUERY_HISTORICO: str = """
     SELECT
       zona AS "ZONA",
@@ -72,15 +72,45 @@ QUERY_HISTORICO: str = """
     FROM dbanalitica.historico_mo
 """
 
-# Cruce subacción -> estado (Efectiva/Fallida/Perdida).
+# Cruce subacción -> estado (Efectiva/Fallida/Perdida). Solo SCR.
 QUERY_ESTADOS: str = (
     'SELECT DISTINCT "SubAccion", "Estado" '
     "FROM dbanalitica.maestro_tarifas "
     'WHERE "SubAccion" IS NOT NULL AND "Estado" IS NOT NULL'
 )
 
+# Consulta COBROS: mismos alias internos para reutilizar el pipeline.
+QUERY_COBROS: str = """
+    SELECT
+      zona AS "ZONA",
+      territorio AS "TERRITORIO",
+      id::text AS "ORDEN",
+      cuenta AS "NIC",
+      municipio AS "MUNICIPIO",
+      NULL::text AS "CORREGIMIENTO",
+      barrio AS "LOCALIDAD/BARRIO",
+      tarifa AS "TARIFA",
+      NULL::text AS "DIRECCION",
+      usuario_gestion AS "ID TECNICO",
+      gestor AS "TECNICO",
+      plan AS "TIPO BRIGADA",
+      gestion AS "TIPO OS",
+      NULL::text AS "TIPO SUSPENSION SOLICITADA",
+      anomalia AS "ACCION",
+      linea_accion AS "SUBACCION/SUBANOMALIA",
+      resultado AS "AV/RESULTADO",
+      fecha_gestion AS "FECHA_CIERRE",
+      observaciones AS "OBSERVACION",
+      observaciones AS "OBS_COMBINADA",
+      REPLACE(punto_gps, '.-', ',-') AS "GPS"
+    FROM dbanalitica.historico_aire_cobros
+"""
+
 # Columnas que deben tratarse como texto (evita el ".0" que pandas pega a floats).
 COLS_TEXTO: tuple[str, ...] = ("ORDEN", "NIC", "ID TECNICO")
+
+
+PROCESOS_VALIDOS: tuple[str, ...] = ("scr", "cobros")
 
 
 @dataclass(frozen=True)
@@ -90,6 +120,7 @@ class Settings:
     database_url: str
     public_dir: Path
     geojson_dir: Path
+    proceso: str = "scr"
     write_csv: bool = False
     csv_path: Path | None = None
     log_level: str = "INFO"
@@ -109,6 +140,7 @@ class Settings:
 
 def load_settings(
     *,
+    proceso: str = "scr",
     write_csv: bool = False,
     csv_path: str | os.PathLike[str] | None = None,
     log_level: str | None = None,
@@ -116,13 +148,17 @@ def load_settings(
     """Construye `Settings` a partir del entorno.
 
     Args:
+        proceso: ``"scr"`` o ``"cobros"``.
         write_csv: si se debe generar el CSV consolidado (por defecto no).
         csv_path: ruta del CSV; si es None se usa `<repo>/consolidado_ordenes.csv`.
         log_level: nivel de logging; si es None se lee de `ETL_LOG_LEVEL` o INFO.
 
     Raises:
-        RuntimeError: si no está definida `SCR_DATABASE_URL`.
+        RuntimeError: si no está definida la variable de BD correspondiente.
     """
+    if proceso not in PROCESOS_VALIDOS:
+        raise RuntimeError(f"Proceso desconocido: {proceso!r}. Válidos: {PROCESOS_VALIDOS}")
+
     database_url = os.environ.get("SCR_DATABASE_URL", "").strip()
     if not database_url:
         raise RuntimeError(
@@ -130,10 +166,13 @@ def load_settings(
             "(defínela en Etl/.env o en GitHub Secrets)."
         )
 
+    salida = _ruta_de("ETL_OUTPUT_DIR", SALIDA_POR_DEFECTO / proceso)
+
     return Settings(
         database_url=database_url,
-        public_dir=_ruta_de("ETL_OUTPUT_DIR", SALIDA_POR_DEFECTO),
+        public_dir=salida,
         geojson_dir=_ruta_de("ETL_GEOJSON_DIR", GEOJSON_POR_DEFECTO),
+        proceso=proceso,
         write_csv=write_csv,
         csv_path=Path(csv_path) if csv_path else (ETL_ROOT / "consolidado_ordenes.csv"),
         log_level=(log_level or os.environ.get("ETL_LOG_LEVEL", "INFO")).upper(),

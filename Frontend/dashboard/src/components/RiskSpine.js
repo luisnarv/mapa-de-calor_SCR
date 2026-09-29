@@ -10,7 +10,8 @@ export default function RiskSpine({
   st,
   dim,
   onFilterChange,
-  onSelectBarrio
+  onSelectBarrio,
+  V = {}
 }) {
   const [q, setQ] = useState("");
   const { palette: P } = useTheme();
@@ -66,7 +67,7 @@ export default function RiskSpine({
 
       <div className="lctl">
         <div className="f">
-          <label>Mín. órdenes</label>
+          <label>Mín. {V.ordenMin || "orden"}es</label>
           <input
             type="number"
             id="minOrders"
@@ -116,7 +117,7 @@ export default function RiskSpine({
             onChange={(e) => onFilterChange("spineSort", e.target.value)}
           >
             <option value="risk">Riesgo ↓</option>
-            <option value="tot">Órdenes ↓</option>
+            <option value="tot">{V.ordenes || "Órdenes"} ↓</option>
             <option value="pe">% Perdidas ↓</option>
             <option value="fa">% Fallidas ↓</option>
             <option value="ef">Efectividad ↑</option>
@@ -130,7 +131,7 @@ export default function RiskSpine({
         ) : (
           <span className="flt-off">Toda la operación</span>
         )}{" "}
-        · {rows.length} barrios · ≥{st.minOrders} órdenes
+        · {rows.length} barrios · ≥{st.minOrders} {V.ordenMin || "orden"}es
       </div>
 
       <div id="spine">
@@ -179,7 +180,7 @@ export default function RiskSpine({
                   <i style={{ width: `${peW}%`, background: P.st[2] }}></i>
                 </div>
                 <div className="sp-f">
-                  <span>{num(o.tot)} órdenes</span>
+                  <span>{num(o.tot)} {V.ordenMin || "orden"}es</span>
                   <span className="sp-pe">{pct(o.pePct)}% perdidas</span>
                   {tr}
                 </div>
@@ -189,7 +190,7 @@ export default function RiskSpine({
         })}
         {!rows.length && (
           <p className="empty">
-            Ningún barrio alcanza el mínimo de {st.minOrders} órdenes con los
+            Ningún barrio alcanza el mínimo de {st.minOrders} {V.ordenMin || "orden"}es con los
             filtros actuales. Baja el umbral o amplía el rango de fechas.
           </p>
         )}

@@ -1,8 +1,7 @@
-name: ETL SCR — regenerar datos del dashboard
+name: ETL SCR + COBROS — regenerar datos del dashboard
 
 # Cuándo corre:
-#  - schedule: cron programado (UTC). El ejemplo corre cada día a las 06:00 UTC
-#    (01:00 hora Colombia). Ajusta el cron a tu necesidad.
+#  - schedule: cron programado (UTC). Cada día a las 06:00 UTC (01:00 Colombia).
 #  - workflow_dispatch: botón "Run workflow" para dispararlo manualmente.
 on:
   schedule:
@@ -21,7 +20,7 @@ concurrency:
 jobs:
   etl:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout del repositorio
@@ -39,24 +38,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ejecutar ETL
+      - name: Ejecutar ETL (SCR + COBROS)
         working-directory: Etl
         env:
-          # El secreto se configura en Settings → Secrets and variables → Actions.
           SCR_DATABASE_URL: ${{ secrets.SCR_DATABASE_URL }}
           ETL_LOG_LEVEL: INFO
-        run: python run_etl.py
+        run: python run_etl.py --proceso todos
 
       - name: Repartir JSON a donde realmente se leen
         run: |
-          # Frontend: solo data*.json y direcciones (no observaciones).
-          cp Etl/salida/data.json Etl/salida/data_*.json Etl/salida/direcciones.json \
-             Frontend/dashboard/public/
+          # --- SCR ---
+          mkdir -p Frontend/dashboard/public/scr Backend/app/data/scr
 
-          # Backend: todo (data, direcciones, observaciones).
-          cp Etl/salida/data.json Etl/salida/data_*.json Etl/salida/direcciones.json \
-             Etl/salida/observaciones_*.json \
-             Backend/app/data/
+          cp Etl/salida/scr/data.json Etl/salida/scr/data_*.json \
+             Etl/salida/scr/direcciones.json \
+             Frontend/dashboard/public/scr/
+
+          cp Etl/salida/scr/data.json Etl/salida/scr/data_*.json \
+             Etl/salida/scr/direcciones.json \
+             Etl/salida/scr/observaciones_*.json \
+             Backend/app/data/scr/
+
+          # --- COBROS ---
+          mkdir -p Frontend/dashboard/public/cobros Backend/app/data/cobros
+
+          cp Etl/salida/cobros/data.json Etl/salida/cobros/data_*.json \
+             Etl/salida/cobros/direcciones.json \
+             Frontend/dashboard/public/cobros/
+
+          cp Etl/salida/cobros/data.json Etl/salida/cobros/data_*.json \
+             Etl/salida/cobros/direcciones.json \
+             Etl/salida/cobros/observaciones_*.json \
+             Backend/app/data/cobros/
 
       - name: Commitear los datos (si cambiaron)
         run: |

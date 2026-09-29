@@ -17,7 +17,8 @@ export default function DetailsPanel({
   zoneAvg,
   actionsFor,
   onFilterChange,
-  onSelectBarrio
+  onSelectBarrio,
+  V = {}
 }) {
   // Controla si el panel de detalles está desplegado u oculto (empieza oculto)
   const [collapsed, setCollapsed] = useState(true);
@@ -201,7 +202,7 @@ export default function DetailsPanel({
           )}
 
           <h3>
-            Motivos de no efectividad <span className="hint">{num(badTot)} órdenes</span>
+            Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
           </h3>
           <div className="causes" style={{ marginBottom: "14px" }}>
             {causes.slice(0, 5).map(([c, n]) => {
@@ -233,7 +234,7 @@ export default function DetailsPanel({
             })}
             {!causes.length && (
               <p className="empty" style={{ marginBottom: "14px" }}>
-                Sin órdenes no efectivas.
+                Sin {V.ordenMin || "orden"}es no efectivas.
               </p>
             )}
           </div>
@@ -248,7 +249,7 @@ export default function DetailsPanel({
                   num(n),
                   pct((n / A.ef) * 100) + "%"
                 ]),
-                ["Subacción", "Órdenes", "Part."]
+                [V.subaccion || "Subacción", V.ordenes || "Órdenes", "Part."]
               )
             : <p className="empty">Sin datos.</p>}
 
@@ -268,7 +269,7 @@ export default function DetailsPanel({
     if (!o) {
       return (
         <p className="empty">
-          Ese barrio no tiene órdenes con los filtros actuales.
+          Ese barrio no tiene {V.ordenMin || "orden"}es con los filtros actuales.
         </p>
       );
     }
@@ -419,7 +420,7 @@ export default function DetailsPanel({
         </div>
 
         <h3>
-          Motivos de no efectividad <span className="hint">{num(badTot)} órdenes</span>
+          Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
         </h3>
         <div className="causes">
           {causes.map(([c, n]) => {
@@ -449,10 +450,10 @@ export default function DetailsPanel({
               </div>
             );
           })}
-          {!causes.length && <p className="empty">Sin órdenes no efectivas.</p>}
+          {!causes.length && <p className="empty">Sin {V.ordenMin || "orden"}es no efectivas.</p>}
         </div>
 
-        <h3>Técnico recomendado aquí</h3>
+        <h3>{V.tecnico || "Técnico"} recomendado aquí</h3>
         {recT.length ? (
           <div className="recs">
             {recT.map((r, i) => (
@@ -461,7 +462,7 @@ export default function DetailsPanel({
                   <b>{r.name}</b>
                   <span 
                     className={`conf ${r.conf.toLowerCase()}`}
-                    title="La confianza estadística se calcula según la cantidad de órdenes comparables:&#10;• Alta: 30 o más órdenes&#10;• Media: 10 a 29 órdenes&#10;• Baja: menos de 10 órdenes"
+                    title={`La confianza estadística se calcula según la cantidad de ${V.ordenMin || "orden"}es comparables:\n• Alta: 30 o más ${V.ordenMin || "orden"}es\n• Media: 10 a 29 ${V.ordenMin || "orden"}es\n• Baja: menos de 10 ${V.ordenMin || "orden"}es`}
                     style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
                   >
                     Confianza {r.conf} <Info size={11} strokeWidth={2.2} style={{ opacity: 0.8 }} aria-hidden="true" />
@@ -472,7 +473,7 @@ export default function DetailsPanel({
                     <b>{pct(r.efAdj)}%</b> efect. ajustada
                   </span>
                   <span>
-                    <b>{num(r.den)}</b> órdenes comparables
+                    <b>{num(r.den)}</b> {V.ordenMin || "orden"}es comparables
                   </span>
                   <span>
                     Última:{" "}
@@ -492,7 +493,7 @@ export default function DetailsPanel({
         )}
 
         <h3>
-          Técnicos más efectivos aquí <span className="hint">en este barrio</span>
+          {V.tecnicos || "Técnicos"} más efectivos aquí <span className="hint">en este barrio</span>
         </h3>
         {localTechs.length
           ? miniTable(
@@ -503,9 +504,9 @@ export default function DetailsPanel({
                   num(r.tot),
                   pct(r.efAdj) + "%"
                 ]),
-              ["Técnico", "Órdenes", "Efect. aj. aquí"]
+              [V.tecnico || "Técnico", V.ordenes || "Órdenes", "Efect. aj. aquí"]
             )
-          : <p className="empty">Ningún técnico tiene ≥3 órdenes aquí.</p>}
+          : <p className="empty">Ningún {V.tecnicoMin || "técnico"} tiene ≥3 {V.ordenMin || "orden"}es aquí.</p>}
 
         <h3>
           Trabajo efectivo realizado <span className="hint">para saber qué distribuir</span>
@@ -517,28 +518,28 @@ export default function DetailsPanel({
                 num(n),
                 pct((n / o.ef) * 100) + "%"
               ]),
-              ["Acción ejecutada", "Órdenes", "Part."]
+              ["Acción ejecutada", V.ordenes || "Órdenes", "Part."]
             )
-          : <p className="empty">Sin órdenes efectivas en este barrio.</p>}
+          : <p className="empty">Sin {V.ordenMin || "orden"}es efectivas en este barrio.</p>}
 
-        <h3>Brigadas asignadas</h3>
+        <h3>{V.brigadas || "Brigadas"} asignadas</h3>
         {miniTable(
           topList(o.brig, 5).map(([g, c]) => [
             dim.brigs[g],
             num(c),
             pct((c / o.tot) * 100) + "%"
           ]),
-          ["Brigada", "Órdenes", "Part."]
+          [V.brigada || "Brigada", V.ordenes || "Órdenes", "Part."]
         )}
 
-        <h3>Tipos de orden</h3>
+        <h3>{V.tiposOs || "Tipos de orden"}</h3>
         {miniTable(
           topList(o.tipo, 5).map(([t, c]) => [
             dim.tipos[t],
             num(c),
             pct((c / o.tot) * 100) + "%"
           ]),
-          ["Tipo OS", "Órdenes", "Part."]
+          [V.tipoOs || "Tipo OS", V.ordenes || "Órdenes", "Part."]
         )}
 
         <h3>Tipos de suspensión</h3>
@@ -548,11 +549,11 @@ export default function DetailsPanel({
             num(c),
             pct((c / o.tot) * 100) + "%"
           ]),
-          ["Suspensión", "Órdenes", "Part."]
+          ["Suspensión", V.ordenes || "Órdenes", "Part."]
         )}
 
         <h3>
-          Subacciones en no efectivas <span className="hint">{num(badTot)} órdenes</span>
+          {V.subacciones || "Subacciones"} en no efectivas <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
         </h3>
         {miniTable(
           topList(o.sub, 6).map(([sx, c]) => [
@@ -560,7 +561,7 @@ export default function DetailsPanel({
             num(c),
             badTot ? pct((c / badTot) * 100) + "%" : "—"
           ]),
-          ["Subacción", "No efect.", "Part."]
+          [V.subaccion || "Subacción", "No efect.", "Part."]
         )}
 
         <h3>
@@ -572,11 +573,11 @@ export default function DetailsPanel({
             num(c),
             pct(o.ef ? (c / o.ef) * 100 : 0) + "%"
           ]),
-          ["Tipo OS", "Efectivas", "Part."]
+          [V.tipoOs || "Tipo OS", "Efectivas", "Part."]
         )}
 
         <h3>
-          Subacciones en efectivas <span className="hint">qué se ejecutó</span>
+          {V.subacciones || "Subacciones"} en efectivas <span className="hint">qué se ejecutó</span>
         </h3>
         {miniTable(
           topList(o.subEf || new Map(), 6).map(([sx, c]) => [
@@ -584,7 +585,7 @@ export default function DetailsPanel({
             num(c),
             pct(o.ef ? (c / o.ef) * 100 : 0) + "%"
           ]),
-          ["Subacción", "Efectivas", "Part."]
+          [V.subaccion || "Subacción", "Efectivas", "Part."]
         )}
       </>
     );
@@ -602,7 +603,7 @@ export default function DetailsPanel({
 
     let body = (
       <p className="empty">
-        Selecciona un técnico para ver su cobertura, recorrido y desempeño.
+        Selecciona un {V.tecnicoMin || "técnico"} para ver su cobertura, recorrido y desempeño.
       </p>
     );
 
@@ -621,7 +622,7 @@ export default function DetailsPanel({
         <>
           <div className="mini-grid">
             <div className="mini">
-              <span>Órdenes</span>
+              <span>{V.ordenes || "Órdenes"}</span>
               <b>{num(o.tot)}</b>
             </div>
             <div className="mini">
@@ -647,7 +648,7 @@ export default function DetailsPanel({
               <b>{num(R.km)} km</b>
             </div>
             <div className="mini">
-              <span>Mediana por orden</span>
+              <span>Mediana por {V.ordenMin || "orden"}</span>
               <b>{num(R.medMin)} min</b>
             </div>
             <div className="mini">
@@ -680,8 +681,8 @@ export default function DetailsPanel({
               <thead>
                 <tr>
                   <th></th>
-                  <th>Técnico</th>
-                  <th>Brigada {brigName}</th>
+                  <th>{V.tecnico || "Técnico"}</th>
+                  <th>{V.brigada || "Brigada"} {brigName}</th>
                   <th>Δ</th>
                 </tr>
               </thead>
@@ -702,7 +703,7 @@ export default function DetailsPanel({
             </table>
           )}
 
-          <h3>Brigadas con las que trabaja</h3>
+          <h3>{V.brigadas || "Brigadas"} con las que trabaja</h3>
           {miniTable(
             [...o.brig.entries()]
               .sort((a, b) => b[1] - a[1])
@@ -711,7 +712,7 @@ export default function DetailsPanel({
                 num(c),
                 pct((c / o.tot) * 100) + "%"
               ]),
-            ["Brigada", "Órdenes", "Part."]
+            [V.brigada || "Brigada", V.ordenes || "Órdenes", "Part."]
           )}
 
           <h3>
@@ -722,7 +723,7 @@ export default function DetailsPanel({
               .sort((a, b) => b[1].tot - a[1].tot)
               .slice(0, 12)
               .map(([nm, bo]) => [nm, num(bo.tot), pct(bo.efPct) + "%"]),
-            ["Barrio", "Órdenes", "Efect."]
+            ["Barrio", V.ordenes || "Órdenes", "Efect."]
           )}
 
           <h3>Motivos de no efectividad</h3>
@@ -735,7 +736,7 @@ export default function DetailsPanel({
                 num(n),
                 dim.causa_ctrl[c] ? "controlable" : "no controlable"
               ]),
-            ["Causa", "Órdenes", ""]
+            ["Causa", V.ordenes || "Órdenes", ""]
           )}
         </>
       );
@@ -744,7 +745,7 @@ export default function DetailsPanel({
     return (
       <>
         <div className="sel-wrap">
-          <label>Técnico</label>
+          <label>{V.tecnico || "Técnico"}</label>
           <select
             id="tecSel"
             value={st.selTec ?? ""}
@@ -779,7 +780,7 @@ export default function DetailsPanel({
 
     let body = (
       <p className="empty">
-        Elige un barrio y un tipo de orden para recibir la asignación sugerida.
+        Elige un barrio y un {V.tipoOsMin || "tipo de orden"} para recibir la asignación sugerida.
       </p>
     );
 
@@ -799,7 +800,7 @@ export default function DetailsPanel({
             </b>
             <span 
               className={`conf ${r.conf.toLowerCase()}`}
-              title="La confianza estadística se calcula según la cantidad de órdenes comparables:&#10;• Alta: 30 o más órdenes&#10;• Media: 10 a 29 órdenes&#10;• Baja: menos de 10 órdenes"
+              title={`La confianza estadística se calcula según la cantidad de ${V.ordenMin || "orden"}es comparables:\n• Alta: 30 o más ${V.ordenMin || "orden"}es\n• Media: 10 a 29 ${V.ordenMin || "orden"}es\n• Baja: menos de 10 ${V.ordenMin || "orden"}es`}
               style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
             >
               Confianza {r.conf} <Info size={11} strokeWidth={2.2} style={{ opacity: 0.8 }} aria-hidden="true" />
@@ -810,7 +811,7 @@ export default function DetailsPanel({
               <b>{pct(r.efAdj)}%</b> efect. ajustada
             </span>
             <span>
-              <b>{num(r.den)}</b> órdenes comparables
+              <b>{num(r.den)}</b> {V.ordenMin || "orden"}es comparables
             </span>
             <span>
               <b>{num(r.pe)}</b> perdidas
@@ -828,18 +829,18 @@ export default function DetailsPanel({
 
       body = (
         <>
-          <h3>Técnico recomendado</h3>
+          <h3>{V.tecnico || "Técnico"} recomendado</h3>
           {rt.length ? (
             <div className="recs">
               {rt.slice(0, 4).map((r, i) => card(r, i, "tec"))}
             </div>
           ) : (
             <p className="empty">
-              Muestra insuficiente: no hay suficientes órdenes comparables para recomendar con fiabilidad.
+              Muestra insuficiente: no hay suficientes {V.ordenMin || "orden"}es comparables para recomendar con fiabilidad.
             </p>
           )}
 
-          <h3>Brigada recomendada</h3>
+          <h3>{V.brigada || "Brigada"} recomendada</h3>
           {rb.length ? (
             <div className="recs">
               {rb.slice(0, 3).map((r, i) => card(r, i, "brig"))}
@@ -850,7 +851,7 @@ export default function DetailsPanel({
 
           <p className="hint">
             El puntaje usa el <b>límite inferior de Wilson (95%)</b> sobre la
-            efectividad ajustada. Las causas fuera de control no penalizan al técnico.
+            efectividad ajustada. Las causas fuera de control no penalizan al {V.tecnicoMin || "técnico"}.
           </p>
         </>
       );
@@ -872,7 +873,7 @@ export default function DetailsPanel({
           </select>
         </div>
         <div className="sel-wrap">
-          <label>Tipo de orden</label>
+          <label>{V.tipoOs || "Tipo de orden"}</label>
           <select
             id="recTipo"
             value={st.tipo}
@@ -983,9 +984,9 @@ export default function DetailsPanel({
           </div>
         </div>
 
-        <h3>Historial de Órdenes</h3>
+        <h3>Historial de {V.ordenes || "Órdenes"}</h3>
         <div className="tbl-wrap" style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--pan2)", maxHeight: "400px" }}>
-          {miniTable(tableRows, ["Orden", "Estado", "Fecha/Hora", "Clasificación", "Técnico"])}
+          {miniTable(tableRows, [V.orden || "Orden", "Estado", "Fecha/Hora", "Clasificación", V.tecnico || "Técnico"])}
         </div>
       </>
     );
@@ -1004,7 +1005,7 @@ export default function DetailsPanel({
           className={`ptab ${st.tab === "tecnico" ? "on" : ""}`}
           onClick={() => onFilterChange("tab", "tecnico")}
         >
-          Cobertura del técnico
+          Cobertura del {V.tecnicoMin || "técnico"}
         </button>
         <button
           className={`ptab ${st.tab === "recomendador" ? "on" : ""}`}

@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Centro Operativo SCR · Mapa de asignación y riesgo — Air-E Atlántico",
-  description: "Visor de asignación y triaje operativo de riesgos, ISES | AIR-E | SCR",
+  title: "Centro Operativo · Mapa de asignación y riesgo — Air-E Atlántico",
+  description: "Visor de asignación y triaje operativo de riesgos, ISES | AIR-E",
 };
 
 export const viewport = {
