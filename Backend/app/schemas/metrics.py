@@ -139,5 +139,6 @@ class FiltroMapa(BaseModel):
     municipio: str | None = None
     zona: str | None = None
     brigada: str | None = None
+    actividad: str | None = None
     tipo_os: str | None = None
     meses: list[str] | None = Field(default=None, description="Claves YYYY-MM")

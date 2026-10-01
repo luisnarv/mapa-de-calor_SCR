@@ -60,7 +60,22 @@ _BRIGADA = {
         "Pásalo siempre que el usuario nombre una: sin él la cifra sale de todas."
     ),
 }
-_TIPO_OS = {"type": "string", "description": "Tipo de orden de servicio."}
+_ACTIVIDAD = {
+    "type": "string",
+    "description": (
+        "Actividad o nombre de brigada específica, p. ej. 'Gestor Integral Multi', "
+        "'GI Liviana'. Cuando pregunten por «multifamiliar» en SCR, pasa "
+        "'Gestor Integral Multi'. Es más fino que el tipo de brigada (Pesada/Liviana)."
+    ),
+}
+_TIPO_OS = {
+    "type": "string",
+    "description": (
+        "Tipo de orden de servicio: TO501 (suspensión), TO502 (reconexión), "
+        "TO503 (revisión), TO504 (normalización), TO506 (retiro). "
+        "El usuario puede decir 'TO501' o 'suspensión': pasa el código."
+    ),
+}
 # Del archivo cargado: coincide por subcadena y siempre dice cuáles tarifas
 # incluyó (ver `_filtrar`), a diferencia de `_TARIFA` (más abajo), que es del
 # histórico y se niega a filtrar cuando el nombre es ambiguo. Nombre propio a
@@ -115,6 +130,7 @@ TOOLS: list[dict[str, Any]] = [
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
                     "brigada": _BRIGADA, "tipo_os": _TIPO_OS,
                     "subaccion": _SUBACCION, "tarifa": _TARIFA,
+                    "actividad": _ACTIVIDAD,
                 },
             },
         },
@@ -134,7 +150,7 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "dimension": {
                         "type": "string",
-                        "enum": ["brigada", "tecnico", "barrio", "subaccion", "tarifa"],
+                        "enum": ["brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad"],
                         "description": "Qué se compara.",
                     },
                     "barrio": _BARRIO,
@@ -174,6 +190,7 @@ TOOLS: list[dict[str, Any]] = [
                         "description": "Mínimo de órdenes para entrar al ranking. Por defecto 10.",
                     },
                     "subaccion": _SUBACCION, "tarifa": _TARIFA,
+                    "actividad": _ACTIVIDAD,
                 },
                 "required": ["dimension"],
             },
@@ -192,7 +209,16 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
                     "brigada": _BRIGADA,
+                    "zona": {
+                        "type": "string",
+                        "description": (
+                            "Zona del tablero: ATLANTICO CENTRO, ATLANTICO NORTE o "
+                            "ATLANTICO SUR. Úsala solo si el usuario nombra una de "
+                            "las tres."
+                        ),
+                    },
                     "subaccion": _SUBACCION, "tarifa": _TARIFA,
+                    "actividad": _ACTIVIDAD,
                 },
             },
         },
@@ -240,6 +266,7 @@ TOOLS: list[dict[str, Any]] = [
                         ),
                     },
                     "barrio": _BARRIO, "municipio": _MUNICIPIO, "mes": _MES,
+                    "brigada": _BRIGADA,
                     "zona": {
                         "type": "string",
                         "description": (
@@ -297,6 +324,7 @@ TOOLS: list[dict[str, Any]] = [
                     "municipio": _MUNICIPIO,
                     "zona": {"type": "string"},
                     "brigada": {"type": "string"},
+                    "actividad": {"type": "string"},
                     "tipo_os": {"type": "string"},
                     "meses": {"type": "array", "items": {"type": "string"}},
                 },
@@ -480,7 +508,12 @@ TOOLS: list[dict[str, Any]] = [
                 "asignación óptima: no reparte carga entre técnicos ni conoce su "
                 "disponibilidad de hoy. Dilo así, y fíjate en "
                 "`ordenes_del_tecnico_en_el_archivo`: si el mismo nombre sale "
-                "recomendado muchas veces, puede estar sobrecargado."
+                "recomendado muchas veces, puede estar sobrecargado.\n"
+                "REQUIERE archivo cargado. Si NO hay archivo y el usuario pide "
+                "recomendar técnicos para un barrio o municipio, NO respondas que "
+                "hace falta un archivo: usa `ranking` con `dimension: 'tecnico'` y "
+                "el municipio o barrio que pidieron. El histórico muestra quién ha "
+                "rendido mejor ahí. Aclara que es por desempeño histórico."
             ),
             "parameters": {
                 "type": "object",
@@ -497,6 +530,7 @@ TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Para pedir la recomendación de un solo barrio del archivo, en vez de los de mayor volumen.",
                     },
+                    "brigada": _BRIGADA,
                 },
             },
         },
@@ -527,6 +561,8 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
         ("brigada", "plan"),
         ("Brigada Tipo Pesada", "Cobro Persuasivo"),
         ("Brigada Tipo Liviana", "Multifamiliar"),
+        ("Gestor Integral Multi", "Multifamiliar"),
+        ("'GI Liviana'", "'Cobro Persuasivo'"),
         ("Tipo de orden de servicio", "Tipo de gestión"),
         ("órdenes", "gestiones"),
         ("Órdenes", "Gestiones"),
@@ -834,16 +870,19 @@ class ToolRunner:
         tipo_os: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
         if subaccion:
             base += f" · {subaccion}"
         if tarifa:
             base += f" · {tarifa}"
+        if actividad:
+            base += f" · actividad {actividad}"
         # El tablero no tiene filtro de subacción ni de tarifa, así que un filtro
         # con solo el municipio enseñaría un recorte más ancho que la respuesta:
         # la cifra sería de estrato 3 y el mapa, de todos. Mejor no moverlo.
-        if subaccion or tarifa:
+        if subaccion or tarifa or actividad:
             filtro = None
         datos = await self.metrics.efectividad(
             bkeys=bkeys,
@@ -853,6 +892,7 @@ class ToolRunner:
             tipo_os=tipo_os,
             subaccion=subaccion,
             tarifa=tarifa,
+            actividad=actividad,
             etiqueta=base,
         )
 
@@ -894,13 +934,13 @@ class ToolRunner:
         ordenar_por: str = "ef_adj",
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
 
-        # Mismo motivo que en `_efectividad`: el tablero no sabe filtrar por estas
-        # dos, y moverlo a un recorte más ancho que la respuesta es peor que
-        # dejarlo quieto.
-        if subaccion or tarifa:
+        # Mismo motivo que en `_efectividad`: el tablero no sabe filtrar por estas,
+        # y moverlo a un recorte más ancho que la respuesta es peor que dejarlo quieto.
+        if subaccion or tarifa or actividad:
             filtro = None
 
         # "Peor" se invierte según el criterio: con efectividad el peor es el de
@@ -912,7 +952,7 @@ class ToolRunner:
                 dimension=dimension, bkeys=en_barrios, municipio=en_municipio,
                 meses=meses, brigada=brigada, min_ordenes=minimo,
                 ascendente=ascendente, ordenar_por=ordenar_por,
-                subaccion=subaccion, tarifa=tarifa,
+                subaccion=subaccion, tarifa=tarifa, actividad=actividad,
             )
 
         filas = await consultar(bkeys, None if bkeys else municipio, min_ordenes)
@@ -949,22 +989,25 @@ class ToolRunner:
         municipio: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
+        zona: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
         if subaccion:
             base += f" · {subaccion}"
         if tarifa:
             base += f" · {tarifa}"
-        # Mismo motivo que en `_efectividad` y `_ranking`: el tablero no sabe
-        # filtrar por estas dos, y moverlo a un recorte más ancho que la
-        # respuesta es peor que dejarlo quieto.
-        if subaccion or tarifa:
+        if actividad:
+            base += f" · actividad {actividad}"
+        if subaccion or tarifa or actividad:
             filtro = None
         filas = await self.metrics.causas(
-            bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses,
-            brigada=brigada, subaccion=subaccion, tarifa=tarifa,
+            bkeys=bkeys, municipio=None if bkeys else municipio,
+            zona=None if bkeys or municipio else zona,
+            meses=meses, brigada=brigada, subaccion=subaccion, tarifa=tarifa,
+            actividad=actividad,
         )
         return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
 
@@ -974,16 +1017,18 @@ class ToolRunner:
         barrio: str | None = None,
         municipio: str | None = None,
         mes: str | None = None,
+        brigada: str | None = None,
         zona: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(
-            barrio, municipio, mes, zona=zona
+            barrio, municipio, mes, brigada, zona=zona
         )
         datos = await self.metrics.buscar_en_observaciones(
             texto=texto,
             bkeys=bkeys,
             municipio=None if bkeys else municipio,
             zona=None if bkeys or municipio else zona,
+            brigada=brigada,
             meses=meses,
             etiqueta=base,
         )
@@ -1216,6 +1261,7 @@ class ToolRunner:
         limite: int = 10,
         min_ordenes: int = 5,
         barrio: str | None = None,
+        brigada: str | None = None,
     ) -> tuple[dict[str, Any], None]:
         """Cruza dos cosas que hoy nadie combinaba: los barrios con más órdenes
         pendientes en el archivo, y quién ha rendido mejor ahí en el histórico.
@@ -1254,7 +1300,8 @@ class ToolRunner:
         for g in objetivos:
             bkey = g["valor"]
             salida_ranking, _ = await self._ranking(
-                dimension="tecnico", barrio=bkey, min_ordenes=min_ordenes, ordenar_por="ef_adj",
+                dimension="tecnico", barrio=bkey, brigada=brigada,
+                min_ordenes=min_ordenes, ordenar_por="ef_adj",
             )
             filas = salida_ranking.get("filas") or []
             if not filas:

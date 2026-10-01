@@ -139,7 +139,7 @@ export default function Topbar({
 
   const hayFiltros =
     st.zona !== "" || st.muni !== "" || st.brig !== "" || st.tipo !== "" ||
-    mesesPuestos || barrioSel;
+    st.act !== "" || mesesPuestos || barrioSel;
 
   const edad = edadDeLosDatos(st.generated);
   const estadoRefresco =
@@ -205,6 +205,15 @@ export default function Topbar({
               ? `Todas las gestiones (${avail.tipo.size})`
               : `Todos los tipos (${avail.tipo.size})`}
           />
+          {dim.acts && dim.acts.length > 0 && (
+            <FiltroPildora
+              etiqueta="Actividad"
+              valor={st.act}
+              opciones={opcionesDe(dim.acts, avail.act)}
+              onElegir={(v) => onFilterChange("act", v)}
+              vacio={`Todas las actividades (${avail.act.size})`}
+            />
+          )}
 
           <div className="hd-f" ref={mesesRef}>
             <button

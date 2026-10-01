@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api.deps import CargueStoreDep, GeolocalizadorDep, MetricsDep
+from app.api.deps import CargueStoreDep, GeolocalizadorDep, MetricsDep, MetricsPorActividadDep
 from app.core.config import settings
 from app.schemas.ordenes import (
     CandidatoRecomendado,
@@ -100,44 +100,53 @@ async def puntos(
     )
 
 
-@router.get(
-    "/recomendar/{nic}",
-    response_model=RecomendacionResponse,
-)
+def _adaptar_cobros(d: dict) -> dict:
+    """Renombra los campos de SCR al vocabulario de COBROS."""
+    d["gestores_recomendados"] = d.pop("tecnicos_recomendados")
+    d["planes_recomendados"] = d.pop("brigadas_recomendadas")
+    for g in d["gestores_recomendados"] + d["planes_recomendados"]:
+        g["ultima_gestion"] = g.pop("ultima_orden")
+    return d
+
+
+@router.get("/recomendar/{nic}")
 async def recomendar(
     nic: str,
-    metrics: MetricsDep,
-) -> RecomendacionResponse:
-    """Recomienda técnicos y brigadas para un NIC según desempeño histórico (Wilson)."""
+    metrics: MetricsPorActividadDep,
+) -> dict:
+    """Recomienda técnicos/gestores y brigadas/planes para un NIC según desempeño histórico."""
     from app.services.metrics_service import NicNoEncontrado
 
     try:
-        return await metrics.recomendar(nic=nic)
+        resultado = await metrics.recomendar(nic=nic)
     except NicNoEncontrado as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    d = resultado.model_dump()
+    if metrics.directorio.name == "cobros":
+        _adaptar_cobros(d)
+    return d
 
-@router.post(
-    "/recomendar",
-    response_model=RecomendacionBatchResponse,
-)
+
+@router.post("/recomendar")
 async def recomendar_batch(
     body: RecomendacionBatchRequest,
-    metrics: MetricsDep,
-) -> RecomendacionBatchResponse:
-    """Recomienda técnicos y brigadas para un lote de NICs."""
+    metrics: MetricsPorActividadDep,
+) -> dict:
+    """Recomienda técnicos/gestores y brigadas/planes para un lote de NICs."""
     from app.services.metrics_service import NicNoEncontrado
 
-    resultados: list[RecomendacionResponse] = []
+    resultados: list[dict] = []
     no_encontrados: list[str] = []
 
     for nic in body.nics:
         try:
-            resultados.append(await metrics.recomendar(nic=nic))
+            r = await metrics.recomendar(nic=nic)
+            d = r.model_dump()
+            if metrics.directorio.name == "cobros":
+                _adaptar_cobros(d)
+            resultados.append(d)
         except NicNoEncontrado:
             no_encontrados.append(nic)
 
-    return RecomendacionBatchResponse(
-        resultados=resultados,
-        no_encontrados=no_encontrados,
-    )
+    return {"resultados": resultados, "no_encontrados": no_encontrados}

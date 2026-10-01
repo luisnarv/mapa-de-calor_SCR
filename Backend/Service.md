@@ -6,28 +6,37 @@
 
 ## 1. Individual — `GET /api/v1/ordenes/recomendar/{nic}`
 
-Recomienda técnicos y brigadas para un NIC según desempeño histórico.
+Recomienda técnicos/gestores y brigadas/planes para un NIC según desempeño histórico.
 
-### Parámetro de ruta
+### Parámetros
 
-| Parámetro | Tipo | Descripción |
-|-----------|------|-------------|
-| `nic` | `string` | Número de identificación del cliente |
+| Parámetro | En | Tipo | Default | Descripción |
+|-----------|------|------|---------|-------------|
+| `nic` | ruta | `string` | — | Número de identificación del cliente |
+| `actividad` | query | `string` | `"scr"` | Actividad: `scr`, `cobros` o `cobro` |
 
-### Ejemplo
+> `cobro` se normaliza a `cobros`. La actividad determina qué datos históricos se consultan y los nombres de los campos en la respuesta.
+
+### Ejemplo SCR
 
 ```bash
-curl http://52.88.48.137/api/v1/ordenes/recomendar/7502057
+curl http://52.88.48.137/api/v1/ordenes/recomendar/7502057?actividad=scr
 ```
 
-### Respuesta 200 — `RecomendacionResponse`
+### Ejemplo COBROS
 
-→ Ver [esquemas de respuesta](#esquemas-de-respuesta) más abajo.
+```bash
+curl http://52.88.48.137/api/v1/ordenes/recomendar/2120682?actividad=cobros
+```
+
+### Respuesta 200
+
+→ Ver [esquemas de respuesta](#esquemas-de-respuesta). Los campos cambian según la actividad.
 
 ### NIC no encontrado → 404
 
 ```json
-{"detail": "NIC 9999999 no encontrado en el histórico."}
+{"detail": "El NIC 9999999 no aparece en el histórico."}
 ```
 
 ---
@@ -35,6 +44,12 @@ curl http://52.88.48.137/api/v1/ordenes/recomendar/7502057
 ## 2. Por lotes — `POST /api/v1/ordenes/recomendar`
 
 Misma lógica Wilson, pero procesa una lista de NICs en una sola petición (sin límite).
+
+### Parámetros
+
+| Parámetro | En | Tipo | Default | Descripción |
+|-----------|------|------|---------|-------------|
+| `actividad` | query | `string` | `"scr"` | Actividad: `scr`, `cobros` o `cobro` |
 
 ### Request body
 
@@ -45,9 +60,9 @@ Misma lógica Wilson, pero procesa una lista de NICs en una sola petición (sin 
 ### Ejemplo
 
 ```bash
-curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
+curl -X POST "http://52.88.48.137/api/v1/ordenes/recomendar?actividad=cobros" \
   -H "Content-Type: application/json" \
-  -d '{"nics": ["7502057", "2313797", "7798002"]}'
+  -d '{"nics": ["2120682", "7502057", "9999999"]}'
 ```
 
 ### Respuesta 200 — `RecomendacionBatchResponse`
@@ -72,6 +87,20 @@ curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
 
 ---
 
+## Campos según actividad
+
+La respuesta cambia el nombre de los campos según la actividad:
+
+| Campo | SCR (`actividad=scr`) | COBROS (`actividad=cobros`) |
+|-------|---|---|
+| Quién ejecuta | `tecnicos_recomendados` | `gestores_recomendados` |
+| Tipo de grupo | `brigadas_recomendadas` | `planes_recomendados` |
+| Fecha más reciente | `ultima_orden` | `ultima_gestion` |
+
+Los demás campos (`nic`, `barrio`, `municipio`, `mejor_horario`, `causas_fallo`, `historial_nic`) son iguales en ambas actividades.
+
+---
+
 ## Esquemas de respuesta
 
 ### RecomendacionResponse
@@ -81,8 +110,8 @@ curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
 | `nic` | `string` | NIC consultado |
 | `barrio` | `string` | Barrio (BKEY: `"MUNICIPIO \| BARRIO"`) |
 | `municipio` | `string` | Municipio |
-| `tecnicos_recomendados` | `CandidatoRecomendado[]` | Top 4 técnicos por Wilson |
-| `brigadas_recomendadas` | `CandidatoRecomendado[]` | Top 3 brigadas por Wilson |
+| `tecnicos_recomendados` / `gestores_recomendados` | `CandidatoRecomendado[]` | Top 4 por Wilson |
+| `brigadas_recomendadas` / `planes_recomendados` | `CandidatoRecomendado[]` | Top 3 por Wilson |
 | `mejor_horario` | `MejorHorario` | Mejor día de la semana por efectividad |
 | `causas_fallo` | `CausaFrecuente[]` | Top 5 causas de fallo en el barrio |
 | `historial_nic` | `HistorialNic` | Resumen de visitas históricas al NIC |
@@ -91,19 +120,19 @@ curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `nombre` | `string` | Nombre del técnico o brigada |
+| `nombre` | `string` | Nombre del técnico/gestor o brigada/plan |
 | `efectividad_ajustada` | `string` | Efectivas / (total − no controlables), e.g. `"87.2%"` |
-| `efectivas` | `int` | Órdenes efectivas |
-| `fallidas` | `int` | Órdenes fallidas (se cobran) |
-| `perdidas` | `int` | Órdenes perdidas (no se cobran) |
-| `ultima_orden` | `string \| null` | Fecha más reciente (`YYYY-MM-DD`) |
+| `efectivas` | `int` | Órdenes/gestiones efectivas |
+| `fallidas` | `int` | Fallidas (se cobran en SCR) |
+| `perdidas` | `int` | Perdidas (no se cobran en SCR) |
+| `ultima_orden` / `ultima_gestion` | `string \| null` | Fecha más reciente (`YYYY-MM-DD`) |
 
 ### MejorHorario
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `mejor_dia` | `string \| null` | Día de la semana con mejor efectividad, o null |
-| `franjas` | `FranjaHoraria[]` | Franjas de 2h por efectividad (requiere hora en el payload) |
+| `franjas` | `FranjaHoraria[]` | Franjas de 2h por efectividad |
 
 ### FranjaHoraria
 
@@ -127,8 +156,8 @@ curl -X POST http://52.88.48.137/api/v1/ordenes/recomendar \
 |-------|------|-------------|
 | `total_visitas` | `int` | Total de visitas al NIC |
 | `efectivas` | `int` | Visitas efectivas |
-| `fallidas` | `int` | Visitas fallidas (se cobran) |
-| `perdidas` | `int` | Visitas perdidas (no se cobran) |
+| `fallidas` | `int` | Visitas fallidas |
+| `perdidas` | `int` | Visitas perdidas |
 | `efectividad` | `string` | Efectividad cruda (efectivas/total), e.g. `"60.0%"` |
 | `ultima_visita` | `string \| null` | Fecha de la última visita (`YYYY-MM-DD`) |
 
@@ -145,7 +174,7 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
 
 ---
 
-## Ejemplo de respuesta (individual)
+## Ejemplo de respuesta SCR (individual)
 
 ```json
 {
@@ -203,6 +232,71 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
     "perdidas": 1,
     "efectividad": "62.5%",
     "ultima_visita": "2026-08-26"
+  }
+}
+```
+
+## Ejemplo de respuesta COBROS (individual)
+
+```json
+{
+  "nic": "2120682",
+  "barrio": "BARRANQUILLA | EL PORVENIR",
+  "municipio": "BARRANQUILLA",
+  "gestores_recomendados": [
+    {
+      "nombre": "NINO JIMENEZ CHARLES ESTEBAN - 8505934",
+      "efectividad_ajustada": "35.7%",
+      "efectivas": 5,
+      "fallidas": 16,
+      "perdidas": 3,
+      "ultima_gestion": "2026-09-09"
+    },
+    {
+      "nombre": "LUIS ALFREDO MEZA ARGUELLES - 1143470220",
+      "efectividad_ajustada": "26.5%",
+      "efectivas": 9,
+      "fallidas": 94,
+      "perdidas": 0,
+      "ultima_gestion": "2026-06-05"
+    }
+  ],
+  "planes_recomendados": [
+    {
+      "nombre": "Visita Personalizada",
+      "efectividad_ajustada": "12.6%",
+      "efectivas": 15,
+      "fallidas": 139,
+      "perdidas": 31,
+      "ultima_gestion": "2026-09-18"
+    },
+    {
+      "nombre": "Cobro Persuasivo",
+      "efectividad_ajustada": "12.1%",
+      "efectivas": 4,
+      "fallidas": 50,
+      "perdidas": 53,
+      "ultima_gestion": "2026-09-09"
+    }
+  ],
+  "mejor_horario": {
+    "mejor_dia": "viernes",
+    "franjas": [
+      {"franja": "10:00–12:00", "efectividad": "7.1%", "ordenes": 953},
+      {"franja": "14:00–16:00", "efectividad": "7.1%", "ordenes": 846}
+    ]
+  },
+  "causas_fallo": [
+    {"causa": "Compromiso de pago", "ordenes": 1674, "porcentaje": "55.0%"},
+    {"causa": "No es el titular", "ordenes": 994, "porcentaje": "32.7%"}
+  ],
+  "historial_nic": {
+    "total_visitas": 13,
+    "efectivas": 0,
+    "fallidas": 10,
+    "perdidas": 3,
+    "efectividad": "0.0%",
+    "ultima_visita": "2026-09-05"
   }
 }
 ```

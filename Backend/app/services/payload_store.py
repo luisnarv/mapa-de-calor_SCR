@@ -45,6 +45,7 @@ class Payload:
     # marca de verdad. Las 12 `causas` son su agrupación.
     subs: list[str]
     tarifas: list[str]  # incluye el estrato: "RESIDENCIAL | ESTRATO 3"
+    acts: list[str]  # actividad: brigada_homologada en SCR, linea_accion en COBROS
     causa_ctrl: list[int]  # 1 = controlable por la operación
     causa_fam: list[str]
     b_muni: list[int]  # barrio -> municipio
@@ -63,6 +64,7 @@ class Payload:
     c: array  # causa
     s: array  # subacción
     f: array  # tarifa
+    a: array  # actividad
     e: array  # estado: 0 Efectiva, 1 Fallida, 2 Perdida
     mes: array  # índice en `meses`
 
@@ -287,7 +289,7 @@ def _cargar(directorio: Path) -> Payload:
         # los define el origen, no nuestra taxonomía, y pasar de 127 valores haría
         # que `extend` lanzara OverflowError. Eso no degrada nada: deja el payload
         # sin cargar y el backend sin arrancar. Un byte más por orden lo evita.
-        "s": array("h"), "f": array("h"),
+        "s": array("h"), "f": array("h"), "a": array("h"),
         "m": array("i"),  # minutos desde fecha_min (signed 32-bit)
     }
 
@@ -302,6 +304,7 @@ def _cargar(directorio: Path) -> Payload:
             )
         for clave in ("b", "t", "g", "o", "c", "e", "s", "f", "m"):
             columnas[clave].extend(pts[clave])
+        columnas["a"].extend(pts.get("a", [0] * n))
         columnas["mes"].extend([i] * n)
 
     payload = Payload(
@@ -314,6 +317,7 @@ def _cargar(directorio: Path) -> Payload:
         causas=dim["causas"],
         subs=dim["subs"],
         tarifas=dim["tarifas"],
+        acts=dim.get("acts", []),
         causa_ctrl=dim["causa_ctrl"],
         causa_fam=dim["causa_fam"],
         b_muni=dim["b_muni"],

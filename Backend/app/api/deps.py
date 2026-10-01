@@ -54,6 +54,22 @@ def get_metrics_service(
 MetricsDep = Annotated[MetricsService, Depends(get_metrics_service)]
 
 
+def _normalizar_actividad(actividad: str) -> str:
+    """'cobro' y 'cobros' son lo mismo; el resto se valida normal."""
+    if actividad.lower() == "cobro":
+        return "cobros"
+    return _validar_proceso(actividad.lower())
+
+
+def get_metrics_por_actividad(
+    actividad: str = Query("scr", description="Actividad: scr o cobro"),
+) -> MetricsService:
+    return MetricsService(settings.DATA_DIR / _normalizar_actividad(actividad))
+
+
+MetricsPorActividadDep = Annotated[MetricsService, Depends(get_metrics_por_actividad)]
+
+
 @lru_cache
 def get_cargue_store() -> CargueStore:
     """Uno por proceso: los cargues tienen que sobrevivir entre peticiones."""

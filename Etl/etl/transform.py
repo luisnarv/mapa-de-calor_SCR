@@ -38,6 +38,7 @@ COLS_OBJETIVO: tuple[str, ...] = (
 )
 COLS_DERIVADAS: tuple[str, ...] = (
     "FECHA_EJECUCION", "LATITUD", "LONGITUD", "CAUSA", "FAMILIA_CAUSA", "CONTROLABLE",
+    "ACTIVIDAD",
 )
 
 
@@ -118,6 +119,12 @@ def enrich(
         df["SUBACCION/SUBANOMALIA"] = _map_por_unico(
             df["SUBACCION/SUBANOMALIA"], homolog_linea_accion,
         )
+
+    # --- Actividad: brigada_homologada en SCR, linea_accion en COBROS ---
+    if proceso == "scr":
+        df["ACTIVIDAD"] = df["BRIGADA HOMOLOGADA"]
+    else:
+        df["ACTIVIDAD"] = df["SUBACCION/SUBANOMALIA"]
 
     # --- Estado ---
     if proceso == "scr":

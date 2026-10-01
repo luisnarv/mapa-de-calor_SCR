@@ -29,6 +29,7 @@ _DIMS: tuple[tuple[str, str], ...] = (
     ("BKEY", "b"), ("TECNICO", "t"), ("TIPO BRIGADA", "g"), ("TIPO OS", "o"),
     ("CAUSA", "c"), ("SUBACCION/SUBANOMALIA", "s"),
     ("TIPO SUSPENSION SOLICITADA", "u"), ("TARIFA", "f"),
+    ("ACTIVIDAD", "a"),
 )
 
 
@@ -58,6 +59,7 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
         "e": df["e"].tolist(), "b": df["b"].tolist(), "t": df["t"].tolist(),
         "g": df["g"].tolist(), "o": df["o"].tolist(), "c": df["c"].tolist(),
         "s": df["s"].tolist(), "u": df["u"].tolist(), "f": df["f"].tolist(),
+        "a": df["a"].tolist(),
         "m": df["m"].tolist(),
         "n": pd.to_numeric(df["ORDEN"], errors="coerce").fillna(0).astype("int64").tolist(),
         "nic": df["NIC"].astype(str).tolist(),
@@ -84,7 +86,8 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
     d["LOCALIDAD/BARRIO"] = d["LOCALIDAD/BARRIO"].fillna("SIN BARRIO")
     d["ZONA"] = d["ZONA"].fillna("SIN ZONA")
     for col in ("TECNICO", "TIPO BRIGADA", "TIPO OS", "TIPO SUSPENSION SOLICITADA",
-                "SUBACCION/SUBANOMALIA", "TARIFA", "CAUSA", "FAMILIA_CAUSA"):
+                "SUBACCION/SUBANOMALIA", "TARIFA", "CAUSA", "FAMILIA_CAUSA",
+                "ACTIVIDAD"):
         d[col] = d[col].fillna("SIN DATO")
     d["BKEY"] = d["MUNICIPIO"] + " | " + d["LOCALIDAD/BARRIO"]
     return d
@@ -113,13 +116,15 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     subs, si = _idx(d["SUBACCION/SUBANOMALIA"])
     susps, ui = _idx(d["TIPO SUSPENSION SOLICITADA"])
     tarifas, fi = _idx(d["TARIFA"])
+    acts, ai = _idx(d["ACTIVIDAD"])
     _, mi_map = _idx(d["MUNICIPIO"])
     munis = sorted(d["MUNICIPIO"].dropna().astype(str).unique().tolist())
     zonas = sorted(d["ZONA"].dropna().astype(str).unique().tolist())
 
     mapas = {"BKEY": bi, "TECNICO": ti, "TIPO BRIGADA": gi, "TIPO OS": oi,
              "CAUSA": ci, "SUBACCION/SUBANOMALIA": si,
-             "TIPO SUSPENSION SOLICITADA": ui, "TARIFA": fi}
+             "TIPO SUSPENSION SOLICITADA": ui, "TARIFA": fi,
+             "ACTIVIDAD": ai}
     for col, letra in _DIMS:
         d[letra] = d[col].map(mapas[col]).fillna(0).astype(int)
     d["e"] = d["Estado"].map(EST)
@@ -184,6 +189,7 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
         "dim": {
             "barrios": barrios, "tecs": tecs, "brigs": brigs, "tipos": tipos,
             "causas": causas, "subs": subs, "susps": susps, "tarifas": tarifas,
+            "acts": acts,
             "munis": munis, "zonas": zonas,
             "estados": ["Efectiva", "Fallida", "Perdida"],
             "causa_ctrl": [int(ctrl_por_causa.get(c, 1)) for c in causas],

@@ -60,6 +60,7 @@ QUERY_HISTORICO: str = """
       id_tecnico AS "ID TECNICO",
       tecnico AS "TECNICO",
       tipo_brigada AS "TIPO BRIGADA",
+      brigada_homologada AS "BRIGADA HOMOLOGADA",
       tipo_os AS "TIPO OS",
       tipo_suspension_solicitada AS "TIPO SUSPENSION SOLICITADA",
       accion AS "ACCION",

@@ -118,6 +118,7 @@ export default function Home() {
     muni: "",
     brig: "",
     tipo: "",
+    act: "",
     d0: 0,
     d1: 60,
     minOrders: 10,
@@ -181,6 +182,7 @@ export default function Home() {
       muni: "",
       brig: "",
       tipo: "",
+      act: "",
       d0: 0,
       d1: maxD,
       selBarrio: null,
@@ -291,6 +293,7 @@ export default function Home() {
       S: Uint8Array.from(P.s),
       U: Uint8Array.from(P.u),
       F: Uint8Array.from(P.f),
+      ACT: P.a ? Uint8Array.from(P.a) : null,
       M: Int32Array.from(P.m),
       ORD: P.n,
       NIC: P.nic,
@@ -394,12 +397,13 @@ export default function Home() {
   // 1. FILTERING ENGINE
   const IDX = useMemo(() => {
     if (!data || !rawArrays) return [];
-    const { DAY, B, G, O } = rawArrays;
+    const { DAY, B, G, O, ACT } = rawArrays;
     const N = DAY.length;
     const zi = st.zona === "" ? -1 : +st.zona;
     const mi = st.muni === "" ? -1 : +st.muni;
     const gi = st.brig === "" ? -1 : +st.brig;
     const oi = st.tipo === "" ? -1 : +st.tipo;
+    const ai = st.act === "" ? -1 : +st.act;
     const activeMi =
       st.months && st.months.length > 0
         ? new Set(
@@ -416,10 +420,11 @@ export default function Home() {
       if (mi >= 0 && data.dim.b_muni[b] !== mi) continue;
       if (gi >= 0 && G[i] !== gi) continue;
       if (oi >= 0 && O[i] !== oi) continue;
+      if (ai >= 0 && ACT && ACT[i] !== ai) continue;
       out[k++] = i;
     }
     return out.subarray(0, k);
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.months]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.months]);
 
   // Recalculates available filters in cascade
   const avail = useMemo(() => {
@@ -427,10 +432,11 @@ export default function Home() {
       zona: new Set(),
       muni: new Set(),
       brig: new Set(),
-      tipo: new Set()
+      tipo: new Set(),
+      act: new Set()
     };
     if (!data || !rawArrays) return res;
-    const { B, G, O, DAY } = rawArrays;
+    const { B, G, O, ACT, DAY } = rawArrays;
     const N = DAY.length;
 
     // Filter values (independent of the selector itself to avoid lockups)
@@ -438,6 +444,7 @@ export default function Home() {
     const mi = st.muni === "" ? -1 : +st.muni;
     const gi = st.brig === "" ? -1 : +st.brig;
     const oi = st.tipo === "" ? -1 : +st.tipo;
+    const ai = st.act === "" ? -1 : +st.act;
     const activeMi =
       st.months && st.months.length > 0
         ? new Set(
@@ -452,26 +459,31 @@ export default function Home() {
       const mVal = data.dim.b_muni[b];
       const gVal = G[i];
       const oVal = O[i];
+      const aVal = ACT ? ACT[i] : -1;
 
-      // Zona depends on Muni, Brig, Tipo
-      if ((mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi)) {
+      // Zona depends on Muni, Brig, Tipo, Act
+      if ((mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
         res.zona.add(zVal);
       }
-      // Muni depends on Zona, Brig, Tipo
-      if ((zi < 0 || zVal === zi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi)) {
+      // Muni depends on Zona, Brig, Tipo, Act
+      if ((zi < 0 || zVal === zi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
         res.muni.add(mVal);
       }
-      // Brig depends on Zona, Muni, Tipo
-      if ((zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (oi < 0 || oVal === oi)) {
+      // Brig depends on Zona, Muni, Tipo, Act
+      if ((zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
         res.brig.add(gVal);
       }
-      // Tipo depends on Zona, Muni, Brig
-      if ((zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi)) {
+      // Tipo depends on Zona, Muni, Brig, Act
+      if ((zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (ai < 0 || aVal === ai)) {
         res.tipo.add(oVal);
+      }
+      // Act depends on Zona, Muni, Brig, Tipo
+      if (ACT && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi)) {
+        res.act.add(aVal);
       }
     }
     return res;
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.months]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.months]);
 
   // 2. AGGREGATION ENGINE
   const A = useMemo(() => {
@@ -1125,6 +1137,7 @@ export default function Home() {
       zona: nombre(dim.zonas, st.zona),
       brigada: nombre(dim.brigs, st.brig),
       tipo_os: nombre(dim.tipos, st.tipo),
+      actividad: dim.acts ? nombre(dim.acts, st.act) : null,
       proceso,
       meses: (st.months || []).map((l) => porEtiqueta.get(l)).filter(Boolean)
     };
@@ -1189,6 +1202,10 @@ export default function Home() {
       if (brig !== null) next.brig = brig;
       const tipo = idxDe(dim.tipos, accion.tipo_os);
       if (tipo !== null) next.tipo = tipo;
+      if (dim.acts) {
+        const act = idxDe(dim.acts, accion.actividad);
+        if (act !== null) next.act = act;
+      }
 
       // El barrio llega como BKEY ("MUNICIPIO | BARRIO"), igual que en dim.barrios.
       const b = idxDe(dim.barrios, accion.barrio);
@@ -1221,6 +1238,7 @@ export default function Home() {
       muni: "",
       brig: "",
       tipo: "",
+      act: "",
       d0: 0,
       d1: MAXDAY,
       minOrders: 10,

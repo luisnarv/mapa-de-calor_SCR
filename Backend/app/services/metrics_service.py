@@ -328,6 +328,7 @@ class MetricsService:
         brigada: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
         etiqueta: str | None = None,
     ) -> Efectividad:
         """Efectividad del recorte indicado. Sin filtros, de todo el histórico.
@@ -338,6 +339,7 @@ class MetricsService:
         conteos = self._agrupar(
             bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
             tipo_os=tipo_os, brigada=brigada, subaccion=subaccion, tarifa=tarifa,
+            actividad=actividad,
         )
         nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
         return _a_dto(conteos.get(0, Conteo()), nombre)
@@ -352,6 +354,7 @@ class MetricsService:
         brigada: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
         min_ordenes: int = 10,
         limite: int = 10,
         ascendente: bool = False,
@@ -367,7 +370,7 @@ class MetricsService:
         ordena por órdenes perdidas, que son las que no se cobran; responderla con
         efectividad devuelve barrios sin una sola pérdida.
         """
-        if dimension not in ("brigada", "tecnico", "barrio", "subaccion", "tarifa"):
+        if dimension not in ("brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad"):
             raise ValueError(f"Dimensión no soportada: {dimension}")
         if ordenar_por not in CRITERIOS:
             raise ValueError(f"Criterio no soportado: {ordenar_por}")
@@ -375,11 +378,12 @@ class MetricsService:
         p = self.datos
         conteos = self._agrupar(
             bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada,
-            subaccion=subaccion, tarifa=tarifa, por=dimension,
+            subaccion=subaccion, tarifa=tarifa, actividad=actividad,
+            por=dimension,
         )
         catalogo = {
             "brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios,
-            "subaccion": p.subs, "tarifa": p.tarifas,
+            "subaccion": p.subs, "tarifa": p.tarifas, "actividad": p.acts,
         }[dimension]
 
         # Las medias salen de TODO el recorte, incluidos los grupos que luego
@@ -408,17 +412,20 @@ class MetricsService:
         *,
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
+        zona: str | None = None,
         meses: Sequence[str] | None = None,
         brigada: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
         limite: int = 6,
     ) -> list[FilaCausa]:
         """Causas de las órdenes NO efectivas, de mayor a menor."""
         p = self.datos
         conteo = self._agrupar(
-            bkeys=bkeys, municipio=municipio, meses=meses, brigada=brigada,
-            subaccion=subaccion, tarifa=tarifa,
+            bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
+            brigada=brigada, subaccion=subaccion, tarifa=tarifa,
+            actividad=actividad,
         ).get(0, Conteo())
 
         total = sum(conteo.causas.values())
@@ -441,6 +448,7 @@ class MetricsService:
         bkeys: Sequence[str] | None = None,
         municipio: str | None = None,
         zona: str | None = None,
+        brigada: str | None = None,
         meses: Sequence[str] | None = None,
         etiqueta: str | None = None,
         limite: int = 10,
@@ -477,18 +485,17 @@ class MetricsService:
         f_barrios = self._indices_barrio(bkeys) if bkeys else None
         f_muni = self._indice(p.munis, municipio)
         f_zona = self._indice(p.zonas, zona)
+        f_brig = self._indice(p.brigs, brigada)
         f_meses = {p.meses.index(m) for m in meses if m in p.meses} if meses else None
         for pedido, resuelto in (
             (bkeys, f_barrios), (municipio, f_muni), (zona, f_zona),
-            (meses, f_meses or None),
+            (brigada, f_brig), (meses, f_meses or None),
         ):
             if pedido is not None and resuelto is None:
-                # Se devuelve QUÉ no resolvió: sin eso, el 0 se lee como «ahí no
-                # pasa nada» cuando lo que pasó es que el recorte no existe.
                 logger.info("Filtro sin coincidencia: %r", pedido)
                 return vacio(str(pedido))
 
-        B, E, b_muni, b_zona = p.b, p.e, p.b_muni, p.b_zona
+        B, E, G, b_muni, b_zona = p.b, p.e, p.g, p.b_muni, p.b_zona
         coincidencias = revisadas = 0
         por_estado = {"Efectiva": 0, "Fallida": 0, "Perdida": 0}
         menciones: dict[int, int] = {}
@@ -526,6 +533,8 @@ class MetricsService:
                     continue
                 zi = b_zona[bi]
                 if f_zona is not None and zi != f_zona:
+                    continue
+                if f_brig is not None and G[i] != f_brig:
                     continue
                 revisadas += 1
                 tot_barrio[bi] = tot_barrio.get(bi, 0) + 1
@@ -941,6 +950,7 @@ class MetricsService:
         brigada: str | None = None,
         subaccion: str | None = None,
         tarifa: str | None = None,
+        actividad: str | None = None,
         por: str | None = None,
     ) -> dict[int, Conteo]:
         """Recorre las órdenes una vez, filtrando y acumulando.
@@ -959,6 +969,7 @@ class MetricsService:
         # ESPECIAL» enteros.
         f_sub = self._indice_parcial(p.subs, subaccion)
         f_tarifa = self._indice_parcial(p.tarifas, tarifa)
+        f_act = self._indice_parcial(p.acts, actividad) if p.acts else None
         # Conjunto y no índice: «todo 2026» son varios meses, no uno. Queda en
         # None si no se pidió ninguno, y vacío si ninguno de los pedidos existe
         # —que no es lo mismo y abajo se distinguen.
@@ -983,15 +994,17 @@ class MetricsService:
             ("brigada", brigada, f_brig, p.brigs),
             ("subaccion", subaccion, f_sub, p.subs),
             ("tarifa", tarifa, f_tarifa, p.tarifas),
+            ("actividad", actividad, f_act, p.acts),
         ):
             if pedido is not None and resuelto is None:
                 raise FiltroNoResuelto(campo, str(pedido), catalogo)
 
         B, C, E, MES, O, G, S, F = p.b, p.c, p.e, p.mes, p.o, p.g, p.s, p.f
+        A = p.a
         ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
         grupo = {
             "brigada": p.g, "tecnico": p.t, "barrio": p.b,
-            "subaccion": p.s, "tarifa": p.f,
+            "subaccion": p.s, "tarifa": p.f, "actividad": A,
         }.get(por)
 
         conteos: dict[int, Conteo] = {}
@@ -1012,6 +1025,8 @@ class MetricsService:
             if f_sub is not None and S[i] != f_sub:
                 continue
             if f_tarifa is not None and F[i] != f_tarifa:
+                continue
+            if f_act is not None and A[i] != f_act:
                 continue
 
             clave = grupo[i] if grupo is not None else 0
