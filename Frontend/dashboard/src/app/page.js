@@ -1747,7 +1747,7 @@ export default function Home() {
           {rightPanelContent}
         </main>
 
-        <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
+        <ChatBot key={proceso} onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
       </div>
     );
   }
@@ -2068,7 +2068,7 @@ export default function Home() {
         />
       </main>
 
-      <ChatBot onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
+      <ChatBot key={proceso} onAccion={handleAccionChat} vista={vistaParaChat} onCargue={handleCargue} proceso={proceso} />
     </div>
   );
 }

@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_TIMEOUT_SECONDS: float = 60.0
     OPENAI_MAX_RETRIES: int = 2
     OPENAI_SYSTEM_PROMPT: str = leer_prompt("sistema.md")
