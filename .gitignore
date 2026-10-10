@@ -61,3 +61,7 @@ desktop.ini
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Variables de entorno guardadas sin punto (contienen claves y cadenas de conexión)
+Backend/env
+Frontend/dashboard/env
