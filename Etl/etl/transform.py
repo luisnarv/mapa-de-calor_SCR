@@ -17,8 +17,10 @@ import pandas as pd
 from .config import BBOX, COLS_TEXTO
 from .logging_conf import get_logger
 from .taxonomy import (
-    RESULTADOS_EFECTIVOS,
-    RESULTADOS_PERDIDOS,
+    ESTADO_GESTION_PERDIDA,
+    ESTADOS_GESTION,
+    SUBCAUSA_SIN_DETALLE,
+    SUBCAUSAS_OBS,
     causa_cobros_for_norm_key,
     causa_for_norm_key,
     homolog_brigada,
@@ -133,16 +135,16 @@ def enrich(
             lambda s: estado_map.get(norm_dato(s)) if pd.notna(s) else None,
         )
     else:
-        def _resultado_a_estado(r: object) -> str | None:
-            if pd.isna(r):
-                return None
-            txt = str(r).strip().upper()
-            if txt in RESULTADOS_EFECTIVOS:
-                return "Efectiva"
-            if txt in RESULTADOS_PERDIDOS:
-                return "Perdida"
-            return "Fallida"
-        df["Estado"] = _map_por_unico(df["AV/RESULTADO"], _resultado_a_estado)
+        # Sin "Fallida": en cobros la gestión se pudo hacer (Efectiva) o no (Perdida).
+        # object y no "string": con NA, `== "VF"` devuelve NA y np.where no lo admite.
+        codigo = df["ESTADO_GESTION"].astype(object).map(
+            lambda v: v.strip().upper() if isinstance(v, str) else None)
+        codigo = codigo.where(codigo.isin(ESTADOS_GESTION))
+        df["ESTADO_GESTION"] = codigo.map(ESTADOS_GESTION)
+        df["Estado"] = np.where(
+            codigo.isna(), None,
+            np.where(codigo == ESTADO_GESTION_PERDIDA, "Perdida", "Efectiva"),
+        )
 
     asignados = int(df["Estado"].notna().sum())
     if asignados == 0:
@@ -158,6 +160,16 @@ def enrich(
     df["CAUSA"] = accion_norm.map({k: v[0] for k, v in causa_lut.items()})
     df["FAMILIA_CAUSA"] = accion_norm.map({k: v[1] for k, v in causa_lut.items()})
     df["CONTROLABLE"] = accion_norm.map({k: v[2] for k, v in causa_lut.items()})
+    if proceso == "cobros":
+        # La causa de la anomalía se guarda antes de pisarla con "Efectiva": una visita
+        # efectiva sin pago (VESP) tiene su razón en la anomalía (compromiso, no es el
+        # titular, sin voluntad de pago), y es lo que explica el 61% de las gestiones.
+        df["ANOMALIA_CAUSA"] = df["CAUSA"]
+        obs = (df["OBSERVACION"].fillna("").astype(str).str.lower()
+               .str.normalize("NFKD").str.encode("ascii", "ignore").str.decode("ascii"))
+        df["SUBCAUSA"] = SUBCAUSA_SIN_DETALLE
+        for etiqueta, patron in reversed(SUBCAUSAS_OBS):
+            df.loc[obs.str.contains(patron, regex=True), "SUBCAUSA"] = etiqueta
     efectiva = df["Estado"].eq("Efectiva")
     df.loc[efectiva, "CAUSA"] = "Efectiva"
     df.loc[efectiva, "FAMILIA_CAUSA"] = "exito"
@@ -170,4 +182,5 @@ def enrich(
         df = df.sort_values("FECHA_EJECUCION").drop_duplicates("ORDEN", keep="last")
         log.info("Duplicados: %s órdenes repetidas, se conserva la más reciente.", f"{duplicados:,}")
 
-    return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS)]
+    extra = ["ESTADO_GESTION", "ANOMALIA_CAUSA", "SUBCAUSA"] if proceso == "cobros" else []
+    return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS) + extra]

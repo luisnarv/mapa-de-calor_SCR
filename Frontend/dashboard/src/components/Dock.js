@@ -4,6 +4,11 @@ import React, { useState } from "react";
 import { ChevronRight, Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { useTheme, riskColor as riskColorOf, riskInk } from "@/lib/theme";
+import VistaGestores from "@/components/VistaGestores";
+import MotivosCobros from "@/components/MotivosCobros";
+import RankingCobros from "@/components/RankingCobros";
+import CargaCobros from "@/components/CargaCobros";
+import JerarquiaCobros from "@/components/JerarquiaCobros";
 
 export default function Dock({
   A,
@@ -12,9 +17,11 @@ export default function Dock({
   dayLabel,
   onFilterChange,
   onSelectBarrio,
+  onSelectNic,
   V = {}
 }) {
   const [gran, setGran] = useState("dia");
+  const [vistaTend, setVistaTend] = useState("evolucion");
   const { palette: P } = useTheme();
 
   const num = (val) => Math.round(val).toLocaleString("es-CO");
@@ -107,8 +114,15 @@ export default function Dock({
     });
     const maxT = Math.max(...series.map((s) => s.t)) || 1;
 
-    // split comparisons
-    const mid = Math.floor((st.d0 + st.d1) / 2);
+    // Mitades del rango que de verdad tiene datos. No se usa d0..d1: al abrir con un
+    // solo mes cargado arrancan en el día 0 del año, y todo caía en la 2.ª mitad.
+    let dmin = Infinity;
+    let dmax = -Infinity;
+    for (const d of A.byDay.keys()) {
+      if (d < dmin) dmin = d;
+      if (d > dmax) dmax = d;
+    }
+    const mid = Math.floor((dmin + dmax) / 2);
     const H = [
       [0, 0, 0],
       [0, 0, 0]
@@ -120,19 +134,32 @@ export default function Dock({
       H[h][2] += v[2];
     }
 
-    const rate = (h) => {
+    // Solo cobros: gestiones perdidas por no poder contactar al cliente, por mitad.
+    const sinFallidas = V.conFallidas === false;
+    const noContacto = [0, 0];
+    const idCausaNc = dim.causas.indexOf("Cliente no contactable");
+    if (sinFallidas && idCausaNc >= 0) {
+      const I = A.IDX || [];
+      for (let j = 0; j < I.length; j++) {
+        const i = I[j];
+        if (st.C_raw[i] === idCausaNc) noContacto[st.DAY_raw[i] <= mid ? 0 : 1]++;
+      }
+    }
+
+    const rate = (h, nc) => {
       const t = h[0] + h[1] + h[2];
       return t
         ? {
             ef: (h[0] / t) * 100,
             fa: (h[1] / t) * 100,
             pe: (h[2] / t) * 100,
+            nc: (nc / t) * 100,
             t
           }
-        : { ef: 0, fa: 0, pe: 0, t: 0 };
+        : { ef: 0, fa: 0, pe: 0, nc: 0, t: 0 };
     };
-    const R1 = rate(H[0]),
-      R2 = rate(H[1]);
+    const R1 = rate(H[0], noContacto[0]),
+      R2 = rate(H[1], noContacto[1]);
 
     const card = (lab, v1, v2, goodUp) => {
       const d = v2 - v1;
@@ -159,10 +186,12 @@ export default function Dock({
           <div className="tc-h">1.ª mitad → 2.ª mitad</div>
           {card("Efectividad", R1.ef, R2.ef, true)}
           {card("Tasa perdida", R1.pe, R2.pe, false)}
-          {card("Tasa fallida", R1.fa, R2.fa, false)}
+          {sinFallidas
+            ? card("Tasa de no contacto", R1.nc, R2.nc, false)
+            : card("Tasa fallida", R1.fa, R2.fa, false)}
           <div className="tc">
             <span>Volumen</span>
-            <b>{num(R2.t)} {V.ordenMin || "orden"}es</b>
+            <b>{num(R2.t)} {V.ordenesMin || "ordenes"}</b>
             <span className={`tc-d ${volD >= 0 ? "ok" : "bad"}`}>
               {volD >= 0 ? (
                 <TrendingUp size={12} strokeWidth={2.4} aria-hidden="true" />
@@ -183,15 +212,15 @@ export default function Dock({
                 key={i}
                 className="tb"
                 style={{ width: `${100 / series.length}%` }}
-                title={`${label(s.k)} · ${num(s.t)} ${V.ordenMin || "orden"}es · ${pct(
+                title={`${label(s.k)} · ${num(s.t)} ${V.ordenesMin || "ordenes"} · ${pct(
                   seg(0)
-                )}% efectividad · ${num(s.v[1])} fallidas · ${num(
+                )}% efectividad${sinFallidas ? "" : ` · ${num(s.v[1])} fallidas`} · ${num(
                   s.v[2]
                 )} perdidas`}
               >
                 <div className="tb-stack" style={{ height: `${h}%` }}>
                   <i style={{ height: `${seg(2)}%`, background: P.st[2] }}></i>
-                  <i style={{ height: `${seg(1)}%`, background: P.st[1] }}></i>
+                  {!sinFallidas && <i style={{ height: `${seg(1)}%`, background: P.st[1] }}></i>}
                   <i style={{ height: `${seg(0)}%`, background: P.st[0] }}></i>
                 </div>
                 <span className="tb-l">
@@ -244,7 +273,7 @@ export default function Dock({
             </div>
           );
         })}
-        {!causes.length && <p className="empty">Sin {V.ordenMin || "orden"}es no efectivas.</p>}
+        {!causes.length && <p className="empty">Sin {V.ordenesMin || "ordenes"} no efectivas.</p>}
       </div>
     );
   };
@@ -311,7 +340,7 @@ export default function Dock({
           <div>
             <h4>
               {V.tecnicos || "Técnicos"} · mayor efectividad ajustada{" "}
-              <span className="hint">≥{minN} {V.ordenMin || "orden"}es</span>
+              <span className="hint">≥{minN} {V.ordenesMin || "ordenes"}</span>
             </h4>
             {tbl(best, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
@@ -320,7 +349,7 @@ export default function Dock({
             {tbl(worst, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div>
-            <h4>{V.tecnicos || "Técnicos"} · más {V.ordenMin || "orden"}es perdidas</h4>
+            <h4>{V.tecnicos || "Técnicos"} · más {V.ordenesMin || "ordenes"} perdidas</h4>
             {tbl(lost, [V.tecnico || "Técnico", ...H.slice(1)], tecRow)}
           </div>
           <div>
@@ -337,8 +366,8 @@ export default function Dock({
           </div>
         </div>
         <p className="hint" style={{ marginTop: "12px" }}>
-          El ranking ordena por <b>efectividad ajustada</b>. Ordenar por efectividad bruta penalizaría a los {V.tecnicoMin || "técnico"}s que
-          recibieron más {V.ordenMin || "orden"}es de clientes que ya habían pagado — algo que no depende de ellos.
+          El ranking ordena por <b>efectividad ajustada</b>. Ordenar por efectividad bruta penalizaría a los {V.tecnicosMin || "técnicos"} que
+          recibieron más {V.ordenesMin || "ordenes"} de clientes que ya habían pagado — algo que no depende de ellos.
         </p>
       </>
     );
@@ -530,7 +559,7 @@ export default function Dock({
             <div className="jer-tec-h" style={{ borderBottom: "none", paddingBottom: 0 }}>
               <b>{dim.tecs[t]}</b>
               <span className="jer-tec-m">
-                {num(s.tot)} {V.ordenMin || "orden"}es &middot;{" "}
+                {num(s.tot)} {V.ordenesMin || "ordenes"} &middot;{" "}
                 <em className="ok">{s.ef} ef</em> &middot;{" "}
                 <em className="warn">{s.fa} fa</em> &middot;{" "}
                 <em className="bad">{s.pe} pe</em> &middot; {pct((s.ef / s.tot) * 100)}% efect.
@@ -600,7 +629,18 @@ export default function Dock({
           Jerarquía
         </button>
 
-        {st.dock === "tendencias" && !st.dockCollapsed && (
+        {st.dock === "tendencias" && !st.dockCollapsed && V.vistaGestores && (
+          <span className="vt-sw" role="group" aria-label="Vista de tendencias">
+            <button className={vistaTend === "evolucion" ? "on" : ""} onClick={() => setVistaTend("evolucion")}>
+              Evolución
+            </button>
+            <button className={vistaTend === "gestores" ? "on" : ""} onClick={() => setVistaTend("gestores")}>
+              Por gestor
+            </button>
+          </span>
+        )}
+
+        {st.dock === "tendencias" && !st.dockCollapsed && vistaTend === "evolucion" && (
           <select
             id="gran"
             value={gran}
@@ -624,11 +664,43 @@ export default function Dock({
       <div id="dockBody">
         {!st.dockCollapsed && (
           <>
-            {st.dock === "tendencias" && renderTrend()}
-            {st.dock === "motivos" && renderCauses()}
-            {st.dock === "ranking" && renderRanking()}
-            {st.dock === "carga" && renderCarga()}
-            {st.dock === "jerarquia" && renderJerarquia()}
+            {st.dock === "tendencias" && V.vistaGestores && vistaTend === "gestores" && (
+              <VistaGestores proceso={V.proceso} meses={st.months} palette={P} />
+            )}
+            {st.dock === "tendencias" && !(V.vistaGestores && vistaTend === "gestores") && renderTrend()}
+            {st.dock === "motivos" &&
+              (V.vistaGestores && dim.anoms ? (
+                <MotivosCobros A={A} st={st} dim={dim} onFilterChange={onFilterChange} P={P} />
+              ) : (
+                renderCauses()
+              ))}
+            {st.dock === "ranking" &&
+              (V.vistaGestores && dim.gests ? (
+                <RankingCobros A={A} st={st} dim={dim} onFilterChange={onFilterChange} P={P} V={V} />
+              ) : (
+                renderRanking()
+              ))}
+            {st.dock === "carga" &&
+              (V.vistaGestores && dim.gests ? (
+                <CargaCobros A={A} st={st} dim={dim} onSelectBarrio={onSelectBarrio} P={P} V={V} />
+              ) : (
+                renderCarga()
+              ))}
+            {st.dock === "jerarquia" &&
+              (V.vistaGestores && dim.gests ? (
+                <JerarquiaCobros
+                  A={A}
+                  st={st}
+                  dim={dim}
+                  dayLabel={dayLabel}
+                  onFilterChange={onFilterChange}
+                  onSelectNic={onSelectNic}
+                  P={P}
+                  V={V}
+                />
+              ) : (
+                renderJerarquia()
+              ))}
           </>
         )}
       </div>

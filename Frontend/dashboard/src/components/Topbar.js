@@ -139,7 +139,9 @@ export default function Topbar({
 
   const hayFiltros =
     st.zona !== "" || st.muni !== "" || st.brig !== "" || st.tipo !== "" ||
-    st.act !== "" || mesesPuestos || barrioSel;
+    st.act !== "" || st.gest !== "" || mesesPuestos || barrioSel ||
+    st.causaSel != null || !st.est.every(Boolean) || st.hotspot !== 60 ||
+    st.minOrders !== (esCobros ? 1 : 10);
 
   const edad = edadDeLosDatos(st.generated);
   const estadoRefresco =
@@ -205,7 +207,16 @@ export default function Topbar({
               ? `Todas las gestiones (${avail.tipo.size})`
               : `Todos los tipos (${avail.tipo.size})`}
           />
-          {dim.acts && dim.acts.length > 0 && (
+          {dim.gests && dim.gests.length > 0 && (
+            <FiltroPildora
+              etiqueta="Estado de gestión"
+              valor={st.gest}
+              opciones={opcionesDe(dim.gests, avail.gest)}
+              onElegir={(v) => onFilterChange("gest", v)}
+              vacio={`Todos los estados (${avail.gest.size})`}
+            />
+          )}
+          {!esCobros && dim.acts && dim.acts.length > 0 && (
             <FiltroPildora
               etiqueta="Actividad"
               valor={st.act}

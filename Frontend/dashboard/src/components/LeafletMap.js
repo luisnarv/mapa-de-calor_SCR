@@ -206,8 +206,12 @@ export default function LeafletMap({
         this._reset();
         const ctx = this._c.getContext("2d");
         ctx.clearRect(0, 0, this._c.width, this._c.height);
-        if (!this._pts || !this._pts.length) return;
-        
+        if (!this._pts || !this._pts.length) {
+          const aviso = document.getElementById("mapCap");
+          if (aviso) aviso.style.display = "none";
+          return;
+        }
+
         const z = map.getZoom();
         const b = map.getBounds();
         const r = z >= 15 ? 5 : z >= 13 ? 4 : 3;
@@ -222,26 +226,54 @@ export default function LeafletMap({
         ctx.strokeStyle = paletteRef.current.pointStroke;
         ctx.lineWidth = 1;
 
-        let drawn = 0;
-        const MAX_POINTS = 8000; // Cap de rendimiento para evitar colapso del hilo principal
-
+        // Tope de rendimiento. Se cuenta sobre los puntos visibles en el encuadre
+        // (al acercar, caben todos) y las perdidas tienen prioridad: son pocas y son
+        // lo que importa, así que nunca se recortan; el recorte cae sobre las
+        // demás, muestreadas a paso parejo para no sesgar hacia las más antiguas.
+        const MAX_POINTS = 8000;
+        const visibles = [];
+        let perdidas = 0;
         for (const i of this._pts) {
           const lat = st.lat(i);
           const lon = st.lon(i);
           if (isNaN(lat) || isNaN(lon)) continue;
           if (lat < south || lat > north || lon < west || lon > east) continue;
-          
-          const p = map.latLngToContainerPoint([lat, lon]);
+          visibles.push(i);
+          if (st.E_raw[i] === 2) perdidas++;
+        }
+        const presupuesto = Math.max(0, MAX_POINTS - perdidas);
+        const otras = visibles.length - perdidas;
+        const paso = otras > presupuesto ? otras / presupuesto : 1;
+
+        const pintar = (i) => {
+          const p = map.latLngToContainerPoint([st.lat(i), st.lon(i)]);
           ctx.fillStyle = palette[st.E_raw[i]];
           ctx.beginPath();
           ctx.arc(p.x, p.y, r, 0, 6.283);
           ctx.fill();
           ctx.stroke();
-
+        };
+        // Las perdidas van al final para que queden encima de las demás.
+        let drawn = 0;
+        let acum = 0;
+        for (const i of visibles) {
+          if (st.E_raw[i] === 2) continue;
+          acum += 1;
+          if (acum < paso) continue;
+          acum -= paso;
+          pintar(i);
           drawn++;
-          if (drawn >= MAX_POINTS) {
-            break;
+        }
+        for (const i of visibles) {
+          if (st.E_raw[i] === 2) {
+            pintar(i);
+            drawn++;
           }
+        }
+        const aviso = document.getElementById("mapCap");
+        if (aviso) {
+          aviso.style.display = drawn < visibles.length ? "block" : "none";
+          aviso.textContent = `Mostrando ${drawn.toLocaleString("es-CO")} de ${visibles.length.toLocaleString("es-CO")} puntos · acerca el mapa para ver el resto`;
         }
         ctx.globalAlpha = 1.0;
       }
@@ -318,15 +350,23 @@ export default function LeafletMap({
           </div>
           <table class="op-t">
             <tbody>
+              ${dim.gests && st.GEST_RAW ? `<tr><td>Estado de gestión</td><td><b>${dim.gests[st.GEST_RAW[i]]}</b></td></tr>` : ""}
               <tr><td>NIC</td><td class="mono">${st.NIC_raw ? st.NIC_raw[i] : "—"}</td></tr>
-              <tr><td>Causa</td><td>${dim.causas[st.C_raw[i]]} ${
-                ctrl ? "" : '<em class="op-nc">no controlable</em>'
-              }</td></tr>
+              <tr><td>${V.conFallidas === false ? "Motivo" : "Causa"}</td><td>${
+                V.conFallidas === false && st.CA_RAW ? dim.anoms[st.CA_RAW[i]] : dim.causas[st.C_raw[i]]
+              } ${ctrl ? "" : '<em class="op-nc">no controlable</em>'}</td></tr>
+              ${
+                V.conFallidas === false && st.SC_RAW && dim.subcausas[st.SC_RAW[i]] !== "Sin detalle"
+                  ? `<tr><td>Según el acta</td><td>${dim.subcausas[st.SC_RAW[i]]}</td></tr>`
+                  : ""
+              }
               <tr><td>${V.subaccion || "Subacción"}</td><td>${dim.subs[st.S_raw[i]]}</td></tr>
-              <tr><td>${V.tecnico || "Técnico"}</td><td>${dim.tecs[st.T_raw[i]]}</td></tr>
+              <tr><td>${V.tecnico || "Técnico"}</td><td>${
+                V.conFallidas === false ? dim.tecs[st.T_raw[i]].replace(/\s*-\s*\d+\s*$/, "") : dim.tecs[st.T_raw[i]]
+              }</td></tr>
               <tr><td>${V.brigada || "Brigada"}</td><td>${dim.brigs[st.G_raw[i]]}</td></tr>
               <tr><td>${V.tipoOs || "Tipo OS"}</td><td>${dim.tipos[st.O_raw[i]]}</td></tr>
-              <tr><td>Suspensión</td><td>${dim.susps[st.U_raw[i]]}</td></tr>
+              ${V.suspension ? `<tr><td>Suspensión</td><td>${dim.susps[st.U_raw[i]]}</td></tr>` : ""}
               <tr><td>Tarifa</td><td>${dim.tarifas[st.F_raw[i]]}</td></tr>
               <tr><td>Barrio</td><td>${barrioName(st.B_raw[i])} · ${barrioMuni(st.B_raw[i])}</td></tr>
               <tr><td>Ejecutada</td><td>${dayLabel(st.DAY_raw[i])} a las ${hh}:${mm}</td></tr>
@@ -522,10 +562,10 @@ export default function LeafletMap({
           .bindTooltip(
             `<b>${p.n}</b><span class="tt-m">${p.m} · límite catastral</span>` +
               (o
-                ? `<span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${
+                ? `<span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${V.riesgoPorPromedio && o.prio ? o.prio + " · " : ""}${
                     o.risk ?? "—"
                   }</span>
-                <span>${num(o.tot)} ${V.ordenMin || "orden"}es · ${pct(o.efPct)}% efectividad</span>` +
+                <span>${num(o.tot)} ${V.ordenesMin || "ordenes"} · ${pct(o.efPct)}% efectividad</span>` +
                   (distinto
                     ? `<span class="tt-l">datos bajo el nombre <b>${barrioName(
                         p.b
@@ -534,7 +574,7 @@ export default function LeafletMap({
                   (dudoso
                     ? `<span class="tt-w">enlace dudoso · solo ${Math.round(
                         p.cf * 100
-                      )}% de sus ${V.ordenMin || "orden"}es caen aquí</span>`
+                      )}% de sus ${V.ordenesMin || "ordenes"} caen aquí</span>`
                     : "")
                 : ""),
             { sticky: true, className: "tt" }
@@ -551,7 +591,9 @@ export default function LeafletMap({
     if (st.layers.sinNic && geo.bp) {
       const selMuni = st.muni !== "" ? dim.munis[+st.muni].toLowerCase() : null;
       for (const p of geo.bp) {
-        if (p.b !== -1) continue; // solo los que no matchearon con ningún NIC
+        // Sin visitar = ninguna gestión dentro del filtro actual (mes, año, zona...):
+        // un polígono sin barrio enlazado, o enlazado pero sin puntos en lo que se ve.
+        if (p.b !== -1 && A.barrio.has(p.b)) continue;
         if (selMuni && (p.m || "").toLowerCase() !== selMuni) continue;
         L.polygon(p.r, {
           color: P.sinNic,
@@ -562,7 +604,7 @@ export default function LeafletMap({
           renderer: vecRenderer
         })
           .bindTooltip(
-            `<b>${p.n}</b><span class="tt-m">${p.m} · sin ${V.ordenMin || "orden"}es registradas</span>`,
+            `<b>${p.n}</b><span class="tt-m">${p.m} · sin ${V.ordenesMin || "ordenes"} registradas</span>`,
             { sticky: true, className: "tt" }
           )
           .addTo(hullLayerRef.current);
@@ -582,6 +624,7 @@ export default function LeafletMap({
         const i = I[j];
         const e = st.E_raw[i];
         if (!vis[e]) continue;
+        if (st.causaPasa && !st.causaPasa(i)) continue;
         if (st.selBarrio !== null && st.B_raw[i] !== st.selBarrio) continue;
         if (st.layers.heat) {
           const lt = st.lat(i);
@@ -648,9 +691,9 @@ export default function LeafletMap({
 
           const tip =
             `<b>${barrioName(b)}</b><span class="tt-m">${barrioMuni(b)}</span>
-            <span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${o.risk ?? "—"}</span>
-            <span>${num(o.tot)} ${V.ordenMin || "orden"}es · ${pct(o.efPct)}% efectividad</span>
-            <span>${num(o.pe)} perdidas · ${num(o.fa)} fallidas</span>` +
+            <span class="tt-r" style="color:${riskColorOf(P, o.risk, true)}">Riesgo ${V.riesgoPorPromedio && o.prio ? o.prio + " · " : ""}${o.risk ?? "—"}</span>
+            <span>${num(o.tot)} ${V.ordenesMin || "ordenes"} · ${pct(o.efPct)}% efectividad</span>
+            <span>${num(o.pe)} perdidas${V.conFallidas ? ` · ${num(o.fa)} fallidas` : ""}</span>` +
             (n !== o.tot ? `<span class="tt-p">mostrando ${num(n)} de ${num(o.tot)} en el filtro actual</span>` : "");
 
           const hitR = Math.max(rad + 6, 12);
@@ -698,7 +741,7 @@ export default function LeafletMap({
     } else {
       if (map.hasLayer(ptLayerRef.current)) map.removeLayer(ptLayerRef.current);
     }
-  }, [A, st.layers, st.est, st.hotspot, st.selBarrio, theme]);
+  }, [A, st.layers, st.est, st.causaSel, st.hotspot, st.selBarrio, theme]);
 
   // 2 bis. Órdenes POR EJECUTAR del archivo cargado en el chat.
   //
@@ -885,12 +928,41 @@ export default function LeafletMap({
       st.layers.cargueApprox);
   const mapaVacio = !st.est.some(Boolean) && !dibujandoCargue;
 
+  // Con alguna casilla marcada puede no quedar nada que dibujar: filtros que dejan
+  // cero gestiones del estado elegido (p. ej. «Visita fallida» con Perdidas oculto).
+  const sinResultados = React.useMemo(() => {
+    if (!st.est.some(Boolean) || dibujandoCargue) return false;
+    const I = A.IDX || [];
+    for (let j = 0; j < I.length; j++) {
+      const i = I[j];
+      if (st.est[st.E_raw[i]] && (!st.causaPasa || st.causaPasa(i))) return false;
+    }
+    return true;
+  }, [A, st.est, st.causaSel, dibujandoCargue]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div id="mapwrap">
       <div ref={mapContainerRef} id="map" style={{ height: "100%", width: "100%" }} />
-      <div id="mapEmpty" style={{ display: mapaVacio ? "block" : "none" }}>
-        <b>Ninguna {V.ordenMin || "orden"} seleccionada</b>
-        <p>Marca al menos un tipo de {V.ordenMin || "orden"} — perdidas, fallidas o efectivas — para dibujarlas en el mapa.</p>
+      <div id="mapCap" />
+      <div id="mapEmpty" style={{ display: mapaVacio || sinResultados ? "block" : "none" }}>
+        {mapaVacio ? (
+          <>
+            <b>Ninguna {V.ordenMin || "orden"} seleccionada</b>
+            <p>
+              Marca al menos un tipo de {V.ordenMin || "orden"} —{" "}
+              {V.conFallidas === false ? "perdidas o efectivas" : "perdidas, fallidas o efectivas"} — para dibujarlas en el
+              mapa.
+            </p>
+          </>
+        ) : (
+          <>
+            <b>Sin {V.ordenesMin || "ordenes"} con estos filtros</b>
+            <p>
+              Ninguna {V.ordenMin || "orden"} cumple los filtros y los tipos marcados. Quita un filtro o marca otro tipo
+              de {V.ordenMin || "orden"}.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ import pandas as pd
 
 from .config import LAT0, LON0, MESES_ES, Settings
 from .direcciones import construir as construir_direcciones
-from .geo import link_barrios, load_municipios, load_zonas
+from .geo import asignar_territorio, link_barrios, load_municipios, load_zonas
 from .logging_conf import get_logger
 
 log = get_logger()
@@ -61,12 +61,14 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
         "s": df["s"].tolist(), "u": df["u"].tolist(), "f": df["f"].tolist(),
         "a": df["a"].tolist(),
         "m": df["m"].tolist(),
+        **({"x": df["x"].tolist()} if "x" in df else {}),
+        **({"ca": df["ca"].tolist(), "sc": df["sc"].tolist()} if "ca" in df else {}),
         "n": pd.to_numeric(df["ORDEN"], errors="coerce").fillna(0).astype("int64").tolist(),
         "nic": df["NIC"].astype(str).tolist(),
     }
 
 
-def _prepare(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     """Filtra a filas con Estado + GPS + fecha válidos y arma BKEY.
 
     Solo conserva el año en curso (el del registro más reciente), igual que SCR.
@@ -82,6 +84,9 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
         log.info("Filtro año %d: %s descartadas -> quedan %s",
                  anio_actual, f"{antes - len(d):,}", f"{len(d):,}")
 
+    # Solo cobros: su barrio y municipio salen del GPS, no del nombre en la base.
+    if settings.proceso == "cobros":
+        d = asignar_territorio(d, settings.geo_barrios, settings.geo_municipios)
     d["MUNICIPIO"] = d["MUNICIPIO"].fillna("SIN MUNICIPIO")
     d["LOCALIDAD/BARRIO"] = d["LOCALIDAD/BARRIO"].fillna("SIN BARRIO")
     d["ZONA"] = d["ZONA"].fillna("SIN ZONA")
@@ -103,7 +108,7 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     Returns:
         Resumen ``{"total_all": int, "meses": {...}}`` para logging/verificación.
     """
-    d = _prepare(df)
+    d = _prepare(df, settings)
     if d.empty:
         raise RuntimeError("No quedan filas con Estado + GPS + fecha; no se genera el mapa.")
 
@@ -127,6 +132,19 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
              "ACTIVIDAD": ai}
     for col, letra in _DIMS:
         d[letra] = d[col].map(mapas[col]).fillna(0).astype(int)
+    # Solo cobros: estado de la gestión (filtro aparte de Efectiva/Perdida).
+    anoms: list[str] = []
+    subcausas: list[str] = []
+    if "ANOMALIA_CAUSA" in d:
+        d["ANOMALIA_CAUSA"] = d["ANOMALIA_CAUSA"].fillna("SIN DATO")
+        anoms, ai2 = _idx(d["ANOMALIA_CAUSA"])
+        subcausas, si2 = _idx(d["SUBCAUSA"])
+        d["ca"] = d["ANOMALIA_CAUSA"].map(ai2).astype(int)
+        d["sc"] = d["SUBCAUSA"].map(si2).astype(int)
+    gests: list[str] = []
+    if "ESTADO_GESTION" in d:
+        gests, xi = _idx(d["ESTADO_GESTION"])
+        d["x"] = d["ESTADO_GESTION"].map(xi).astype(int)
     d["e"] = d["Estado"].map(EST)
 
     # Minutos desde la fecha mínima (resolución que usa el front).
@@ -190,8 +208,10 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
             "barrios": barrios, "tecs": tecs, "brigs": brigs, "tipos": tipos,
             "causas": causas, "subs": subs, "susps": susps, "tarifas": tarifas,
             "acts": acts,
+            **({"gests": gests} if gests else {}),
+            **({"anoms": anoms, "subcausas": subcausas} if anoms else {}),
             "munis": munis, "zonas": zonas,
-            "estados": ["Efectiva", "Fallida", "Perdida"],
+            "estados": ["Efectiva", "Fallida", "Perdida"],  # índice 1 sin uso en cobros
             "causa_ctrl": [int(ctrl_por_causa.get(c, 1)) for c in causas],
             "causa_fam": [fam_por_causa.get(c, "otros") for c in causas],
             "b_muni": b_muni, "b_zona": b_zona,
@@ -214,6 +234,30 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     log.info("JSON direcciones -> %s (%.2f MB)", dir_path.name, dir_path.stat().st_size / 1e6)
 
     return {"total_all": int(len(d)), "meses": resumen_meses}
+
+
+def escribir_gestores(df: pd.DataFrame, settings: Settings) -> None:
+    """Vuelca la vista por gestor y mes (solo COBROS) en `gestores.json`.
+
+    Va aparte del mapa porque no es por gestión sino por cuenta y mes, y el tablero
+    solo la pide al abrir la vista por gestor. Formato compacto: cada fila es
+    ``[gestor, mes, cuentas, cuentas_con_gestión_efectiva, deuda, recaudo, cuentas_con_pago]`` con
+    índices a las listas ``gestores`` y ``meses``.
+    """
+    gestores = sorted(df["gestor"].dropna().astype(str).unique().tolist())
+    meses = sorted(df["periodo_mes"].dropna().astype(str).unique().tolist())
+    gi = {g: i for i, g in enumerate(gestores)}
+    mi = {m: i for i, m in enumerate(meses)}
+    filas = [
+        [gi[str(r.gestor)], mi[str(r.periodo_mes)], int(r.cuentas), int(r.cuentas_ef),
+         round(float(r.deuda)), round(float(r.recaudo)), int(r.cuentas_pago)]
+        for r in df.itertuples(index=False)
+    ]
+    settings.public_dir.mkdir(parents=True, exist_ok=True)
+    path = settings.public_dir / "gestores.json"
+    _escribir(path, {"gestores": gestores, "meses": meses, "filas": filas})
+    log.info("JSON gestores -> %s (%s gestores, %s meses, %s filas)",
+             path.name, len(gestores), len(meses), f"{len(filas):,}")
 
 
 def _escribir_observaciones(grp: pd.DataFrame, ym: str, destino: Path) -> None:

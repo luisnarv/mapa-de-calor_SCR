@@ -103,8 +103,30 @@ QUERY_COBROS: str = """
       fecha_gestion AS "FECHA_CIERRE",
       observaciones AS "OBSERVACION",
       observaciones AS "OBS_COMBINADA",
-      REPLACE(punto_gps, '.-', ',-') AS "GPS"
+      REPLACE(punto_gps, '.-', ',-') AS "GPS",
+      estado_final AS "ESTADO_GESTION"
     FROM dbanalitica.historico_aire_cobros
+"""
+
+# Vista general por gestor (solo COBROS). Sale de la vista por NIC y mes, que cuenta
+# cada cuenta una sola vez: sumar deuda y recaudo sobre la tabla cruda los repite
+# por cada gestión de la cuenta. Cuenta con gestión efectiva = su gestión vigente
+# del mes no fue VF (mismo criterio que el mapa).
+QUERY_GESTORES: str = """
+    SELECT
+      periodo_mes,
+      gestor,
+      COUNT(*) AS cuentas,
+      COUNT(*) FILTER (WHERE estado_final <> 'VF') AS cuentas_ef,
+      COUNT(*) FILTER (WHERE estado_final IN ('PAGO TOTAL', 'ABONO', 'ACUERDO DE PAGO')) AS cuentas_pago,
+      COALESCE(SUM(saldo) FILTER (WHERE estado_final <> 'VF'), 0) AS deuda,
+      COALESCE(SUM(recaudo_cartera) FILTER (WHERE estado_final <> 'VF'), 0) AS recaudo
+    FROM dbanalitica.v_aire_cobros_nic_mes
+    WHERE anio = (SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes)
+      AND gestor IS NOT NULL
+      AND estado_final IS NOT NULL
+    GROUP BY periodo_mes, gestor
+    ORDER BY periodo_mes, gestor
 """
 
 # Columnas que deben tratarse como texto (evita el ".0" que pandas pega a floats).

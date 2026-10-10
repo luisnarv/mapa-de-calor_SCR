@@ -111,14 +111,35 @@ def causa_cobros_for_norm_key(anomalia_norm: str) -> tuple[str, str, int]:
     return _CAUSAS_COBROS_NORM.get(anomalia_norm, CAUSA_DEFECTO_COBROS)
 
 
-# Resultado → Estado para COBROS (no usa maestro_tarifas).
-RESULTADOS_EFECTIVOS: frozenset[str] = frozenset({
-    "REALIZO PAGO", "REALIZO ACUERDO DE PAGO", "PRE-ACUERDO",
-})
-RESULTADOS_PERDIDOS: frozenset[str] = frozenset({
-    "CONTACTO NO EFECTIVO", "NO CONTESTA", "BUZON DE MENSAJES",
-    "TELEFONO EQUIVOCADO", "TELEFONO ERRADO", "CLIENTE CUELGA LLAMADA",
-})
+# Causa más fina de una gestión de COBROS, leída del texto que escribe el gestor.
+# El primero que coincida gana, así que va de lo más específico a lo más genérico.
+# Se busca sobre texto sin tildes y con raíces ("notificaci"): una observación con
+# la tilde dañada pierde la letra y la palabra entera dejaría de coincidir.
+SUBCAUSAS_OBS: tuple[tuple[str, str], ...] = (
+    ("Usuario agresivo", r"agresiv|amenaz|insult|grit|maltrat"),
+    ("Sector peligroso", r"peligros|inseguro|zona roja|balacera|atraco"),
+    ("Predio desocupado", r"desocupad|deshabitad|abandonad|sin habitar|se arrienda|en arriendo|en venta"),
+    ("Predio demolido o inexistente", r"demolid|inexistente|no existe"),
+    ("Dirección no ubicada", r"direccion (errad|incorrect|no)|no se ubica|no se logra ubicar|no encuentra la direccion"),
+    ("Predio cerrado o sin respuesta", r"cerrad|nadie|ausente|no atiende|no abre|no responde|no se encuentra|sin respuesta|no hay persona"),
+    ("No permite el ingreso", r"no permite|no deja|se niega|no quiere"),
+    ("Animal bravo", r"perro|animal|can bravo"),
+    ("Dejó notificación", r"notificaci|informacion por escrito|volante|se deja informacion|dejo informacion"),
+)
+SUBCAUSA_SIN_DETALLE: str = "Sin detalle"
+
+
+# Estado de la gestión en COBROS (`estado_final` de la BD) -> etiqueta legible.
+# VF es la única perdida: no se pudo visitar. Las demás son efectivas, incluida
+# VESP (visita efectiva sin pago), que cuenta como visita lograda aunque no cobre.
+ESTADOS_GESTION: dict[str, str] = {
+    "PAGO TOTAL": "Pago total",
+    "ABONO": "Abono",
+    "ACUERDO DE PAGO": "Acuerdo de pago",
+    "VESP": "Visita efectiva sin pago",
+    "VF": "Visita fallida",
+}
+ESTADO_GESTION_PERDIDA: str = "VF"
 
 
 # Homologación de linea_accion (35 variantes → ~12 limpias).

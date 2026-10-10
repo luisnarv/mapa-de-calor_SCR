@@ -7,10 +7,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .config import QUERY_COBROS, QUERY_HISTORICO, Settings
+from .config import QUERY_COBROS, QUERY_GESTORES, QUERY_HISTORICO, Settings
 from .database import Database
 from .logging_conf import get_logger
-from .payload import build_and_write
+from .payload import build_and_write, escribir_gestores
 from .transform import enrich
 
 log = get_logger()
@@ -38,6 +38,7 @@ def run(settings: Settings) -> dict[str, Any]:
     with Database(settings.database_url) as db:
         df_crudo = db.fetch_ordenes(query)
         estado_map = db.fetch_estado_map() if settings.proceso == "scr" else None
+        gestores = db.fetch_ordenes(QUERY_GESTORES) if settings.proceso == "cobros" else None
 
     df = enrich(df_crudo, estado_map, proceso=settings.proceso)
 
@@ -47,6 +48,8 @@ def run(settings: Settings) -> dict[str, Any]:
         log.info("CSV consolidado -> %s (%s filas)", settings.csv_path.name, f"{len(df):,}")
 
     resumen = build_and_write(df, settings)
+    if gestores is not None:
+        escribir_gestores(gestores, settings)
 
     log.info("=" * 60)
     log.info("OK  total_all=%s  |  %.1fs", f"{resumen['total_all']:,}", time.perf_counter() - inicio)
