@@ -2,8 +2,10 @@
 
 import React, { useState } from "react";
 
-// Motivos de COBROS: por qué se perdió una visita (VF) y por qué no hubo pago
-// (VESP), con la causa más fina que sale del texto del gestor. Elegir un motivo
+import { PERDIDA, SIN_RECAUDO, idDe, idRec } from "@/lib/resultadoCobros";
+
+// Motivos de COBROS: por qué una gestión quedó «No efectiva» y por qué una efectiva
+// quedó «sin recaudo», con la causa más fina que sale del texto del gestor. Elegir un motivo
 // deja en el mapa solo esas gestiones.
 export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
   const [vista, setVista] = useState("perdidas");
@@ -11,7 +13,11 @@ export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const pct = (v) => v.toFixed(1).replace(".", ",");
 
-  const estadoId = dim.gests.indexOf(vista === "perdidas" ? "Visita fallida" : "Visita efectiva sin pago");
+  // Las perdidas son «Visita fallida» (resultado gestión); lo «sin recaudo» sale de la otra
+  // dimensión, la del recaudo.
+  const porRecaudo = vista !== "perdidas";
+  const estadoId = porRecaudo ? idRec(dim, SIN_RECAUDO) : idDe(dim, PERDIDA);
+  const estados = porRecaudo ? st.RG_RAW : st.GEST_RAW;
   const campo = vista === "perdidas" ? "C" : "CA";
   const nombres = vista === "perdidas" ? dim.causas : dim.anoms;
   const arr = vista === "perdidas" ? st.C_raw : st.CA_RAW;
@@ -26,15 +32,15 @@ export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
   for (let j = 0; j < I.length; j++) {
     const i = I[j];
     if (st.SC_RAW[i] === agresivoId) agresivos++;
-    if (st.GEST_RAW[i] !== estadoId) continue;
+    if (estados[i] !== estadoId) continue;
     total++;
     causas.set(arr[i], (causas.get(arr[i]) || 0) + 1);
-    if (sel && sel.campo === campo && sel.x === estadoId && arr[i] === sel.id) {
+    if (sel && sel.campo === campo && sel.x === estadoId && sel.fx === (porRecaudo ? "R" : "G") && arr[i] === sel.id) {
       detalle.set(st.SC_RAW[i], (detalle.get(st.SC_RAW[i]) || 0) + 1);
     }
   }
   const filas = [...causas.entries()].sort((a, b) => b[1] - a[1]);
-  const delTipo = sel && sel.campo === campo && sel.x === estadoId;
+  const delTipo = sel && sel.campo === campo && sel.x === estadoId && sel.fx === (porRecaudo ? "R" : "G");
   const totalSel = delTipo ? causas.get(sel.id) || 0 : 0;
 
   const elegir = (nuevo) => {
@@ -55,10 +61,10 @@ export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
         <div className="mc-h">
           <span className="vt-sw" role="group" aria-label="Tipo de motivo">
             <button className={vista === "perdidas" ? "on" : ""} onClick={() => cambiarVista("perdidas")}>
-              Perdidas (VF)
+              Visitas fallidas
             </button>
             <button className={vista === "sinpago" ? "on" : ""} onClick={() => cambiarVista("sinpago")}>
-              Sin pago (VESP)
+              Efectivas sin recaudo
             </button>
           </span>
           <span className="mc-t">{num(total)} gestiones</span>
@@ -77,7 +83,7 @@ export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
               <div
                 key={c}
                 className={`cz cz-click${activa ? " sel" : ""}`}
-                onClick={() => elegir({ campo, id: c, x: estadoId })}
+                onClick={() => elegir({ campo, id: c, x: estadoId, fx: porRecaudo ? "R" : "G" })}
                 title="Ver solo estas gestiones en el mapa"
               >
                 <span className="cz-n">

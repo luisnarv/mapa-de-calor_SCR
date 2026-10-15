@@ -38,42 +38,70 @@ v_aire_cobros_nic_mes  ──►  (misma corrida: gestores.json)          │
 |---|---|---|
 | `dbanalitica.historico_aire_cobros` | Una fila por gestión. | El ETL del mapa (`QUERY_COBROS` en `etl/etl/config.py`). |
 | `dbanalitica.v_aire_cobros_gestion` | La misma tabla sin las **110 filas duplicadas** (clave repetida; se conserva la más reciente). | Nadie todavía. El mapa lee la tabla cruda, así que esas 110 gestiones se cuentan dos veces (≈0,01%). |
-| `dbanalitica.v_aire_cobros_nic_mes` | Una fila por **cuenta (NIC) y mes**; los atributos de cartera (saldo, recaudo) aparecen una sola vez. | `gestores.json` (`QUERY_GESTORES`). |
+| `dbanalitica.v_aire_cobros_nic_mes` | Una fila por **cuenta (NIC) y mes**; los atributos de cartera (saldo, recaudo) aparecen una sola vez. Trae `resultado_gestion` (el de la gestión vigente del mes), `gestiones_con_pago`, `gestiones_sin_recaudo`, `gestiones_no_efectivas` y `recaudo_energia_balanza`; `calculo_provisional` es verdadero para el mes en curso (el mes aún no cierra). | `gestores.json` (`QUERY_GESTORES`). |
 
-Sumar `saldo` o `recaudo_cartera` sobre la tabla cruda los repite por cada gestión de la
+Sumar `saldo` o `recaudo_sin_irr` (antes `recaudo_cartera`; la BD lo renombró el 14-oct-2026,
+los valores son idénticos) sobre la tabla cruda los repite por cada gestión de la
 cuenta: para dinero usar siempre la vista por NIC y mes.
 
 ## 3. Definiciones de negocio (las que debe respetar el chat)
 
-### Estado de la gestión (`estado_final` de la BD)
-Son 5 y ninguna fila queda sin clasificar:
+### Resultado de la gestión (`estado_final` de la BD)
+Es el filtro **«Resultado gestión»** de la barra superior y lo que separa Efectiva de
+Perdida. Son 5 valores y ninguna fila queda sin clasificar:
 
 | Código en BD | Nombre en pantalla | Clasificación en el mapa |
 |---|---|---|
-| `PAGO TOTAL` | Pago total | Efectiva |
 | `ABONO` | Abono | Efectiva |
 | `ACUERDO DE PAGO` | Acuerdo de pago | Efectiva |
+| `PAGO TOTAL` | Pago total | Efectiva |
 | `VESP` | Visita efectiva sin pago | Efectiva |
 | `VF` | Visita fallida | **Perdida** |
 
 - **No existe la categoría «Fallida»** en cobros. En SCR hay Efectiva/Fallida/Perdida;
   aquí solo **Efectiva** y **Perdida**. El código de estado `1` (Fallida) queda en
   `dim.estados` por compatibilidad, pero ningún punto lo usa.
-- «Visita fallida» (VF) **sí existe**: es el nombre del estado que equivale a Perdida.
-- Una gestión es **Efectiva** si la visita se hizo, aunque no haya pago (VESP). Por eso la
-  efectividad ronda el 95%: mide visitas realizadas, no cobros logrados.
-- Reglas completas de cada estado (para referencia): VF sale de las anomalías de visita
-  imposible; los otros cuatro exigen ser la última gestión del NIC en el mes
-  (`visita_cobro = 0`): acuerdo si hay cuota inicial y fecha de acuerdo, pago total si hay
-  recaudo con fecha posterior y no hay mora relevante, abono si el recaudo supera $20.000, y
-  VESP el resto.
+- «Visita fallida» (VF) **sí existe**: es el nombre del resultado que equivale a Perdida.
+- Una gestión es **Efectiva** si el resultado no es VF, aunque no haya pago (VESP). Por eso
+  la efectividad ronda el 95%: mide visitas realizadas, no cobros logrados.
+- Va en `pts.x` (índice en `dim.gests`).
+
+### Recaudo de la gestión (`resultado_gestion` de la BD)
+Es **otra dimensión**, calculada por la BD con las reglas de recaudo. Alimenta el
+**submenú de «Efectivas» en Capas** y las columnas «con pago» / «sin recaudo» de las
+tablas. Va en `pts.rg` (índice en `dim.resultados`).
+
+| Valor en BD | Nombre en pantalla |
+|---|---|
+| `Efectiva con Pago` | Efectiva con pago |
+| `Efectiva sin recaudo` | Efectiva sin recaudo |
+| `Efectiva sin validar` | Efectiva sin validar |
+| `No efectiva` | No efectiva |
+
+Reglas (las define la BD):
+- **Efectiva con pago / sin recaudo**: para los resultados PAGO NO APLICADO, NO REALIZO
+  ACUERDO DE PAGO, NO REALIZO PAGO FACTURA UNO y REALIZO PAGO: con pago si
+  `recaudo_energia_balanza > 0` (antes `recaudo_energia`) y `fecha_pago >= fecha_gestion`; si no, sin recaudo.
+- **REALIZO ACUERDO DE PAGO**: con pago si el acuerdo se valida en el consolidado de
+  acuerdos materializados; sin recaudo si se valida que no; **«sin validar»** mientras no
+  se haya validado (`acuerdos_evaluados = false`: abril–diciembre de 2025 y el mes en curso).
+- **No efectiva**: `CONTACTO NO EFECTIVO` y otros resultados sin contacto (NO CONTESTA,
+  BUZON DE MENSAJES, TELEFONO EQUIVOCADO/ERRADO, CLIENTE CUELGA LLAMADA, PRE-ACUERDO).
+
+**Las dos dimensiones no son equivalentes.** Se calculan con reglas distintas y en unas
+~500 gestiones de octubre no coinciden (p. ej. «Visita efectiva sin pago» con «Efectiva con
+pago»). Para separar Efectiva de Perdida el mapa usa **solo** el resultado de la gestión
+(`estado_final`); «No efectiva» incluye llamadas sin contacto que `estado_final` aún
+marca como VESP. Las gestiones «No efectiva» que el mapa trata como efectivas no tienen
+casilla en el submenú de Capas (siempre se dibujan).
 
 ### Efectividad
 - **Efectividad (bruta)** = gestiones que no son VF / total de gestiones.
 - **No hay efectividad ajustada en cobros.** Ninguna perdida se descarta por «no
   controlable»: todas cuentan. El tablero muestra solo la bruta. (En el código, para cobros
   se fuerza que toda causa sea controlable, así `efAdj == efPct`.)
-- **% con pago** = (Pago total + Abono + Acuerdo de pago) / gestiones.
+- **% con pago** = gestiones «Efectiva con pago» / gestiones (en las tablas por gestor
+  es cuentas «Efectiva con pago» / cuentas gestionadas).
 
 ### Causas y motivos
 - **Motivo de pérdida** (solo VF): la anomalía, p. ej. «Cliente no contactable»,
@@ -144,31 +172,63 @@ causa (la anomalía **solo en perdidas**; en efectivas vale «Efectiva»), `s` l
 `u` suspensión (siempre «SIN DATO»), `f` tarifa, `a` actividad (= línea de acción), `m`
 minutos desde `meta.fecha_min`, `n` id de gestión, `nic`, y los **nuevos de cobros**:
 
-- `x` → índice en `dim.gests` (estado de la gestión: los 5 de arriba).
+- `x` → índice en `dim.gests` (resultado de la gestión, de `estado_final`: los 5 de arriba).
+- `rg` → índice en `dim.resultados` (recaudo, de `resultado_gestion`: los 4 de arriba).
 - `ca` → índice en `dim.anoms` (anomalía homologada, **también en efectivas**).
 - `sc` → índice en `dim.subcausas` (categoría según el acta).
 
 ### `dim` (catálogos)
 `barrios` (`"MUNICIPIO | BARRIO"`), `tecs` (gestores, con la cédula: `"NOMBRE - 123456"`),
 `brigs` (planes), `tipos`, `causas`, `subs`, `susps`, `tarifas`, `acts`, `munis`, `zonas`,
-`estados`, `causa_ctrl`, `causa_fam`, `b_muni`, `b_zona`, y los nuevos `gests`, `anoms`,
-`subcausas`.
+`estados`, `causa_ctrl`, `causa_fam`, `b_muni`, `b_zona`, y los nuevos `gests`, `resultados`,
+`anoms`, `subcausas`.
 
-### `gestores.json`
+### Tabla por gestor (Tendencias > Por gestor y Ranking) y `gestores.json`
+**Las cifras son las de `v_aire_cobros_nic_mes`.** El ETL agrega la vista (una fila por
+cuenta y mes, ya sin duplicados) por *mes, gestor, zona, municipio, plan, resultado de la
+gestión y recaudo* y la escribe en `gestores.json` (≈19.000 filas, ≈650 KB). El navegador
+la filtra y la suma (`tablaGestores` en `Tablero.js`):
+
 ```
-{ "gestores": [...], "meses": ["2026-01", ...],
-  "filas": [[gestor, mes, cuentas, cuentas_efectivas, deuda, recaudo, cuentas_con_pago], ...] }
+{ "gestores": [...], "meses": ["2026-01", ...], "zonas": [...], "municipios": [...],
+  "planes": [...], "estados": [...], "resultados": [...], "provisionales": ["2026-10"],
+  "filas": [[gestor, mes, zona, municipio, plan, estado, resultado, cuentas, saldo, recaudo], ...] }
 ```
-Calculado sobre `v_aire_cobros_nic_mes`, una fila por gestor y mes:
-- `cuentas`: cuentas gestionadas. `cuentas_efectivas`: las cuya gestión vigente del mes no
-  fue VF. `cuentas_con_pago`: Pago total, Abono o Acuerdo.
-- `deuda` = suma de `saldo` y `recaudo` = suma de `recaudo_cartera`, **solo de las cuentas
-  con gestión efectiva**.
-- **% efectividad del gestor** = `cuentas_efectivas / cuentas` del mes (es por **cuentas**,
-  no por gestiones). La fila de total de la tabla suma cuentas, deuda y recaudo, y
-  **promedia** los porcentajes de los gestores.
+`estados` lleva las mismas etiquetas que `dim.gests` y `resultados` las de `dim.resultados`.
+
+Filtros que aplica: **Zona, Municipio, Plan, Resultado gestión y Meses**. El filtro
+**«Gestión»** (tipo de gestión) **no aplica** porque la vista no trae el tipo; la tabla lo
+avisa. El municipio es el de la BD (el del mapa se corrige por GPS), así que en ese filtro
+puede haber una diferencia pequeña con los otros paneles.
+
+Definiciones (una cuenta = una fila de la vista, con el `resultado_gestion` de su gestión
+vigente del mes):
+- `cuentas gestionadas`: todas las cuentas del gestor en los meses elegidos.
+  `cuentas con gestión efectiva`: «Efectiva con pago» + «Efectiva sin recaudo».
+  `con pago`: solo «Efectiva con pago». `sin validar`: «Efectiva sin validar», que **no** entra
+  en las efectivas. `cuentas = efectivas + sin validar + no efectivas`.
+- `deuda` = suma de `saldo` y `recaudo` = suma de `recaudo_sin_irr`, **solo de las cuentas
+  efectivas** (con pago + sin recaudo).
+- **% Recaudo del gestor** = `recaudo / deuda` del mes seleccionado (el último mes elegido)
+  y del mes anterior. La fila de total suma cuentas, deuda y recaudo y **promedia** los
+  porcentajes de los gestores.
+- **El mes en curso es provisional** (`calculo_provisional = periodo_mes >= mes actual`): el
+  encabezado lo marca «(prov.)» porque el recaudo y los acuerdos pueden cambiar hasta el cierre.
+- **`saldo` es lo que queda por pagar después del recaudo**, no la deuda de origen: en las
+  cuentas «con pago» casi la mitad tiene `saldo = 0` y su recaudo promedio supera al saldo
+  promedio. Por eso `recaudo / deuda` puede pasar de 100% en gestores con mucha cartera
+  ya pagada. La deuda de origen se aproxima con `saldo + recaudo` (o con `deuda_energia`).
 - Con varios meses seleccionados, cuentas, deuda y recaudo se suman, así que una misma
   cuenta cuenta una vez por cada mes.
+
+**Validación de la vista (14-oct-2026).** Llave `(cuenta, periodo_mes)` única en las 771.470
+filas; las 955.739 gestiones de la vista suman igual que `v_aire_cobros_gestion` (110 menos que
+la tabla cruda: los duplicados); `gestiones = con pago + sin recaudo + no efectivas` en todas
+las filas; sin nulos en gestor, zona, municipio, plan, estado ni resultado; no falta ninguna
+cuenta-mes de la tabla cruda. Tres cosas a tener presentes: 89 filas con recaudo negativo;
+90.470 cuentas-mes (11,7%) fueron gestionadas por más de un gestor y la vista las deja con
+uno solo (el de la gestión vigente); y 2.425 cuentas de 2026 donde `estado_final` y
+`resultado_gestion` se contradicen (p. ej. VESP con «Efectiva con Pago»: 1.565).
 
 ## 5. Qué hace cada menú del tablero
 
@@ -176,15 +236,35 @@ Calculado sobre `v_aire_cobros_nic_mes`, una fila por gestor y mes:
 |---|---|
 | **Mapa** | Marcadores por barrio (color = categoría de riesgo), calor, puntos GPS, límites y barrios sin visitar. Con muchos puntos dibuja hasta 8.000 y siempre incluye todas las perdidas. |
 | **Triaje** | Cola de barrios por categoría (todos, incluidos los de muestra pequeña). Umbral hotspot y mínimo de gestiones (por defecto 1). |
-| **Tendencias** | «1.ª mitad → 2.ª mitad» del periodo (efectividad, tasa perdida, tasa de no contacto, volumen) y barras por día. Vista **Por gestor**: tabla con deuda y recaudo y gráfico. |
-| **Causas** | Motivos de las perdidas (VF) y de las visitas sin pago (VESP); clic filtra el mapa; detalle según el acta; conteo de menciones de usuario agresivo. |
-| **Ranking** | La tabla por gestor, ordenada por % con pago (los de menos de 30 cuentas van al final), más el desempeño por plan. Clic en un gestor filtra el mapa. |
+| **Tendencias** | «1.ª mitad → 2.ª mitad» del periodo (efectividad, tasa perdida, tasa de no contacto, volumen) y barras por día. Vista **Por gestor**: tabla con deuda, recaudo y % de recaudo (recaudo / deuda) y gráfico. |
+| **Causas** | Motivos de las gestiones «No efectivas» y de las «Efectivas sin recaudo»; clic filtra el mapa; detalle según el acta; conteo de menciones de usuario agresivo. |
+| **Ranking** | La tabla por gestor (con cuentas con pago, sin recaudo y sin validar), ordenada por % con pago (los de menos de 30 cuentas van al final), más el desempeño por plan. Clic en un gestor filtra el mapa. |
 | **Carga** | Todos los barrios con gestiones, gestores, planes, gestiones por gestor, % con pago y categoría. |
 | **Jerarquía** | Barrio → plan → gestor → gestiones individuales (clic abre el historial del NIC). |
 | **Detalle** | Resumen, ficha de barrio, cobertura del gestor, recomendador de gestor/plan e historial del NIC. |
 
-Todo respeta los filtros de la barra superior (zona, municipio, plan, gestión, **estado de
-gestión** y meses). «Actividad» no se muestra en cobros.
+Todo —incluida la tabla por gestor (salvo «Gestión»), el conteo de la barra superior («N barrios · N gestores ·
+fechas») y «Barrios sin visitar»— respeta los filtros de la barra superior (zona, municipio, plan, gestión, **resultado
+gestión** y meses). En Capas, «Efectivas» tiene un submenú (con pago, sin recaudo, sin
+validar) que solo cambia lo que se dibuja en el mapa, no las tablas. «Actividad» no se muestra en cobros.
+
+### Filtros: solo ofrecen lo que existe en los datos
+- Cada lista (Zona, Municipio, Plan, Gestión, Resultado gestión) muestra únicamente los valores
+  con gestiones dadas las demás selecciones. Una píldora con 0 o 1 valores posibles se apaga
+  (con el motivo en el tooltip); si ya tiene un valor puesto sigue activa para poder quitarlo.
+- En Capas, «Perdidas», «Efectivas» y cada tipo de recaudo del submenú se apagan o se ocultan si
+  no hay gestiones de ese tipo con los filtros actuales.
+- En Tendencias, «Por semana» y «Por mes» solo aparecen si el rango trae al menos dos.
+
+### Zonas (`zonas_atlantico.geojson`)
+Hay tres copias con la misma geometría: `Frontend/dashboard/public/geojson/` (la que lee el ETL y
+dibuja el mapa), `Backend/app/data/geojson/` y `Frontend/dashboard/zonas_atlantico.geojson` (solo
+cambian los colores). **Cualquier ajuste de límites se hace en las tres y en `geo.zp` de cada
+`data.json`** (el ETL lo regenera desde la copia de `public/`). El barrio **Puerta Dorada**
+(Soledad) estaba casi todo fuera de las tres zonas (solo 2% dentro de CENTRO); desde el
+14-oct-2026 queda completo dentro de CENTRO. Comparación: `Documentacion/ajuste_zona_puerta_dorada.png`.
+La zona de cada gestión en los datos sale de la columna `zona` de la BD, no de estos polígonos:
+el cambio afecta solo a lo que se dibuja con «Límites oficiales > Zonas».
 
 ## 6. Diferencias con SCR (lo que NO aplica a cobros)
 
@@ -197,17 +277,24 @@ gestión** y meses). «Actividad» no se muestra en cobros.
 - Etiquetas: Gestor (no técnico), Plan (no brigada), Gestión (no tipo OS), Línea de
   acción (no subacción).
 
-## 7. Cifras de referencia para validar al chat (octubre 2026, datos del 10-oct)
+## 7. Cifras de referencia para validar al chat (octubre 2026, datos del 13-oct)
 
 - Gestiones del mes en curso: **14.334** (13.669 Efectivas, 665 Perdidas). Tasa de pérdida
   4,6%; efectividad 95,4%.
+- Por resultado de la gestión: Visita efectiva sin pago 8.362, Pago total 4.661, Visita
+  fallida 665, Abono 559, Acuerdo de pago 87. Por recaudo: Efectiva sin recaudo 8.124,
+  Efectiva con pago 5.448, No efectiva 665, Efectiva sin validar 97. (La BD sigue
+  actualizando `resultado_gestion`; estas cifras son de la corrida del 14-oct y pueden
+  moverse un poco.)
 - Motivos de las 665 perdidas: Cliente no contactable 539 (81,1%), Predio desocupado 104,
   Dirección errada 10, Predio demolido/inexistente 8, Vía en mal estado 3, Sector peligroso 1.
 - Según el acta, de las 539 de «No contactable»: Predio cerrado o sin respuesta 60,1%,
   Sector peligroso 20,6%, Sin detalle 9,6%, Dejó notificación 8,7%.
 - Año 2026: 721.644 gestiones en el mapa; 103 gestores en el año, 82 en octubre.
-- Tabla por gestor de octubre: 13.242 cuentas con gestión efectiva, $54.839 millones de
-  deuda, $1.507 millones de recaudo, 4.964 cuentas con pago (35,8%).
+- Tabla por gestor de octubre: 12.959 cuentas con gestión efectiva (5.123 con pago + 7.836
+  sin recaudo), 283 sin validar, $54.807 millones de deuda, $1.554 millones de recaudo y
+  36,9% de cuentas con pago. (Con la definición anterior —cuentas que no eran VF— eran
+  13.242: la diferencia son las 283 «sin validar».)
 
 ## 8. Lo que hay que ajustar en el chat y el backend (pendiente, fuera del tablero)
 
@@ -217,7 +304,7 @@ Verificado leyendo el código; **nada de esto se ha cambiado**:
    `sc`, sin `gestores.json`, con barrio/municipio de la base (no del GPS) y con el estado
    calculado por la regla anterior (Efectiva/Fallida/Perdida por `resultado`). Hay que
    copiar ahí los JSON nuevos de `etl/salida/cobros/` y hacer que `payload_store.py` lea
-   los campos nuevos.
+   los campos nuevos. Cada punto trae dos campos nuevos: `x` (resultado de la gestión, de `estado_final`) y `rg` (recaudo, de `resultado_gestion`).
 2. **Prompt** `Backend/app/prompts/sistema_cobros.md`: define Efectiva/**Fallida**/Perdida,
    explica `ef_adj` («efectividad ajustada») y manda a usarla para rankings, y habla de
    «no controlables». En cobros hay solo Efectiva/Perdida, no hay ajustada y el ranking del
@@ -225,10 +312,11 @@ Verificado leyendo el código; **nada de esto se ha cambiado**:
    correcta.)
 3. **Taxonomía** `Backend/app/core/taxonomy.py`: espejo de la del ETL. `ESTADOS` sigue en
    tres valores y `RESULTADOS_EFECTIVOS/PERDIDOS` ya no existen en el ETL (se reemplazaron
-   por `ESTADOS_GESTION` y `ESTADO_GESTION_PERDIDA`). Hay una prueba que compara ambas.
+   por `ESTADOS_GESTION` —con los valores de `estado_final`—, `ESTADO_GESTION_PERDIDA` y `RESULTADOS_GESTION` —con los de `resultado_gestion`—).
+   Hay una prueba que compara ambas.
 4. **Métricas y herramientas** (`services/metrics_service.py`, `services/tools.py`): cuentan
    `fallidas`/`pct_fallidas` y ofrecen la efectividad ajustada como métrica principal.
-   Habría que quitar las fallidas para cobros y ofrecer: % con pago, estado de gestión,
+   Habría que quitar las fallidas para cobros y ofrecer: % con pago, resultado de la gestión,
    motivo (anomalía), detalle según el acta, tasa de no contacto, riesgo por categoría y la
    vista por gestor (deuda, recaudo, cuentas con pago).
 5. **Riesgo.** El chat no debe usar la fórmula de SCR: en cobros es veces el promedio de

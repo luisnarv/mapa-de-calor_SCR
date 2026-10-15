@@ -129,17 +129,32 @@ SUBCAUSAS_OBS: tuple[tuple[str, str], ...] = (
 SUBCAUSA_SIN_DETALLE: str = "Sin detalle"
 
 
-# Estado de la gestión en COBROS (`estado_final` de la BD) -> etiqueta legible.
-# VF es la única perdida: no se pudo visitar. Las demás son efectivas, incluida
-# VESP (visita efectiva sin pago), que cuenta como visita lograda aunque no cobre.
+# Dos dimensiones distintas de una gestión de COBROS, cada una con su columna de la BD:
+#
+# 1. Resultado de la gestión (`estado_final`): el filtro «Resultado gestión» del
+#    tablero y lo que separa Efectiva de Perdida. VF es la única perdida; las otras
+#    cuatro son efectivas, incluida VESP (la visita se hizo aunque no hubo pago).
+#    La clave va en mayúsculas porque el ETL compara sin distinguir mayúsculas.
 ESTADOS_GESTION: dict[str, str] = {
-    "PAGO TOTAL": "Pago total",
     "ABONO": "Abono",
     "ACUERDO DE PAGO": "Acuerdo de pago",
+    "PAGO TOTAL": "Pago total",
     "VESP": "Visita efectiva sin pago",
     "VF": "Visita fallida",
 }
 ESTADO_GESTION_PERDIDA: str = "VF"
+
+# 2. Recaudo de la gestión (`resultado_gestion`): el submenú de «Efectivas» en Capas
+#    y las columnas «con pago» de las tablas. «Efectiva sin validar» es un acuerdo de
+#    pago que aún no se valida contra los acuerdos materializados. «No efectiva» incluye
+#    llamadas sin contacto que `estado_final` todavía marca como VESP; por eso no se usa
+#    para separar Efectiva de Perdida.
+RESULTADOS_GESTION: dict[str, str] = {
+    "EFECTIVA CON PAGO": "Efectiva con pago",
+    "EFECTIVA SIN RECAUDO": "Efectiva sin recaudo",
+    "EFECTIVA SIN VALIDAR": "Efectiva sin validar",
+    "NO EFECTIVA": "No efectiva",
+}
 
 
 # Homologación de linea_accion (35 variantes → ~12 limpias).

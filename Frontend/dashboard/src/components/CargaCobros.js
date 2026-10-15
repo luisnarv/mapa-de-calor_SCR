@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 
 import { riskColor as riskColorOf, riskInk } from "@/lib/theme";
+import { CON_PAGO, idRec } from "@/lib/resultadoCobros";
 
 // Carga operativa de COBROS: cuánto trabajo cae en cada barrio y quién lo atiende.
 // Todos los barrios, ordenables y con buscador. Un clic abre el detalle del barrio.
@@ -13,14 +14,12 @@ export default function CargaCobros({ A, st, dim, onSelectBarrio, P, V }) {
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const pct = (v) => v.toFixed(1).replace(".", ",");
 
-  const pagoIds = new Set(
-    ["Pago total", "Abono", "Acuerdo de pago"].map((n) => dim.gests.indexOf(n)).filter((i) => i >= 0)
-  );
+  const pagoIds = new Set([idRec(dim, CON_PAGO)].filter((i) => i >= 0));
   const conPago = new Map();
   const I = A.IDX || [];
   for (let j = 0; j < I.length; j++) {
     const i = I[j];
-    if (pagoIds.has(st.GEST_RAW[i])) conPago.set(st.B_raw[i], (conPago.get(st.B_raw[i]) || 0) + 1);
+    if (pagoIds.has(st.RG_RAW[i])) conPago.set(st.B_raw[i], (conPago.get(st.B_raw[i]) || 0) + 1);
   }
 
   const buscado = q.trim().toLowerCase();

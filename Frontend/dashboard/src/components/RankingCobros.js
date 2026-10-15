@@ -3,6 +3,7 @@
 import React from "react";
 
 import VistaGestores from "@/components/VistaGestores";
+import { CON_PAGO, PERDIDA, idDe, idRec } from "@/lib/resultadoCobros";
 
 // Ranking de COBROS: la misma tabla por gestor de Tendencias (con posición y
 // cuentas con pago) y, al lado, el desempeño por plan. Un clic en un gestor deja
@@ -11,10 +12,8 @@ export default function RankingCobros({ A, st, dim, onFilterChange, P, V }) {
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const pct = (v) => v.toFixed(1).replace(".", ",") + "%";
 
-  const vfId = dim.gests.indexOf("Visita fallida");
-  const pagoIds = new Set(
-    ["Pago total", "Abono", "Acuerdo de pago"].map((n) => dim.gests.indexOf(n)).filter((i) => i >= 0)
-  );
+  const vfId = idDe(dim, PERDIDA);
+  const pagoIds = new Set([idRec(dim, CON_PAGO)].filter((i) => i >= 0));
 
   // Planes: gestiones, perdidas (VF) y gestiones con pago, sobre lo que hay filtrado.
   const planes = new Map();
@@ -28,7 +27,7 @@ export default function RankingCobros({ A, st, dim, onFilterChange, P, V }) {
     }
     o.tot++;
     if (st.GEST_RAW[i] === vfId) o.vf++;
-    else if (pagoIds.has(st.GEST_RAW[i])) o.pago++;
+    if (pagoIds.has(st.RG_RAW[i])) o.pago++;
   }
   const filasPlan = [...planes.entries()].sort(
     (a, b) => b[1].pago / b[1].tot - a[1].pago / a[1].tot
@@ -83,8 +82,8 @@ export default function RankingCobros({ A, st, dim, onFilterChange, P, V }) {
 
   return (
     <VistaGestores
-      proceso={V.proceso}
-      meses={st.months}
+      tabla={st.tablaGestores}
+      dim={dim}
       palette={P}
       ranking
       lateral={lateral}

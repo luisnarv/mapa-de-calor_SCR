@@ -350,7 +350,8 @@ export default function LeafletMap({
           </div>
           <table class="op-t">
             <tbody>
-              ${dim.gests && st.GEST_RAW ? `<tr><td>Estado de gestión</td><td><b>${dim.gests[st.GEST_RAW[i]]}</b></td></tr>` : ""}
+              ${dim.gests && st.GEST_RAW ? `<tr><td>Resultado gestión</td><td><b>${dim.gests[st.GEST_RAW[i]]}</b></td></tr>` : ""}
+              ${dim.resultados && st.RG_RAW ? `<tr><td>Recaudo</td><td>${dim.resultados[st.RG_RAW[i]]}</td></tr>` : ""}
               <tr><td>NIC</td><td class="mono">${st.NIC_raw ? st.NIC_raw[i] : "—"}</td></tr>
               <tr><td>${V.conFallidas === false ? "Motivo" : "Causa"}</td><td>${
                 V.conFallidas === false && st.CA_RAW ? dim.anoms[st.CA_RAW[i]] : dim.causas[st.C_raw[i]]
@@ -589,12 +590,30 @@ export default function LeafletMap({
     // --- A bis. Barrios sin visitar: polígonos sin ninguna orden (NIC)
     // enlazada (b === -1). Se resaltan en amarillo fuerte. ---
     if (st.layers.sinNic && geo.bp) {
-      const selMuni = st.muni !== "" ? dim.munis[+st.muni].toLowerCase() : null;
+      // Los geojson traen el municipio con tilde ("SANTO TOMÁS") y la base sin ella.
+      const norm = (t) => (t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const selMuni = st.muni !== "" ? norm(dim.munis[+st.muni]) : null;
+      // Zona de cada municipio, por el barrio con datos que más pesa. Sin esto, al filtrar
+      // una zona todos los polígonos de las demás salían como «sin visitar».
+      let zonaDeMuni = null;
+      if (st.zona !== "") {
+        const cuenta = new Map();
+        for (let b = 0; b < dim.barrios.length; b++) {
+          const k = norm(dim.munis[dim.b_muni[b]]) + "|" + dim.b_zona[b];
+          cuenta.set(k, (cuenta.get(k) || 0) + 1);
+        }
+        zonaDeMuni = new Map();
+        for (const [k, n] of cuenta) {
+          const [m, z] = k.split("|");
+          if (!zonaDeMuni.has(m) || n > zonaDeMuni.get(m).n) zonaDeMuni.set(m, { z: +z, n });
+        }
+      }
       for (const p of geo.bp) {
         // Sin visitar = ninguna gestión dentro del filtro actual (mes, año, zona...):
         // un polígono sin barrio enlazado, o enlazado pero sin puntos en lo que se ve.
         if (p.b !== -1 && A.barrio.has(p.b)) continue;
-        if (selMuni && (p.m || "").toLowerCase() !== selMuni) continue;
+        if (selMuni && norm(p.m) !== selMuni) continue;
+        if (zonaDeMuni && zonaDeMuni.get(norm(p.m))?.z !== +st.zona) continue;
         L.polygon(p.r, {
           color: P.sinNic,
           weight: 1.4,
@@ -681,7 +700,8 @@ export default function LeafletMap({
 
           const c = geo.bc[b];
           if (!c) continue;
-          const n = (vis[0] ? o.ef : 0) + (vis[1] ? o.fa : 0) + (vis[2] ? o.pe : 0);
+          const efVis = (st.efOcultas || []).reduce((a, id) => a - (o.efGest?.get(id) || 0), o.ef);
+          const n = (vis[0] ? efVis : 0) + (vis[1] ? o.fa : 0) + (vis[2] ? o.pe : 0);
           if (!n) continue;
 
           const isSel = sel != null && b === sel;
@@ -741,7 +761,7 @@ export default function LeafletMap({
     } else {
       if (map.hasLayer(ptLayerRef.current)) map.removeLayer(ptLayerRef.current);
     }
-  }, [A, st.layers, st.est, st.causaSel, st.hotspot, st.selBarrio, theme]);
+  }, [A, st.layers, st.est, st.causaSel, st.efOcultas, st.hotspot, st.selBarrio, theme]);
 
   // 2 bis. Órdenes POR EJECUTAR del archivo cargado en el chat.
   //
@@ -938,7 +958,7 @@ export default function LeafletMap({
       if (st.est[st.E_raw[i]] && (!st.causaPasa || st.causaPasa(i))) return false;
     }
     return true;
-  }, [A, st.est, st.causaSel, dibujandoCargue]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [A, st.est, st.causaSel, st.efOcultas, dibujandoCargue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div id="mapwrap">

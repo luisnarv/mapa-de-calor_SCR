@@ -20,7 +20,21 @@ export default function Dock({
   onSelectNic,
   V = {}
 }) {
-  const [gran, setGran] = useState("dia");
+  const [granElegida, setGran] = useState("dia");
+  // «Por semana» o «Por mes» solo sirven si el rango trae al menos dos de ellas; con un
+  // solo mes, «Por mes» no tendría qué comparar.
+  const gruposGran = (() => {
+    const dias = [...A.byDay.keys()];
+    const base = new Date((st.fechaMin || "2026-01-01") + "T00:00:00");
+    const meses = new Set(
+      dias.map((d) => {
+        const x = new Date(base.getTime() + d * 86400000);
+        return x.getFullYear() * 12 + x.getMonth();
+      })
+    );
+    return { dia: dias.length, semana: new Set(dias.map((d) => Math.floor(d / 7))).size, mes: meses.size };
+  })();
+  const gran = gruposGran[granElegida] >= 2 ? granElegida : "dia";
   const [vistaTend, setVistaTend] = useState("evolucion");
   const { palette: P } = useTheme();
 
@@ -647,8 +661,8 @@ export default function Dock({
             onChange={(e) => setGran(e.target.value)}
           >
             <option value="dia">Por día</option>
-            <option value="semana">Por semana</option>
-            <option value="mes">Por mes</option>
+            {gruposGran.semana >= 2 && <option value="semana">Por semana</option>}
+            {gruposGran.mes >= 2 && <option value="mes">Por mes</option>}
           </select>
         )}
 
@@ -665,7 +679,7 @@ export default function Dock({
         {!st.dockCollapsed && (
           <>
             {st.dock === "tendencias" && V.vistaGestores && vistaTend === "gestores" && (
-              <VistaGestores proceso={V.proceso} meses={st.months} palette={P} />
+              <VistaGestores tabla={st.tablaGestores} dim={dim} palette={P} />
             )}
             {st.dock === "tendencias" && !(V.vistaGestores && vistaTend === "gestores") && renderTrend()}
             {st.dock === "motivos" &&

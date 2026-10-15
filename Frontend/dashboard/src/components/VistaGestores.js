@@ -31,93 +31,62 @@ const METRICAS = [
   { id: "recaudo", texto: "Recaudo" },
   { id: "deuda", texto: "Deuda" },
   { id: "cuentas", texto: "Cuentas efectivas" },
-  { id: "efectividad", texto: "% Efectividad" },
+  { id: "pctRecaudo", texto: "% Recaudo / deuda" },
 ];
-
-// El archivo es el mismo para todas las visitas a la vista: se pide una sola vez.
-let cache = null;
 
 // `ranking` la usa el menú Ranking: misma tabla, con posición, cuentas con pago y
 // clic por gestor; en lugar del gráfico muestra `lateral`.
 const MUESTRA_MINIMA = 30;
 
-export default function VistaGestores({ proceso, meses, palette: P, ranking = false, lateral = null, onPick, seleccion = null }) {
-  const [datos, setDatos] = useState(cache);
-  const [error, setError] = useState(false);
+export default function VistaGestores({ tabla, palette: P, ranking = false, lateral = null, onPick, seleccion = null }) {
   const [orden, setOrden] = useState({ col: ranking ? "pctPago" : "recaudo", asc: false });
   const [metrica, setMetrica] = useState("recaudo");
 
-  useEffect(() => {
-    if (cache) return;
-    fetch(`/${proceso}/gestores.json`)
-      .then((r) => r.json())
-      .then((j) => {
-        cache = j;
-        setDatos(j);
-      })
-      .catch(() => setError(true));
-  }, [proceso]);
-
+  // La tabla llega ya calculada y filtrada desde el tablero (mismos filtros que el mapa).
   const vista = useMemo(() => {
-    if (!datos) return null;
-    const claves = new Set(datos.meses);
-    const sel = (meses || []).map(claveDeEtiqueta).filter((k) => k && claves.has(k));
-    const elegidos = sel.length ? sel : datos.meses;
-    const actual = [...elegidos].sort().at(-1);
-    const anterior = mesAnterior(actual);
-    const iElegidos = new Set(elegidos.map((k) => datos.meses.indexOf(k)));
-    const iActual = datos.meses.indexOf(actual);
-    const iAnterior = datos.meses.indexOf(anterior);
-
-    const porGestor = new Map();
-    const fila = (g) => {
-      let o = porGestor.get(g);
-      if (!o) {
-        o = { g, cuentas: 0, deuda: 0, recaudo: 0, pago: 0, gestionadas: 0, efAct: null, efAnt: null };
-        porGestor.set(g, o);
-      }
-      return o;
-    };
-    for (const [g, m, cuentas, ef, deuda, recaudo, pago] of datos.filas) {
-      if (iElegidos.has(m)) {
-        const o = fila(g);
-        o.cuentas += ef;
-        o.deuda += deuda;
-        o.recaudo += recaudo;
-        o.pago += pago;
-        o.gestionadas += cuentas;
-      }
-      if (m === iActual) fila(g).efAct = cuentas ? (ef / cuentas) * 100 : null;
-      if (m === iAnterior) fila(g).efAnt = cuentas ? (ef / cuentas) * 100 : null;
-    }
-    // Un gestor sin nada en los meses elegidos no aporta fila.
-    const filas = [...porGestor.values()]
-      .filter((o) => o.cuentas > 0 || o.recaudo > 0 || o.efAct != null)
+    if (!tabla) return null;
+    const filas = tabla.filas
+      .filter((o) => o.gestionadas > 0)
       .map((o) => ({
-        ...o,
-        completo: datos.gestores[o.g],
-        nombre: nombreDe(datos.gestores[o.g]),
+        g: o.completo,
+        completo: o.completo,
+        nombre: nombreDe(o.completo),
+        cuentas: o.ef,
+        deuda: o.deuda,
+        recaudo: o.recaudo,
+        pago: o.pago,
+        sinValidar: o.sinValidar,
+        gestionadas: o.gestionadas,
+        sinRecaudo: o.ef - o.pago,
+        // % de recaudo = recaudo / deuda de las cuentas con gestión efectiva de ese mes.
+        pctAct: o.aDeuda > 0 ? (o.aRec / o.aDeuda) * 100 : null,
+        pctAnt: o.pDeuda > 0 ? (o.pRec / o.pDeuda) * 100 : null,
         pctPago: o.gestionadas ? (o.pago / o.gestionadas) * 100 : null,
       }));
-
+    const suma = (k) => filas.reduce((a, o) => a + o[k], 0);
     const prom = (k) => {
       const v = filas.map((o) => o[k]).filter((x) => x != null);
       return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
     };
     const total = {
-      cuentas: filas.reduce((a, o) => a + o.cuentas, 0),
-      deuda: filas.reduce((a, o) => a + o.deuda, 0),
-      recaudo: filas.reduce((a, o) => a + o.recaudo, 0),
-      pago: filas.reduce((a, o) => a + o.pago, 0),
-      gestionadas: filas.reduce((a, o) => a + o.gestionadas, 0),
-      efAnt: prom("efAnt"),
-      efAct: prom("efAct"),
+      cuentas: suma("cuentas"),
+      deuda: suma("deuda"),
+      recaudo: suma("recaudo"),
+      pago: suma("pago"),
+      sinRecaudo: suma("sinRecaudo"),
+      sinValidar: suma("sinValidar"),
+      gestionadas: suma("gestionadas"),
+      pctAnt: prom("pctAnt"),
+      pctAct: prom("pctAct"),
     };
-    return { filas, total, actual, anterior };
-  }, [datos, meses]);
+    return {
+      filas, total, actual: tabla.actual, anterior: tabla.anterior, hayAnterior: tabla.hayAnterior,
+      provisionalActual: tabla.provisionalActual, ignoraGestion: tabla.ignoraGestion,
+    };
+  }, [tabla]);
 
-  if (error) return <p className="empty">No se pudo cargar la vista por gestor.</p>;
   if (!vista) return <p className="empty">Cargando…</p>;
+  if (!vista.filas.length) return <p className="empty">Ningún gestor con cuentas gestionadas con los filtros actuales.</p>;
 
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const dinero = (v) => "$" + Math.round(v).toLocaleString("es-CO");
@@ -133,6 +102,9 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
     return orden.asc ? c : -c;
   });
 
+  // «Sin validar» solo existe mientras la BD tenga acuerdos sin evaluar: sin ellos, no se muestra.
+  const hayValidar = vista.total.sinValidar > 0;
+
   const cabecera = (col, texto, num_ = true) => (
     <th
       className={num_ ? "num" : ""}
@@ -145,7 +117,7 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
   );
 
   // Gráfico: los 12 primeros según la métrica elegida.
-  const valorDe = (o) => (metrica === "efectividad" ? o.efAct ?? 0 : o[metrica] ?? 0);
+  const valorDe = (o) => (metrica === "pctRecaudo" ? o.pctAct ?? 0 : o[metrica] ?? 0);
   const top = [...vista.filas].sort((a, b) => valorDe(b) - valorDe(a)).slice(0, 12);
   const maximo = Math.max(...top.map(valorDe), 1);
   const formato = metrica === "recaudo" || metrica === "deuda" ? dinero : metrica === "cuentas" ? num : pct;
@@ -161,9 +133,11 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
               {cabecera("cuentas", "Cuentas con gestión efectiva")}
               {cabecera("deuda", "Deuda")}
               {cabecera("recaudo", "Recaudo")}
-              {cabecera("efAnt", `% Efect. ${etiquetaCorta(vista.anterior)}`)}
-              {cabecera("efAct", `% Efect. ${etiquetaCorta(vista.actual)}`)}
+              {cabecera("pctAnt", `% Recaudo ${etiquetaCorta(vista.anterior)}`)}
+              {cabecera("pctAct", `% Recaudo ${etiquetaCorta(vista.actual)}${vista.provisionalActual ? " (prov.)" : ""}`)}
               {ranking && cabecera("pago", "Con pago")}
+              {ranking && cabecera("sinRecaudo", "Sin recaudo")}
+              {ranking && hayValidar && cabecera("sinValidar", "Sin validar")}
               {ranking && cabecera("pctPago", "% con pago")}
             </tr>
           </thead>
@@ -180,9 +154,11 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
                 <td className="num">{num(o.cuentas)}</td>
                 <td className="num">{dinero(o.deuda)}</td>
                 <td className="num">{dinero(o.recaudo)}</td>
-                <td className="num">{pct(o.efAnt)}</td>
-                <td className="num">{pct(o.efAct)}</td>
+                <td className="num">{pct(o.pctAnt)}</td>
+                <td className="num">{pct(o.pctAct)}</td>
                 {ranking && <td className="num">{num(o.pago)}</td>}
+                {ranking && <td className="num">{num(o.sinRecaudo)}</td>}
+                {ranking && hayValidar && <td className="num">{num(o.sinValidar)}</td>}
                 {ranking && (
                   <td className="num">
                     {pct(o.pctPago)}
@@ -199,9 +175,11 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
               <td className="num">{num(vista.total.cuentas)}</td>
               <td className="num">{dinero(vista.total.deuda)}</td>
               <td className="num">{dinero(vista.total.recaudo)}</td>
-              <td className="num">{pct(vista.total.efAnt)}</td>
-              <td className="num">{pct(vista.total.efAct)}</td>
+              <td className="num">{pct(vista.total.pctAnt)}</td>
+              <td className="num">{pct(vista.total.pctAct)}</td>
               {ranking && <td className="num">{num(vista.total.pago)}</td>}
+              {ranking && <td className="num">{num(vista.total.sinRecaudo)}</td>}
+              {ranking && hayValidar && <td className="num">{num(vista.total.sinValidar)}</td>}
               {ranking && (
                 <td className="num">
                   {pct(vista.total.gestionadas ? (vista.total.pago / vista.total.gestionadas) * 100 : null)}
@@ -210,12 +188,20 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
             </tr>
           </tfoot>
         </table>
-        {ranking && (
-          <p className="gv-nota">
-            * Menos de {MUESTRA_MINIMA} cuentas gestionadas: el porcentaje se calcula pero no entra al orden.
-            Con pago = cuentas con pago total, abono o acuerdo de pago.
-          </p>
-        )}
+        <p className="gv-nota">
+          Cuentas con gestión efectiva = «Efectiva con pago» + «Efectiva sin recaudo». Deuda y recaudo son de esas
+          cuentas; % Recaudo = recaudo / deuda del mes (el total es el promedio de los gestores). Cifras de
+          la vista v_aire_cobros_nic_mes.
+          {vista.provisionalActual && " (prov.) = el mes en curso aún no cierra: puede subir."}
+          {vista.ignoraGestion && " El filtro «Gestión» no aplica a esta tabla (la vista no trae el tipo de gestión)."}
+          {ranking && (
+            <>
+              {" "}
+              {hayValidar && "«Sin validar» (acuerdos aún sin validar) no está en las cuentas efectivas. "}* Menos de {MUESTRA_MINIMA}{" "}
+              cuentas gestionadas: el porcentaje se calcula pero no entra al orden.
+            </>
+          )}
+        </p>
       </div>
 
       {ranking ? (
@@ -234,15 +220,15 @@ export default function VistaGestores({ proceso, meses, palette: P, ranking = fa
           <div key={o.g} className="gv-b" title={`${o.nombre}: ${formato(valorDe(o))}`}>
             <span className="gv-n">{o.nombre}</span>
             <i>
-              {metrica === "efectividad" && o.efAnt != null && (
-                <b style={{ width: `${(o.efAnt / maximo) * 100}%`, background: P.serieRef, height: 4 }}></b>
+              {metrica === "pctRecaudo" && o.pctAnt != null && (
+                <b style={{ width: `${(o.pctAnt / maximo) * 100}%`, background: P.serieRef, height: 4 }}></b>
               )}
               <b style={{ width: `${(valorDe(o) / maximo) * 100}%`, background: P.series[1] }}></b>
             </i>
             <span className="gv-v">{formato(valorDe(o))}</span>
           </div>
         ))}
-        {metrica === "efectividad" && (
+        {metrica === "pctRecaudo" && (
           <p className="gv-nota">
             Barra gruesa: {etiquetaCorta(vista.actual)} · barra fina: {etiquetaCorta(vista.anterior)}
           </p>

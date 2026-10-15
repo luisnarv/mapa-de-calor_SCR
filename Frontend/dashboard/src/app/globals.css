@@ -480,6 +480,8 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radiu
 .mc-ag{margin-top:6px;text-align:left;background:var(--pan2);border:1px solid var(--line);border-radius:var(--r);color:var(--mut);font:500 11px var(--ff);padding:7px 9px;cursor:pointer}
 .mc-ag:hover,.mc-ag.sel{border-color:var(--cu2);color:var(--tx)}
 .mc-ag b{color:var(--tx)}
+.lay-sub{margin:0 0 2px 20px}
+.lay-sub .lay{font-size:11px;opacity:.95}
 .cc-q{background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:var(--r);font:500 11.5px var(--ff);padding:5px 9px;min-width:200px}
 .rk-fila{cursor:pointer}
 .rk-fila:hover,.rk-fila.sel{background:var(--pan2)}
@@ -528,8 +530,10 @@ table.mt th,table.cmp th{text-align:left;font:600 9.5px var(--ff);letter-spacing
   color:var(--dim);padding:6px 7px;border-bottom:1px solid var(--line)}
 table.mt td,table.cmp td{padding:6px 7px;border-bottom:1px solid var(--row-line);color:var(--mut)}
 table.mt td:first-child,table.cmp td:first-child{color:var(--tx)}
-td.num{text-align:right;font-family:var(--ff-num)}
-table.cmp td:not(:first-child){text-align:right;font-family:var(--ff-num);font-variant-numeric:tabular-nums}
+/* Cabecera y cifras centradas: con la cifra a la derecha y el título a la izquierda no se sabía a qué columna pertenecía cada valor. */
+td.num,th.num{text-align:center;font-family:var(--ff-num);font-variant-numeric:tabular-nums}
+table.mt th:not(:first-child),table.cmp th:not(:first-child),table.mt th.num,table.mt td:not(:first-child),table.cmp td:not(:first-child){text-align:center}
+table.cmp td:not(:first-child){text-align:center;font-family:var(--ff-num);font-variant-numeric:tabular-nums}
 tr.clk{cursor:pointer}
 tr.clk:hover td{background:var(--pan2)}
 .pill{display:inline-block;min-width:28px;padding:2px 6px;border-radius:var(--r-sm);
@@ -1168,3 +1172,9 @@ td.go>svg{display:block;margin-left:auto}
     border-bottom:3px solid transparent !important;padding:6px 10px !important}
   .v4-rail .rail-btn.active{border-left:0 !important;border-bottom:3px solid var(--cu) !important}
 }
+
+
+/* Controles que los datos filtrados no permiten usar: se ven apagados. */
+.hd-pill:disabled{opacity:.45;cursor:not-allowed}
+label.lay:has(input:disabled){opacity:.45;cursor:not-allowed}
+label.lay input:disabled{cursor:not-allowed}

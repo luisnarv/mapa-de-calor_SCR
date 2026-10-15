@@ -19,6 +19,7 @@ from .logging_conf import get_logger
 from .taxonomy import (
     ESTADO_GESTION_PERDIDA,
     ESTADOS_GESTION,
+    RESULTADOS_GESTION,
     SUBCAUSA_SIN_DETALLE,
     SUBCAUSAS_OBS,
     causa_cobros_for_norm_key,
@@ -141,6 +142,9 @@ def enrich(
             lambda v: v.strip().upper() if isinstance(v, str) else None)
         codigo = codigo.where(codigo.isin(ESTADOS_GESTION))
         df["ESTADO_GESTION"] = codigo.map(ESTADOS_GESTION)
+        recaudo = df["RESULTADO_GESTION"].astype(object).map(
+            lambda v: v.strip().upper() if isinstance(v, str) else None)
+        df["RESULTADO_GESTION"] = recaudo.where(recaudo.isin(RESULTADOS_GESTION)).map(RESULTADOS_GESTION)
         df["Estado"] = np.where(
             codigo.isna(), None,
             np.where(codigo == ESTADO_GESTION_PERDIDA, "Perdida", "Efectiva"),
@@ -182,5 +186,8 @@ def enrich(
         df = df.sort_values("FECHA_EJECUCION").drop_duplicates("ORDEN", keep="last")
         log.info("Duplicados: %s órdenes repetidas, se conserva la más reciente.", f"{duplicados:,}")
 
-    extra = ["ESTADO_GESTION", "ANOMALIA_CAUSA", "SUBCAUSA"] if proceso == "cobros" else []
+    extra = (
+        ["ESTADO_GESTION", "RESULTADO_GESTION", "ANOMALIA_CAUSA", "SUBCAUSA"]
+        if proceso == "cobros" else []
+    )
     return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS) + extra]

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 import { riskColor as riskColorOf, riskInk } from "@/lib/theme";
+import { CON_PAGO, PERDIDA, idDe, idRec } from "@/lib/resultadoCobros";
 
 const LIMITE_GESTIONES = 200;
 
@@ -23,10 +24,8 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
   const barrioName = (b) => dim.barrios[b].split(" | ")[1];
   const barrioMuni = (b) => dim.barrios[b].split(" | ")[0];
 
-  const vfId = dim.gests.indexOf("Visita fallida");
-  const pagoIds = new Set(
-    ["Pago total", "Abono", "Acuerdo de pago"].map((n) => dim.gests.indexOf(n)).filter((i) => i >= 0)
-  );
+  const vfId = idDe(dim, PERDIDA);
+  const pagoIds = new Set([idRec(dim, CON_PAGO)].filter((i) => i >= 0));
   const I = A.IDX || [];
 
   const subir = (barrio, plan) => {
@@ -89,7 +88,7 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
     const conPago = new Map();
     for (let j = 0; j < I.length; j++) {
       const i = I[j];
-      if (pagoIds.has(st.GEST_RAW[i])) conPago.set(st.B_raw[i], (conPago.get(st.B_raw[i]) || 0) + 1);
+      if (pagoIds.has(st.RG_RAW[i])) conPago.set(st.B_raw[i], (conPago.get(st.B_raw[i]) || 0) + 1);
     }
     const buscado = q.trim().toLowerCase();
     const filas = ordenar(
@@ -169,7 +168,7 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
       if (!o) porPlan.set(st.G_raw[i], (o = { tot: 0, vf: 0, pago: 0 }));
       o.tot++;
       if (st.GEST_RAW[i] === vfId) o.vf++;
-      else if (pagoIds.has(st.GEST_RAW[i])) o.pago++;
+      else if (pagoIds.has(st.RG_RAW[i])) o.pago++;
     }
     const totBarrio = [...porPlan.values()].reduce((a, o) => a + o.tot, 0);
     if (!porPlan.size) return <p className="empty">Sin datos en este barrio.</p>;
@@ -213,7 +212,7 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
       if (!o) porTec.set(st.T_raw[i], (o = { tot: 0, vf: 0, pago: 0 }));
       o.tot++;
       if (st.GEST_RAW[i] === vfId) o.vf++;
-      else if (pagoIds.has(st.GEST_RAW[i])) o.pago++;
+      else if (pagoIds.has(st.RG_RAW[i])) o.pago++;
     }
     cuerpo = (
       <table className="mt rk">
@@ -260,7 +259,8 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
             <tr>
               <th>Fecha</th>
               <th>NIC</th>
-              <th>Estado de gestión</th>
+              <th>Resultado gestión</th>
+              <th>Recaudo</th>
               <th>Causa</th>
               <th>Detalle del acta</th>
             </tr>
@@ -274,6 +274,7 @@ export default function JerarquiaCobros({ A, st, dim, dayLabel, onFilterChange, 
                   <td>{dayLabel(st.DAY_raw[i])} {hh}:{mm}</td>
                   <td className="mono">{st.NIC_raw[i]}</td>
                   <td className={st.GEST_RAW[i] === vfId ? "bad" : ""}>{dim.gests[st.GEST_RAW[i]]}</td>
+                  <td>{dim.resultados[st.RG_RAW[i]]}</td>
                   <td>{dim.anoms[st.CA_RAW[i]]}</td>
                   <td className="dim">{dim.subcausas[st.SC_RAW[i]]}</td>
                 </tr>

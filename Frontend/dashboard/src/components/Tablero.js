@@ -81,6 +81,12 @@ const NIVELES_COBROS = [
   [90, "81–100 · Crítico"],
 ];
 
+// "2026-10" -> "2026-09"
+const mesPrevio = (ym) => {
+  const [anio, mes] = ym.split("-").map(Number);
+  return mes === 1 ? `${anio - 1}-12` : `${anio}-${String(mes - 1).padStart(2, "0")}`;
+};
+
 // `proceso` lo fija la ruta ("/" = scr, "/cobros" = cobros), no un estado: así cada
 // actividad tiene su propia URL y recargar no devuelve al usuario a SCR.
 export default function Tablero({ proceso }) {
@@ -147,6 +153,7 @@ export default function Tablero({ proceso }) {
     act: "",
     gest: "",
     causaSel: null,
+    efOcultas: [],
     d0: 0,
     d1: 60,
     minOrders: proceso === "cobros" ? 1 : 10,
@@ -214,6 +221,7 @@ export default function Tablero({ proceso }) {
       act: "",
       gest: "",
       causaSel: null,
+      efOcultas: [],
       d0: 0,
       d1: maxD,
       selBarrio: null,
@@ -255,7 +263,8 @@ export default function Tablero({ proceso }) {
     if (!data) return;
     const manifest = (data.meta && data.meta.months) || [];
     const byLabel = new Map(manifest.map((m) => [m.label, m]));
-    const need = (st.months || [])
+    const etiquetas = [...(st.months || [])];
+    const need = etiquetas
       .map((lbl) => byLabel.get(lbl))
       .filter(
         (m) =>
@@ -326,6 +335,7 @@ export default function Tablero({ proceso }) {
       F: Uint8Array.from(P.f),
       ACT: P.a ? Uint8Array.from(P.a) : null,
       GEST: P.x ? Uint8Array.from(P.x) : null,
+      RG: P.rg ? Uint8Array.from(P.rg) : null,
       CA: P.ca ? Uint8Array.from(P.ca) : null,
       SC: P.sc ? Uint8Array.from(P.sc) : null,
       M: Int32Array.from(P.m),
@@ -431,8 +441,11 @@ export default function Tablero({ proceso }) {
   // 1. FILTERING ENGINE
   const IDX = useMemo(() => {
     if (!data || !rawArrays) return [];
-    const { DAY, B, G, O, ACT, GEST } = rawArrays;
+    const { DAY, B, G, O, ACT, GEST, E, RG } = rawArrays;
     const N = DAY.length;
+    // Las casillas de «gestiones a mostrar» (perdidas / efectivas y sus tipos de recaudo) son
+    // filtros reales: lo desmarcado no entra en ninguna lista, tabla ni total.
+    const ocultas = new Set(st.efOcultas);
     const zi = st.zona === "" ? -1 : +st.zona;
     const mi = st.muni === "" ? -1 : +st.muni;
     const gi = st.brig === "" ? -1 : +st.brig;
@@ -450,6 +463,8 @@ export default function Tablero({ proceso }) {
     let k = 0;
     for (let i = 0; i < N; i++) {
       if (activeMi && !activeMi.has(monthMap.idx[i])) continue;
+      if (!st.est[E[i]]) continue;
+      if (ocultas.size && E[i] === 0 && RG && ocultas.has(RG[i])) continue;
       const b = B[i];
       if (zi >= 0 && data.dim.b_zona[b] !== zi) continue;
       if (mi >= 0 && data.dim.b_muni[b] !== mi) continue;
@@ -460,7 +475,110 @@ export default function Tablero({ proceso }) {
       out[k++] = i;
     }
     return out.subarray(0, k);
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
+
+  // Tabla por gestor (Tendencias > Por gestor y Ranking). Sale de `gestores.json`, la
+  // agregación de `v_aire_cobros_nic_mes` (una fila por cuenta y mes, ya sin duplicados),
+  // así que las cifras son las de la vista. Se filtra aquí con zona, municipio, plan y
+  // resultado gestión, y con los meses. «Gestión» (tipo de gestión) no está en la vista,
+  // por eso no aplica a esta tabla.
+  const [gestoresDet, setGestoresDet] = useState(null);
+  useEffect(() => {
+    if (!V.vistaGestores || gestoresDet || !["tendencias", "ranking"].includes(st.activeTab)) return;
+    fetch(`/${proceso}/gestores.json`)
+      .then((r) => r.json())
+      .then(setGestoresDet)
+      .catch((err) => console.error("No se pudo cargar gestores.json", err));
+  }, [V, proceso, gestoresDet, st.activeTab]);
+
+  const tablaGestores = useMemo(() => {
+    if (!V.vistaGestores || !data || !gestoresDet) return null;
+    if (!["tendencias", "ranking"].includes(st.activeTab)) return null;
+    const G = gestoresDet;
+    const dim = data.dim;
+    const llave = (t) => (t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const indiceDe = (lista, valor) => (valor === null ? -1 : lista.findIndex((x) => llave(x) === llave(valor)));
+    const pedido = {
+      zona: st.zona === "" ? null : dim.zonas[+st.zona],
+      muni: st.muni === "" ? null : dim.munis[+st.muni],
+      plan: st.brig === "" ? null : dim.brigs[+st.brig],
+      estado: st.gest === "" ? null : dim.gests[+st.gest],
+    };
+    // Las casillas de Capas también filtran esta tabla: «Visita fallida» es la perdida y los
+    // tipos de recaudo ocultos solo aplican a las efectivas.
+    const iPerdida = G.estados.indexOf("Visita fallida");
+    const ocultosG = new Set(st.efOcultas.map((id) => G.resultados.indexOf(dim.resultados[id])));
+    const iz = indiceDe(G.zonas, pedido.zona);
+    const im = indiceDe(G.municipios, pedido.muni);
+    const ip = indiceDe(G.planes, pedido.plan);
+    const ie = indiceDe(G.estados, pedido.estado);
+    // Un filtro que el archivo no conoce (p. ej. un municipio sin cuentas) no deja filas.
+    const sinCoincidencia =
+      (pedido.zona !== null && iz < 0) || (pedido.muni !== null && im < 0) ||
+      (pedido.plan !== null && ip < 0) || (pedido.estado !== null && ie < 0);
+
+    const ymDe = new Map(availableMonths.map((m) => [m.key, m.ym]));
+    const elegidos = new Set(
+      (st.months && st.months.length ? st.months : availableMonths.map((m) => m.key))
+        .map((l) => ymDe.get(l))
+        .filter(Boolean)
+    );
+    const actual = [...elegidos].sort().at(-1);
+    const anterior = actual ? mesPrevio(actual) : null;
+    const iSel = new Set([...elegidos].map((ym) => G.meses.indexOf(ym)).filter((i) => i >= 0));
+    const iAct = G.meses.indexOf(actual);
+    const iAnt = G.meses.indexOf(anterior);
+
+    const idCon = G.resultados.indexOf("Efectiva con pago");
+    const idSin = G.resultados.indexOf("Efectiva sin recaudo");
+    const idVal = G.resultados.indexOf("Efectiva sin validar");
+
+    const filas = new Map();
+    if (!sinCoincidencia) {
+      for (const [g, m, z, mu, pl, e, r, cuentas, saldo, recaudo] of G.filas) {
+        const enSel = iSel.has(m);
+        if (!enSel && m !== iAnt) continue;
+        if (iz >= 0 && z !== iz) continue;
+        if (im >= 0 && mu !== im) continue;
+        if (ip >= 0 && pl !== ip) continue;
+        if (ie >= 0 && e !== ie) continue;
+        if (e === iPerdida ? !st.est[2] : !st.est[0]) continue;
+        if (e !== iPerdida && ocultosG.has(r)) continue;
+        let f = filas.get(g);
+        if (!f) {
+          f = { completo: G.gestores[g], gestionadas: 0, ef: 0, pago: 0, sinValidar: 0, deuda: 0, recaudo: 0, aDeuda: 0, aRec: 0, pDeuda: 0, pRec: 0 };
+          filas.set(g, f);
+        }
+        const efectiva = r === idCon || r === idSin;
+        if (enSel) {
+          f.gestionadas += cuentas;
+          if (efectiva) {
+            f.ef += cuentas;
+            f.deuda += saldo;
+            f.recaudo += recaudo;
+          }
+          if (r === idCon) f.pago += cuentas;
+          if (r === idVal) f.sinValidar += cuentas;
+        }
+        if (efectiva && m === iAct) {
+          f.aDeuda += saldo;
+          f.aRec += recaudo;
+        }
+        if (efectiva && m === iAnt) {
+          f.pDeuda += saldo;
+          f.pRec += recaudo;
+        }
+      }
+    }
+    return {
+      filas: [...filas.values()],
+      actual,
+      anterior,
+      hayAnterior: iAnt >= 0,
+      provisionalActual: G.provisionales.includes(actual),
+      ignoraGestion: st.tipo !== "",
+    };
+  }, [V, data, gestoresDet, availableMonths, st.activeTab, st.months, st.zona, st.muni, st.brig, st.tipo, st.gest, st.est, st.efOcultas]);
 
   // Recalculates available filters in cascade
   const avail = useMemo(() => {
@@ -470,10 +588,15 @@ export default function Tablero({ proceso }) {
       brig: new Set(),
       tipo: new Set(),
       act: new Set(),
-      gest: new Set()
+      gest: new Set(),
+      // Lo que existe con los filtros de las píldoras, sin mirar las casillas de Capas:
+      // sirve para apagar una casilla cuando no hay nada de ese tipo.
+      tipos: [0, 0, 0],
+      efRec: new Map()
     };
     if (!data || !rawArrays) return res;
-    const { B, G, O, ACT, GEST, DAY } = rawArrays;
+    const { B, G, O, ACT, GEST, DAY, E, RG } = rawArrays;
+    const ocultas = new Set(st.efOcultas);
     const N = DAY.length;
 
     // Filter values (independent of the selector itself to avoid lockups)
@@ -500,6 +623,17 @@ export default function Tablero({ proceso }) {
       const oVal = O[i];
       const aVal = ACT ? ACT[i] : -1;
 
+      if (
+        xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) &&
+        (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)
+      ) {
+        res.tipos[E[i]]++;
+        if (E[i] === 0 && RG) res.efRec.set(RG[i], (res.efRec.get(RG[i]) || 0) + 1);
+      }
+      // Las opciones de cada filtro salen solo de lo que las casillas dejan ver.
+      if (!st.est[E[i]]) continue;
+      if (ocultas.size && E[i] === 0 && RG && ocultas.has(RG[i])) continue;
+
       // Zona depends on Muni, Brig, Tipo, Act
       if (xOk && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
         res.zona.add(zVal);
@@ -524,7 +658,7 @@ export default function Tablero({ proceso }) {
       if (GEST && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.gest.add(GEST[i]);
     }
     return res;
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // 2. AGGREGATION ENGINE
   const A = useMemo(() => {
@@ -535,6 +669,7 @@ export default function Tablero({ proceso }) {
       pe: 0,
       faCtrl: 0,
       noCtrl: 0,
+      efGest: new Map(),
       efPct: 0,
       efAdj: 0,
       pePct: 0,
@@ -552,7 +687,7 @@ export default function Tablero({ proceso }) {
     };
     if (!data || !rawArrays || !IDX.length) return defaultAgg;
 
-    const { E, C, B, T, G, O, S, U, M, DAY } = rawArrays;
+    const { E, C, B, T, G, O, S, U, M, DAY, RG } = rawArrays;
     // En cobros toda perdida cuenta, así que ninguna causa se descarta como "no controlable".
     const CTRL = V.sinAjuste ? data.dim.causa_ctrl.map(() => 1) : data.dim.causa_ctrl;
 
@@ -563,6 +698,7 @@ export default function Tablero({ proceso }) {
       pe: 0,
       faCtrl: 0,
       noCtrl: 0,
+      efGest: new Map(),
       tecs: new Set(),
       brigs: new Set(),
       barrio: new Map(),
@@ -582,6 +718,7 @@ export default function Tablero({ proceso }) {
       pe: 0,
       faCtrl: 0,
       noCtrl: 0,
+      efGest: new Map(),
       causa: new Map(),
       tec: new Map(),
       brig: new Map(),
@@ -648,8 +785,10 @@ export default function Tablero({ proceso }) {
       ]) {
         const o = bump(map, key);
         o.tot++;
-        if (e === 0) o.ef++;
-        else if (e === 1) o.fa++;
+        if (e === 0) {
+          o.ef++;
+          if (RG) o.efGest.set(RG[i], (o.efGest.get(RG[i]) || 0) + 1);
+        } else if (e === 1) o.fa++;
         else o.pe++;
 
         if (isNoCtrl) o.noCtrl++;
@@ -1323,12 +1462,14 @@ export default function Tablero({ proceso }) {
       act: "",
       gest: "",
       causaSel: null,
+      efOcultas: [],
       d0: 0,
       d1: MAXDAY,
       minOrders: proceso === "cobros" ? 1 : 10,
       hotspot: 60,
       adjusted: true,
       est: [true, true, true],
+      efOcultas: [],
       selBarrio: null,
       selTec: null,
       // Vuelve al mes en curso (mantiene el arranque liviano; los históricos se
@@ -1412,14 +1553,38 @@ export default function Tablero({ proceso }) {
     F_raw: rawArrays.F,
     NIC_raw: rawArrays.NIC,
     GEST_RAW: rawArrays.GEST,
+    RG_RAW: rawArrays.RG,
+    tablaGestores,
+    // Lo que muestra la barra superior (barrios, gestores, fechas) ya filtrado.
+    contexto: (() => {
+      let dmin = Infinity;
+      let dmax = -Infinity;
+      for (const d of A.byDay.keys()) {
+        if (d < dmin) dmin = d;
+        if (d > dmax) dmax = d;
+      }
+      const iso = (d) => {
+        const x = new Date(new Date(data.meta.fecha_min + "T00:00:00").getTime() + d * 86400000);
+        return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+      };
+      return {
+        barrios: A.barrio.size,
+        gestores: A.tec.size,
+        desde: dmin === Infinity ? null : iso(dmin),
+        hasta: dmax === -Infinity ? null : iso(dmax),
+      };
+    })(),
     CA_RAW: rawArrays.CA,
     SC_RAW: rawArrays.SC,
     // Motivo elegido en el panel de causas: el mapa dibuja solo esas gestiones.
     causaPasa: (i) => {
+      // Efectivas apagadas en el submenú de Capas («con pago», «sin recaudo»…).
+      if (st.efOcultas.length && rawArrays.E[i] === 0 && st.efOcultas.includes(rawArrays.RG[i])) return false;
       const s = st.causaSel;
       if (!s) return true;
-      if (s.campo === "C") return rawArrays.C[i] === s.id && rawArrays.GEST[i] === s.x;
-      if (s.campo === "CA") return rawArrays.CA[i] === s.id && rawArrays.GEST[i] === s.x;
+      const estados = s.fx === "R" ? rawArrays.RG : rawArrays.GEST;
+      if (s.campo === "C") return rawArrays.C[i] === s.id && estados[i] === s.x;
+      if (s.campo === "CA") return rawArrays.CA[i] === s.id && estados[i] === s.x;
       if (s.campo === "T") return rawArrays.T[i] === s.id;
       return rawArrays.SC[i] === s.id;
     }
@@ -1691,6 +1856,7 @@ export default function Tablero({ proceso }) {
                         <input
                           type="checkbox"
                           checked={st.est[2]}
+                          disabled={avail.tipos[2] === 0}
                           onChange={(e) => {
                             const est = [...st.est];
                             est[2] = e.target.checked;
@@ -1705,6 +1871,7 @@ export default function Tablero({ proceso }) {
                         <input
                           type="checkbox"
                           checked={st.est[1]}
+                          disabled={avail.tipos[1] === 0}
                           onChange={(e) => {
                             const est = [...st.est];
                             est[1] = e.target.checked;
@@ -1719,6 +1886,7 @@ export default function Tablero({ proceso }) {
                         <input
                           type="checkbox"
                           checked={st.est[0]}
+                          disabled={avail.tipos[0] === 0}
                           onChange={(e) => {
                             const est = [...st.est];
                             est[0] = e.target.checked;
@@ -1728,6 +1896,26 @@ export default function Tablero({ proceso }) {
                         <span className="sw" style={{ background: P.st[0] }}></span>
                         Efectivas
                       </label>
+{data.dim.resultados && (
+  <div className="lay-sub">
+    {data.dim.resultados.map((nombre, id) =>
+      nombre === "No efectiva" || !(avail.efRec.get(id) > 0) ? null : (
+        <label key={id} className="lay">
+          <input
+            type="checkbox"
+            checked={!st.efOcultas.includes(id)}
+            disabled={!st.est[0]}
+            onChange={(e) => {
+              const resto = st.efOcultas.filter((x) => x !== id);
+              handleFilterChange("efOcultas", e.target.checked ? resto : [...resto, id]);
+            }}
+          />
+          {nombre}
+        </label>
+      )
+    )}
+  </div>
+)}
 
                       {ordenes && (
   <CapasCargue
@@ -1990,6 +2178,7 @@ export default function Tablero({ proceso }) {
               <input
                 type="checkbox"
                 checked={st.est[2]}
+                          disabled={avail.tipos[2] === 0}
                 onChange={(e) => {
                   const est = [...st.est];
                   est[2] = e.target.checked;
@@ -2004,6 +2193,7 @@ export default function Tablero({ proceso }) {
               <input
                 type="checkbox"
                 checked={st.est[1]}
+                          disabled={avail.tipos[1] === 0}
                 onChange={(e) => {
                   const est = [...st.est];
                   est[1] = e.target.checked;
@@ -2018,6 +2208,7 @@ export default function Tablero({ proceso }) {
               <input
                 type="checkbox"
                 checked={st.est[0]}
+                          disabled={avail.tipos[0] === 0}
                 onChange={(e) => {
                   const est = [...st.est];
                   est[0] = e.target.checked;
@@ -2027,6 +2218,26 @@ export default function Tablero({ proceso }) {
               <span className="sw" style={{ background: P.st[0] }}></span>
               Efectivas
             </label>
+{data.dim.resultados && (
+  <div className="lay-sub">
+    {data.dim.resultados.map((nombre, id) =>
+      nombre === "No efectiva" || !(avail.efRec.get(id) > 0) ? null : (
+        <label key={id} className="lay">
+          <input
+            type="checkbox"
+            checked={!st.efOcultas.includes(id)}
+            disabled={!st.est[0]}
+            onChange={(e) => {
+              const resto = st.efOcultas.filter((x) => x !== id);
+              handleFilterChange("efOcultas", e.target.checked ? resto : [...resto, id]);
+            }}
+          />
+          {nombre}
+        </label>
+      )
+    )}
+  </div>
+)}
 
             {ordenes && (
   <CapasCargue
