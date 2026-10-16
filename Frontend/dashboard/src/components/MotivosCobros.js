@@ -13,7 +13,7 @@ export default function MotivosCobros({ A, st, dim, onFilterChange, P }) {
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const pct = (v) => v.toFixed(1).replace(".", ",");
 
-  // Las perdidas son «Visita fallida» (resultado gestión); lo «sin recaudo» sale de la otra
+  // Las perdidas son «Contacto no efectivo» (resultado gestión); lo «sin recaudo» sale de la otra
   // dimensión, la del recaudo.
   const porRecaudo = vista !== "perdidas";
   const estadoId = porRecaudo ? idRec(dim, SIN_RECAUDO) : idDe(dim, PERDIDA);

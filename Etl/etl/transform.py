@@ -11,6 +11,8 @@ El resultado es idéntico al del script original, en una fracción del tiempo.
 """
 from __future__ import annotations
 
+import unicodedata
+
 import numpy as np
 import pandas as pd
 
@@ -18,7 +20,7 @@ from .config import BBOX, COLS_TEXTO
 from .logging_conf import get_logger
 from .taxonomy import (
     ESTADO_GESTION_PERDIDA,
-    ESTADOS_GESTION,
+    RESULTADOS_REPORTADOS,
     RESULTADOS_GESTION,
     SUBCAUSA_SIN_DETALLE,
     SUBCAUSAS_OBS,
@@ -139,9 +141,9 @@ def enrich(
         # Sin "Fallida": en cobros la gestión se pudo hacer (Efectiva) o no (Perdida).
         # object y no "string": con NA, `== "VF"` devuelve NA y np.where no lo admite.
         codigo = df["ESTADO_GESTION"].astype(object).map(
-            lambda v: v.strip().upper() if isinstance(v, str) else None)
-        codigo = codigo.where(codigo.isin(ESTADOS_GESTION))
-        df["ESTADO_GESTION"] = codigo.map(ESTADOS_GESTION)
+            lambda v: "".join(c for c in unicodedata.normalize("NFKD", v.strip()) if not unicodedata.combining(c)).upper() if isinstance(v, str) else None)
+        codigo = codigo.where(codigo.isin(RESULTADOS_REPORTADOS))
+        df["ESTADO_GESTION"] = codigo.map(RESULTADOS_REPORTADOS)
         recaudo = df["RESULTADO_GESTION"].astype(object).map(
             lambda v: v.strip().upper() if isinstance(v, str) else None)
         df["RESULTADO_GESTION"] = recaudo.where(recaudo.isin(RESULTADOS_GESTION)).map(RESULTADOS_GESTION)
