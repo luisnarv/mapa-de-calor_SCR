@@ -6,7 +6,7 @@
 
 ## 1. Individual — `GET /api/v1/ordenes/recomendar/{nic}`
 
-Recomienda técnicos/gestores y brigadas/planes para un NIC según desempeño histórico.
+Recomienda técnicos y brigadas (SCR) o gestores (COBROS) para un NIC según desempeño histórico. En COBROS agrega además los indicadores de facturación y recaudo de `historico_balanza` (ver [IndicadoresCobro](#indicadorescobro)).
 
 ### Parámetros
 
@@ -94,10 +94,78 @@ La respuesta cambia el nombre de los campos según la actividad:
 | Campo | SCR (`actividad=scr`) | COBROS (`actividad=cobros`) |
 |-------|---|---|
 | Quién ejecuta | `tecnicos_recomendados` | `gestores_recomendados` |
-| Tipo de grupo | `brigadas_recomendadas` | `planes_recomendados` |
+| Tipo de grupo | `brigadas_recomendadas` | — (COBROS no recomienda plan) |
+| Facturación y recaudo | — | `cobro`, `aviso_cobro` |
 | Fecha más reciente | `ultima_orden` | `ultima_gestion` |
 
 Los demás campos (`nic`, `barrio`, `municipio`, `mejor_horario`, `causas_fallo`, `historial_nic`) son iguales en ambas actividades.
+
+---
+
+## Recomendaciones de COBROS
+
+En COBROS cada NIC trae dos tipos de recomendación:
+
+- **Quién gestiona** (`gestores_recomendados`): los gestores con mejor desempeño histórico en el barrio del NIC, igual que los técnicos en SCR.
+- **Cómo está la cuenta** (`cobro`): indicadores de facturación y recaudo que ayudan a decidir si vale la pena gestionarla y qué tan buena pagadora es.
+
+COBROS **ya no recomienda plan** (`planes_recomendados` se eliminó de la respuesta).
+
+### De dónde salen los indicadores
+
+Se consultan en el momento, en la tabla `dbanalitica.historico_balanza` (facturación y recaudo, cargada a diario). El NIC se busca como `cuenta`: son el mismo número. Los indicadores aplican al endpoint individual y al de lote; en el lote se resuelven todos los NICs con una sola consulta.
+
+### 1. Cuentas de muy bajo valor — `marca`
+
+Identifica las cuentas cuyo valor es tan bajo que no justifica una gestión ordinaria.
+
+| Valor | Significa |
+|-------|-----------|
+| `"No gestionar"` | Lo facturado en el último periodo es **menor a $30.000** |
+| `"Gestionar"` | Lo facturado en el último periodo es **$30.000 o más** |
+| `null` | La cuenta nunca tuvo un valor facturado: no hay cifra sobre la cual decidir |
+
+- **Qué valor se compara:** `facturado_energia` del **último periodo facturado** de la cuenta, que se devuelve en `ultimo_periodo` y `facturado_ultimo_periodo` para que se pueda ver la cifra que decidió.
+- **Por qué "último facturado" y no "último periodo":** el mes en curso aparece en la balanza antes de facturarse, con el valor vacío. En ese caso se toma el mes anterior. Por ejemplo, una cuenta sin factura de octubre se evalúa con la de septiembre.
+- **Valores en cero o negativos** (saldo a favor) quedan como `"No gestionar"`.
+- La marca **no saca la cuenta de la respuesta**: la cuenta sigue trayendo sus gestores recomendados. Quien consume la API decide qué hacer con las que vienen `"No gestionar"`.
+
+### 2. Comportamiento de pago reciente — `pagos_ultimos_6_meses`
+
+Cuántas facturas pagó la cuenta en los **últimos 6 meses cerrados**, de 0 a 6. Mide la frecuencia de pago: 6 es una cuenta que paga todos los meses, 0 una que no ha pagado en medio año.
+
+- **Qué cuenta como pago:** el periodo tiene `con_pago` verdadero en la balanza.
+- **Qué meses entran:** los 6 anteriores al mes en curso. Consultando en octubre de 2026 son abril a septiembre. El mes en curso no entra porque todavía se está recaudando; se ve aparte en `recaudo_mes_actual`.
+
+### 3. Recaudo del mes anterior y del mes actual — `recaudo_mes_anterior`, `recaudo_mes_actual`
+
+Si la cuenta tuvo recaudo (`"Sí"`) o no (`"No"`) en el mes inmediatamente anterior y en el mes en curso.
+
+- **Qué cuenta como recaudo:** `recaudo_energia` mayor a 0 en ese periodo.
+- **Mes actual** es el mes calendario de la consulta. Como la balanza se carga a diario, un `"No"` a principio de mes puede cambiar a `"Sí"` días después.
+- Si la cuenta no tiene fila en la balanza para ese mes, se responde `"No"`.
+
+> `pagos_ultimos_6_meses` usa `con_pago` y los indicadores de recaudo usan `recaudo_energia`. En la balanza no siempre coinciden (hay periodos marcados con pago cuyo recaudo es 0), así que una cuenta puede mostrar un pago en un mes y `"No"` de recaudo en ese mismo mes.
+
+### Cuando no hay indicadores — `aviso_cobro`
+
+Si no se pudieron calcular, `cobro` viene en `null` y `aviso_cobro` explica por qué. La recomendación de gestores **sale igual**: la balanza nunca hace fallar el endpoint.
+
+| `aviso_cobro` | Qué hacer |
+|---------------|-----------|
+| `"La cuenta no aparece en historico_balanza."` | El NIC tiene gestiones pero no facturación registrada. No es un error de la API |
+| `"historico_balanza no respondió; reintenta para ver los indicadores de cobro."` | La base de datos falló o no estaba disponible. Reintentar |
+
+### Cómo leerlos juntos
+
+| Situación | Lectura sugerida |
+|-----------|------------------|
+| `"No gestionar"` | Valor muy bajo: fuera de la gestión ordinaria, sin importar lo demás |
+| `"Gestionar"`, 5–6 pagos, recaudo anterior `"Sí"` | Buena pagadora: probablemente pague sin gestión intensiva |
+| `"Gestionar"`, 0–1 pagos, recaudo anterior y actual `"No"` | Morosidad sostenida: candidata prioritaria a gestión |
+| `"Gestionar"`, varios pagos pero recaudo anterior `"No"` | Pagadora que se atrasó recién: vale un recordatorio temprano |
+
+Esta tabla es una guía de interpretación: la API entrega los indicadores, no una decisión combinada.
 
 ---
 
@@ -111,21 +179,36 @@ Los demás campos (`nic`, `barrio`, `municipio`, `mejor_horario`, `causas_fallo`
 | `barrio` | `string` | Barrio (BKEY: `"MUNICIPIO \| BARRIO"`) |
 | `municipio` | `string` | Municipio |
 | `tecnicos_recomendados` / `gestores_recomendados` | `CandidatoRecomendado[]` | Top 4 por Wilson |
-| `brigadas_recomendadas` / `planes_recomendados` | `CandidatoRecomendado[]` | Top 3 por Wilson |
+| `brigadas_recomendadas` | `CandidatoRecomendado[]` | Top 3 por Wilson. Solo SCR |
 | `mejor_horario` | `MejorHorario` | Mejor día de la semana por efectividad |
 | `causas_fallo` | `CausaFrecuente[]` | Top 5 causas de fallo en el barrio |
 | `historial_nic` | `HistorialNic` | Resumen de visitas históricas al NIC |
+| `cobro` | `IndicadoresCobro \| null` | Solo COBROS. Ver [Recomendaciones de COBROS](#recomendaciones-de-cobros) |
+| `aviso_cobro` | `string` | Solo COBROS y solo cuando `cobro` es `null`: dice por qué |
 
 ### CandidatoRecomendado
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `nombre` | `string` | Nombre del técnico/gestor o brigada/plan |
+| `nombre` | `string` | Nombre del técnico/gestor o brigada |
 | `efectividad_ajustada` | `string` | Efectivas / (total − no controlables), e.g. `"87.2%"` |
 | `efectivas` | `int` | Órdenes/gestiones efectivas |
 | `fallidas` | `int` | Fallidas (se cobran en SCR) |
 | `perdidas` | `int` | Perdidas (no se cobran en SCR) |
 | `ultima_orden` / `ultima_gestion` | `string \| null` | Fecha más reciente (`YYYY-MM-DD`) |
+
+### IndicadoresCobro
+
+Referencia rápida; la explicación de cada campo está en [Recomendaciones de COBROS](#recomendaciones-de-cobros).
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `marca` | `"Gestionar" \| "No gestionar" \| null` | `"No gestionar"` si `facturado_energia` del último periodo es menor a $30.000; `"Gestionar"` si no. `null` solo si la cuenta nunca tuvo facturado |
+| `ultimo_periodo` | `int \| null` | Último periodo con `facturado_energia` no nulo (`YYYYMM`): el mes en curso aparece en la balanza antes de facturarse |
+| `facturado_ultimo_periodo` | `float \| null` | `facturado_energia` de ese periodo |
+| `pagos_ultimos_6_meses` | `int` | Periodos con `con_pago` en los 6 meses cerrados antes del actual (hoy en octubre → abril a septiembre) |
+| `recaudo_mes_anterior` | `"Sí" \| "No"` | `recaudo_energia > 0` en el periodo del mes anterior |
+| `recaudo_mes_actual` | `"Sí" \| "No"` | `recaudo_energia > 0` en el periodo del mes en curso |
 
 ### MejorHorario
 
@@ -261,24 +344,6 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
       "ultima_gestion": "2026-06-05"
     }
   ],
-  "planes_recomendados": [
-    {
-      "nombre": "Visita Personalizada",
-      "efectividad_ajustada": "12.6%",
-      "efectivas": 15,
-      "fallidas": 139,
-      "perdidas": 31,
-      "ultima_gestion": "2026-09-18"
-    },
-    {
-      "nombre": "Cobro Persuasivo",
-      "efectividad_ajustada": "12.1%",
-      "efectivas": 4,
-      "fallidas": 50,
-      "perdidas": 53,
-      "ultima_gestion": "2026-09-09"
-    }
-  ],
   "mejor_horario": {
     "mejor_dia": "viernes",
     "franjas": [
@@ -297,11 +362,21 @@ El algoritmo prueba 4 niveles progresivos y se detiene en el primero con ≥2 ca
     "perdidas": 3,
     "efectividad": "0.0%",
     "ultima_visita": "2026-09-05"
+  },
+  "cobro": {
+    "marca": "Gestionar",
+    "ultimo_periodo": 202610,
+    "facturado_ultimo_periodo": 114269.98,
+    "pagos_ultimos_6_meses": 0,
+    "recaudo_mes_anterior": "No",
+    "recaudo_mes_actual": "No"
   }
 }
 ```
 
-## Ejemplo de respuesta (lote)
+## Ejemplo de respuesta (lote, SCR)
+
+En COBROS cada elemento de `resultados` tiene la misma forma que el ejemplo individual de COBROS.
 
 ```json
 {

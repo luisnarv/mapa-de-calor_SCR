@@ -123,6 +123,26 @@ class RecomendacionResponse(BaseModel):
     historial_nic: HistorialNic
 
 
+class IndicadoresCobro(BaseModel):
+    """Facturación y recaudo de la cuenta, de `historico_balanza`. Solo COBROS."""
+
+    marca: Literal["Gestionar", "No gestionar"] | None = Field(
+        description=(
+            "'No gestionar' si lo facturado en el último periodo es menor a $30.000; "
+            "'Gestionar' si no. null si la cuenta nunca tuvo facturado."
+        )
+    )
+    ultimo_periodo: int | None = Field(
+        description="Último periodo con facturado_energia (YYYYMM); null si nunca se le facturó."
+    )
+    facturado_ultimo_periodo: float | None
+    pagos_ultimos_6_meses: int = Field(
+        description="Periodos con pago en los 6 meses cerrados antes del actual."
+    )
+    recaudo_mes_anterior: Literal["Sí", "No"]
+    recaudo_mes_actual: Literal["Sí", "No"]
+
+
 class RecomendacionBatchRequest(BaseModel):
     """Lote de NICs para recomendar."""
 

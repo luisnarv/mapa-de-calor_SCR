@@ -4,10 +4,11 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api.deps import CargueStoreDep, GeolocalizadorDep, MetricsDep, MetricsPorActividadDep
+from app.api.deps import BalanzaDep, CargueStoreDep, GeolocalizadorDep, MetricsDep, MetricsPorActividadDep
 from app.core.config import settings
 from app.schemas.ordenes import (
     CandidatoRecomendado,
+    IndicadoresCobro,
     OrdenSinUbicar,
     PuntoOrden,
     PuntosCargue,
@@ -100,12 +101,24 @@ async def puntos(
     )
 
 
-def _adaptar_cobros(d: dict) -> dict:
-    """Renombra los campos de SCR al vocabulario de COBROS."""
+def _adaptar_cobros(d: dict, indicadores: dict[str, IndicadoresCobro] | None) -> dict:
+    """Pasa la respuesta de SCR al vocabulario de COBROS y le suma la balanza.
+
+    COBROS no recomienda plan: las brigadas de SCR se descartan aquí.
+    """
     d["gestores_recomendados"] = d.pop("tecnicos_recomendados")
-    d["planes_recomendados"] = d.pop("brigadas_recomendadas")
-    for g in d["gestores_recomendados"] + d["planes_recomendados"]:
+    d.pop("brigadas_recomendadas")
+    for g in d["gestores_recomendados"]:
         g["ultima_gestion"] = g.pop("ultima_orden")
+
+    if indicadores is None:
+        d["cobro"] = None
+        d["aviso_cobro"] = "historico_balanza no respondió; reintenta para ver los indicadores de cobro."
+    elif d["nic"] not in indicadores:
+        d["cobro"] = None
+        d["aviso_cobro"] = "La cuenta no aparece en historico_balanza."
+    else:
+        d["cobro"] = indicadores[d["nic"]].model_dump()
     return d
 
 
@@ -113,8 +126,13 @@ def _adaptar_cobros(d: dict) -> dict:
 async def recomendar(
     nic: str,
     metrics: MetricsPorActividadDep,
+    balanza: BalanzaDep,
 ) -> dict:
-    """Recomienda técnicos/gestores y brigadas/planes para un NIC según desempeño histórico."""
+    """Recomienda técnicos/gestores para un NIC según desempeño histórico.
+
+    En SCR también brigadas; en COBROS, en vez del plan, los indicadores de
+    facturación y recaudo de la balanza.
+    """
     from app.services.metrics_service import NicNoEncontrado
 
     try:
@@ -124,7 +142,7 @@ async def recomendar(
 
     d = resultado.model_dump()
     if metrics.directorio.name == "cobros":
-        _adaptar_cobros(d)
+        _adaptar_cobros(d, await balanza.indicadores([nic]))
     return d
 
 
@@ -132,8 +150,9 @@ async def recomendar(
 async def recomendar_batch(
     body: RecomendacionBatchRequest,
     metrics: MetricsPorActividadDep,
+    balanza: BalanzaDep,
 ) -> dict:
-    """Recomienda técnicos/gestores y brigadas/planes para un lote de NICs."""
+    """Lo mismo que `GET /recomendar/{nic}` para un lote de NICs."""
     from app.services.metrics_service import NicNoEncontrado
 
     resultados: list[dict] = []
@@ -141,12 +160,15 @@ async def recomendar_batch(
 
     for nic in body.nics:
         try:
-            r = await metrics.recomendar(nic=nic)
-            d = r.model_dump()
-            if metrics.directorio.name == "cobros":
-                _adaptar_cobros(d)
-            resultados.append(d)
+            resultados.append((await metrics.recomendar(nic=nic)).model_dump())
         except NicNoEncontrado:
             no_encontrados.append(nic)
+
+    if metrics.directorio.name == "cobros" and resultados:
+        # Una sola consulta para todo el lote: una por NIC serían miles de idas
+        # a la base en un cargue grande.
+        indicadores = await balanza.indicadores([d["nic"] for d in resultados])
+        for d in resultados:
+            _adaptar_cobros(d, indicadores)
 
     return {"resultados": resultados, "no_encontrados": no_encontrados}

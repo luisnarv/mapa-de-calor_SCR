@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import PROCESOS_VALIDOS, settings
 from app.core.database import SessionLocal
+from app.services.balanza_service import BalanzaService
 from app.services.cargue_store import CargueStore
 from app.services.feedback_service import FeedbackService
 from app.services.geolocalizacion import Geolocalizador
@@ -109,6 +110,14 @@ def get_feedback_service() -> FeedbackService:
 
 
 FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
+
+
+@lru_cache
+def get_balanza_service() -> BalanzaService:
+    return BalanzaService()
+
+
+BalanzaDep = Annotated[BalanzaService, Depends(get_balanza_service)]
 
 ToolRunnerDep = Annotated[ToolRunner, Depends(get_tool_runner)]
 
