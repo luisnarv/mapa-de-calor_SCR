@@ -103,8 +103,36 @@ QUERY_COBROS: str = """
       fecha_gestion AS "FECHA_CIERRE",
       observaciones AS "OBSERVACION",
       observaciones AS "OBS_COMBINADA",
-      REPLACE(punto_gps, '.-', ',-') AS "GPS"
+      REPLACE(punto_gps, '.-', ',-') AS "GPS",
+      estado_final AS "ESTADO_GESTION",
+      resultado_gestion AS "RESULTADO_GESTION"
     FROM dbanalitica.historico_aire_cobros
+"""
+
+# Tabla por gestor (solo COBROS), calculada con `v_aire_cobros_nic_mes`: una fila por
+# cuenta y mes, con su gestión vigente, saldo y recaudo ya sin duplicados. Se agrupa por
+# todo lo que el tablero filtra (mes, gestor, zona, municipio, plan, resultado de la
+# gestión y recaudo) para que el navegador pueda sumar solo lo que pasa los filtros y
+# el resultado cuadre con la vista. `calculo_provisional` es verdadero en el mes en curso.
+QUERY_GESTORES: str = """
+    SELECT
+      periodo_mes,
+      gestor,
+      zona,
+      municipio,
+      plan,
+      estado_final,
+      resultado_gestion,
+      COUNT(*) AS cuentas,
+      COALESCE(SUM(saldo), 0) AS saldo,
+      COALESCE(SUM(recaudo_sin_irr), 0) AS recaudo,
+      BOOL_OR(calculo_provisional) AS provisional
+    FROM dbanalitica.v_aire_cobros_nic_mes
+    WHERE anio = (SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes)
+      AND gestor IS NOT NULL
+      AND resultado_gestion IS NOT NULL
+    GROUP BY periodo_mes, gestor, zona, municipio, plan, estado_final, resultado_gestion
+    ORDER BY periodo_mes, gestor
 """
 
 # Columnas que deben tratarse como texto (evita el ".0" que pandas pega a floats).

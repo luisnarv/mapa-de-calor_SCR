@@ -266,15 +266,47 @@ export function useTheme() {
 
 /* ---------- helpers de color de datos ---------- */
 
+/* En COBROS no existe «fallida», y el ámbar del riesgo medio es su color. Por eso
+   el índice usa una rampa propia (azul · violeta · magenta) que no se parece a
+   ningún estado de la gestión. Es un interruptor del módulo y no un parámetro:
+   riskColor se llama desde una veintena de sitios, todos dentro de un mismo
+   tablero, y la ruta fija el proceso una vez al montarlo. */
+let rampaCobros = false;
+export function usarRampaCobros(activa) {
+  rampaCobros = activa;
+}
+
+const RIESGO_COBROS = {
+  light: {
+    fill: ["#3B8EC9", "#8A63D2", "#C2185B", "#7F0D3A"],
+    text: ["#1F6A9E", "#5E3BA8", "#A0124A", "#7F0D3A"],
+    ink: ["#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"],
+  },
+  dark: {
+    fill: ["#5BB4F0", "#B08CFF", "#FF6FA5", "#FF2D55"],
+    text: ["#5BB4F0", "#B08CFF", "#FF6FA5", "#FF5C7A"],
+    ink: [DARK.base, DARK.base, DARK.base, DARK.base],
+  },
+};
+
+// Cobros separa un cuarto nivel (crítico, desde 81); SCR sigue con tres.
+const nivelCobros = (r) => (r >= 81 ? 3 : r >= 61 ? 2 : r >= 31 ? 1 : 0);
+
+function rampa(p) {
+  return RIESGO_COBROS[p.name] || RIESGO_COBROS.dark;
+}
+
 /** Color del índice de riesgo (0–100). `text: true` devuelve la variante con contraste AA. */
 export function riskColor(p, r, text = false) {
   if (r == null) return p.none;
   const band = r >= 61 ? 2 : r >= 31 ? 1 : 0;
+  if (rampaCobros) return text ? rampa(p).text[nivelCobros(r)] : rampa(p).fill[nivelCobros(r)];
   return text ? p.stText[band] : p.st[band];
 }
 
 /** Color de tinta legible sobre un relleno de riesgo. */
 export function riskInk(p, r) {
   if (r == null) return p.ink;
-  return p.stInk[r >= 61 ? 2 : r >= 31 ? 1 : 0];
+  const band = r >= 61 ? 2 : r >= 31 ? 1 : 0;
+  return rampaCobros ? rampa(p).ink[nivelCobros(r)] : p.stInk[band];
 }

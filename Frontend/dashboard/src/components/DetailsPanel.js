@@ -26,6 +26,8 @@ export default function DetailsPanel({
 
   const num = (val) => Math.round(val).toLocaleString("es-CO");
   const pct = (val) => val.toFixed(1).replace(".", ",");
+  // En cobros la base trae "NOMBRE - cédula": en pantalla basta el nombre.
+  const gestor = (n) => (V.sinAjuste ? n.replace(/\s*-\s*\d+\s*$/, "").trim() : n);
   const delta = (v, ref) => {
     const d = v - ref;
     const cls = d > 0 ? "ok" : "bad";
@@ -116,7 +118,7 @@ export default function DetailsPanel({
             </div>
           </div>
 
-          <div className="mini-grid" style={{ marginBottom: "14px" }}>
+          <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`} style={{ marginBottom: "14px" }}>
             <div className="mini">
               <span>Total</span>
               <b>{num(A.tot)}</b>
@@ -125,10 +127,12 @@ export default function DetailsPanel({
               <span>Efectivas</span>
               <b className="ok">{num(A.ef)}</b>
             </div>
+{V.conFallidas !== false && (
             <div className="mini">
               <span>Fallidas</span>
               <b className="warn">{num(A.fa)}</b>
             </div>
+            )}
             <div className="mini">
               <span>Perdidas</span>
               <b className="bad">{num(A.pe)}</b>
@@ -142,20 +146,24 @@ export default function DetailsPanel({
                 <td>Efectividad bruta</td>
                 <td className="num">{pct(A.efPct)}%</td>
               </tr>
+              {!V.sinAjuste && (
               <tr>
                 <td>Efectividad ajustada</td>
                 <td className="num ok" style={{ fontWeight: "600" }}>
                   {pct(A.efAdj)}%
                 </td>
               </tr>
+              )}
               <tr>
                 <td>Tasa de pérdida</td>
                 <td className="num bad">{pct(A.pePct)}%</td>
               </tr>
+{V.conFallidas !== false && (
               <tr>
                 <td>Tasa de fallas</td>
                 <td className="num warn">{pct(A.faPct)}%</td>
               </tr>
+              )}
             </tbody>
           </table>
 
@@ -202,7 +210,7 @@ export default function DetailsPanel({
           )}
 
           <h3>
-            Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
+            Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenesMin || "ordenes"}</span>
           </h3>
           <div className="causes" style={{ marginBottom: "14px" }}>
             {causes.slice(0, 5).map(([c, n]) => {
@@ -234,7 +242,7 @@ export default function DetailsPanel({
             })}
             {!causes.length && (
               <p className="empty" style={{ marginBottom: "14px" }}>
-                Sin {V.ordenMin || "orden"}es no efectivas.
+                Sin {V.ordenesMin || "ordenes"} no efectivas.
               </p>
             )}
           </div>
@@ -269,7 +277,7 @@ export default function DetailsPanel({
     if (!o) {
       return (
         <p className="empty">
-          Ese barrio no tiene {V.ordenMin || "orden"}es con los filtros actuales.
+          Ese barrio no tiene {V.ordenesMin || "ordenes"} con los filtros actuales.
         </p>
       );
     }
@@ -320,7 +328,7 @@ export default function DetailsPanel({
           </div>
         </div>
 
-        <div className="mini-grid">
+        <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`}>
           <div className="mini">
             <span>Total</span>
             <b>{num(o.tot)}</b>
@@ -329,10 +337,12 @@ export default function DetailsPanel({
             <span>Efectivas</span>
             <b className="ok">{num(o.ef)}</b>
           </div>
+{V.conFallidas !== false && (
           <div className="mini">
             <span>Fallidas</span>
             <b className="warn">{num(o.fa)}</b>
           </div>
+          )}
           <div className="mini">
             <span>Perdidas</span>
             <b className="bad">{num(o.pe)}</b>
@@ -356,40 +366,66 @@ export default function DetailsPanel({
               <td>{pct(z.efPct)}%</td>
               <td>{delta(o.efPct, z.efPct)}</td>
             </tr>
+            {!V.sinAjuste && (
             <tr>
               <td>Efectividad ajustada</td>
               <td>{pct(o.efAdj)}%</td>
               <td>{pct(z.efAdj)}%</td>
               <td>{delta(o.efAdj, z.efAdj)}</td>
             </tr>
+            )}
             <tr>
               <td>% Perdidas</td>
               <td>{pct(o.pePct)}%</td>
               <td>{pct(z.pePct)}%</td>
               <td>{delta(z.pePct, o.pePct)}</td>
             </tr>
+{V.conFallidas !== false && (
             <tr>
               <td>% Fallidas</td>
               <td>{pct(o.faPct)}%</td>
               <td>{pct(z.faPct)}%</td>
               <td>{delta(z.faPct, o.faPct)}</td>
             </tr>
+            )}
           </tbody>
         </table>
 
-        {o.risk != null && (
+        {o.risk != null && V.riesgoPorPromedio && (
+          <>
+            <h3>
+              Categoría de riesgo <span className="hint">frente al promedio</span>
+            </h3>
+            <p className="gv-nota" style={{ fontSize: "11.5px", color: "var(--mut)", lineHeight: 1.5 }}>
+              Pierde el <b>{pct(o.pePct)}%</b> de sus visitas: <b>{pct(o.mult)}×</b> el promedio de la
+              operación ({pct(A.pePct)}%). Categoría{" "}
+              <b style={{ color: riskColorOf(P, o.risk, true) }}>{o.prio}</b>.
+              {o.pequena && (
+                <>
+                  {" "}
+                  <em>
+                    Muestra pequeña ({num(o.tot)} {V.ordenesMin || "ordenes"}): una sola gestión puede
+                    cambiar la categoría.
+                  </em>
+                </>
+              )}
+            </p>
+          </>
+        )}
+
+        {o.risk != null && !V.riesgoPorPromedio && (
           <>
             <h3>
               Composición del índice de riesgo <span className="hint">(0-100)</span>
             </h3>
             <div className="parts">
               {[
-                ["% perdidas", o.parts.pe, 40],
-                ["% fallidas", o.parts.fa, 25],
-                ["Volumen", o.parts.vol, 15],
-                ["Tendencia", o.parts.tr, 10],
-                ["Desempeño histórico", o.parts.hist, 10]
-              ].map(([l, v, mx]) => (
+                ["% perdidas", o.parts.pe, V.pesos.pe],
+                ["% fallidas", o.parts.fa, V.pesos.fa],
+                ["Volumen", o.parts.vol, V.pesos.vol],
+                ["Tendencia", o.parts.tr, V.pesos.tr],
+                ["Desempeño histórico", o.parts.hist, V.pesos.hist]
+              ].filter(([, , w]) => w > 0).map(([l, v, w]) => [l, v, w * 100]).map(([l, v, mx]) => (
                 <div key={l} className="part">
                   <span>{l}</span>
                   <i>
@@ -420,7 +456,7 @@ export default function DetailsPanel({
         </div>
 
         <h3>
-          Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
+          Motivos de no efectividad <span className="hint">{num(badTot)} {V.ordenesMin || "ordenes"}</span>
         </h3>
         <div className="causes">
           {causes.map(([c, n]) => {
@@ -450,7 +486,7 @@ export default function DetailsPanel({
               </div>
             );
           })}
-          {!causes.length && <p className="empty">Sin {V.ordenMin || "orden"}es no efectivas.</p>}
+          {!causes.length && <p className="empty">Sin {V.ordenesMin || "ordenes"} no efectivas.</p>}
         </div>
 
         <h3>{V.tecnico || "Técnico"} recomendado aquí</h3>
@@ -459,10 +495,10 @@ export default function DetailsPanel({
             {recT.map((r, i) => (
               <div key={i} className={`rec ${i === 0 ? "best" : ""}`}>
                 <div className="rec-h">
-                  <b>{r.name}</b>
+                  <b>{gestor(r.name)}</b>
                   <span 
                     className={`conf ${r.conf.toLowerCase()}`}
-                    title={`La confianza estadística se calcula según la cantidad de ${V.ordenMin || "orden"}es comparables:\n• Alta: 30 o más ${V.ordenMin || "orden"}es\n• Media: 10 a 29 ${V.ordenMin || "orden"}es\n• Baja: menos de 10 ${V.ordenMin || "orden"}es`}
+                    title={`La confianza estadística se calcula según la cantidad de ${V.ordenesMin || "ordenes"} comparables:\n• Alta: 30 o más ${V.ordenesMin || "ordenes"}\n• Media: 10 a 29 ${V.ordenesMin || "ordenes"}\n• Baja: menos de 10 ${V.ordenesMin || "ordenes"}`}
                     style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
                   >
                     Confianza {r.conf} <Info size={11} strokeWidth={2.2} style={{ opacity: 0.8 }} aria-hidden="true" />
@@ -470,10 +506,10 @@ export default function DetailsPanel({
                 </div>
                 <div className="rec-m">
                   <span>
-                    <b>{pct(r.efAdj)}%</b> efect. ajustada
+                    <b>{pct(r.efAdj)}%</b> {V.sinAjuste ? "efectividad" : "efect. ajustada"}
                   </span>
                   <span>
-                    <b>{num(r.den)}</b> {V.ordenMin || "orden"}es comparables
+                    <b>{num(r.den)}</b> {V.ordenesMin || "ordenes"} comparables
                   </span>
                   <span>
                     Última:{" "}
@@ -500,13 +536,13 @@ export default function DetailsPanel({
               localTechs
                 .slice(0, 6)
                 .map((r) => [
-                  dim.tecs[r.t],
+                  gestor(dim.tecs[r.t]),
                   num(r.tot),
                   pct(r.efAdj) + "%"
                 ]),
-              [V.tecnico || "Técnico", V.ordenes || "Órdenes", "Efect. aj. aquí"]
+              [V.tecnico || "Técnico", V.ordenes || "Órdenes", V.sinAjuste ? "Efectividad aquí" : "Efect. aj. aquí"]
             )
-          : <p className="empty">Ningún {V.tecnicoMin || "técnico"} tiene ≥3 {V.ordenMin || "orden"}es aquí.</p>}
+          : <p className="empty">Ningún {V.tecnicoMin || "técnico"} tiene ≥3 {V.ordenesMin || "ordenes"} aquí.</p>}
 
         <h3>
           Trabajo efectivo realizado <span className="hint">para saber qué distribuir</span>
@@ -520,7 +556,7 @@ export default function DetailsPanel({
               ]),
               ["Acción ejecutada", V.ordenes || "Órdenes", "Part."]
             )
-          : <p className="empty">Sin {V.ordenMin || "orden"}es efectivas en este barrio.</p>}
+          : <p className="empty">Sin {V.ordenesMin || "ordenes"} efectivas en este barrio.</p>}
 
         <h3>{V.brigadas || "Brigadas"} asignadas</h3>
         {miniTable(
@@ -542,18 +578,22 @@ export default function DetailsPanel({
           [V.tipoOs || "Tipo OS", V.ordenes || "Órdenes", "Part."]
         )}
 
-        <h3>Tipos de suspensión</h3>
-        {miniTable(
-          topList(o.susp, 5).map(([u, c]) => [
-            dim.susps[u],
-            num(c),
-            pct((c / o.tot) * 100) + "%"
-          ]),
-          ["Suspensión", V.ordenes || "Órdenes", "Part."]
+        {V.suspension !== false && (
+          <>
+            <h3>Tipos de suspensión</h3>
+            {miniTable(
+              topList(o.susp, 5).map(([u, c]) => [
+                dim.susps[u],
+                num(c),
+                pct((c / o.tot) * 100) + "%"
+              ]),
+              ["Suspensión", V.ordenes || "Órdenes", "Part."]
+            )}
+          </>
         )}
 
         <h3>
-          {V.subacciones || "Subacciones"} en no efectivas <span className="hint">{num(badTot)} {V.ordenMin || "orden"}es</span>
+          {V.subacciones || "Subacciones"} en no efectivas <span className="hint">{num(badTot)} {V.ordenesMin || "ordenes"}</span>
         </h3>
         {miniTable(
           topList(o.sub, 6).map(([sx, c]) => [
@@ -597,7 +637,7 @@ export default function DetailsPanel({
       .sort((a, b) => b[1].tot - a[1].tot)
       .map(([t]) => (
         <option key={t} value={t}>
-          {dim.tecs[t]}
+          {gestor(dim.tecs[t])}
         </option>
       ));
 
@@ -620,7 +660,7 @@ export default function DetailsPanel({
 
       body = (
         <>
-          <div className="mini-grid">
+          <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`}>
             <div className="mini">
               <span>{V.ordenes || "Órdenes"}</span>
               <b>{num(o.tot)}</b>
@@ -629,20 +669,24 @@ export default function DetailsPanel({
               <span>Efectivas · {num(o.ef)}</span>
               <b className="ok">{pct(o.efPct)}%</b>
             </div>
+{V.conFallidas !== false && (
             <div className="mini">
               <span>Fallidas · {num(o.fa)}</span>
               <b className="warn">{pct(o.faPct)}%</b>
             </div>
+            )}
             <div className="mini">
               <span>Perdidas · {num(o.pe)}</span>
               <b className="bad">{pct(o.pePct)}%</b>
             </div>
           </div>
-          <div className="mini-grid">
+          <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`}>
+            {!V.sinAjuste && (
             <div className="mini">
               <span>Efect. ajustada</span>
               <b className="ok">{pct(o.efAdj)}%</b>
             </div>
+            )}
             <div className="mini">
               <span>Distancia</span>
               <b>{num(R.km)} km</b>
@@ -660,16 +704,18 @@ export default function DetailsPanel({
           <h3>Distribución de resultados</h3>
           <div className="dist-bar">
             <i style={{ width: `${o.efPct}%`, background: ST_COLOR[0] }} title="Efectivas"></i>
-            <i style={{ width: `${o.faPct}%`, background: ST_COLOR[1] }} title="Fallidas"></i>
+            {V.conFallidas !== false && <i style={{ width: `${o.faPct}%`, background: ST_COLOR[1] }} title="Fallidas"></i>}
             <i style={{ width: `${o.pePct}%`, background: ST_COLOR[2] }} title="Perdidas"></i>
           </div>
           <div className="dist-leg">
             <span>
               <i style={{ background: ST_COLOR[0] }}></i> Efectivas <b>{pct(o.efPct)}%</b>
             </span>
+{V.conFallidas !== false && (
             <span>
               <i style={{ background: ST_COLOR[1] }}></i> Fallidas <b>{pct(o.faPct)}%</b>
             </span>
+            )}
             <span>
               <i style={{ background: ST_COLOR[2] }}></i> Perdidas <b>{pct(o.pePct)}%</b>
             </span>
@@ -687,12 +733,14 @@ export default function DetailsPanel({
                 </tr>
               </thead>
               <tbody>
+                {!V.sinAjuste && (
                 <tr>
                   <td>Efectividad ajustada</td>
                   <td>{pct(o.efAdj)}%</td>
                   <td>{pct(bo.efAdj)}%</td>
                   <td>{delta(o.efAdj, bo.efAdj)}</td>
                 </tr>
+                )}
                 <tr>
                   <td>Efectividad bruta</td>
                   <td>{pct(o.efPct)}%</td>
@@ -703,7 +751,7 @@ export default function DetailsPanel({
             </table>
           )}
 
-          <h3>{V.brigadas || "Brigadas"} con las que trabaja</h3>
+          <h3>{V.brigadas || "Brigadas"} con {V.sinAjuste ? "los" : "las"} que trabaja</h3>
           {miniTable(
             [...o.brig.entries()]
               .sort((a, b) => b[1] - a[1])
@@ -796,11 +844,11 @@ export default function DetailsPanel({
               {i === 0 && (
                 <Star size={12} strokeWidth={2.2} fill="currentColor" aria-hidden="true" />
               )}
-              {r.name}
+              {gestor(r.name)}
             </b>
             <span 
               className={`conf ${r.conf.toLowerCase()}`}
-              title={`La confianza estadística se calcula según la cantidad de ${V.ordenMin || "orden"}es comparables:\n• Alta: 30 o más ${V.ordenMin || "orden"}es\n• Media: 10 a 29 ${V.ordenMin || "orden"}es\n• Baja: menos de 10 ${V.ordenMin || "orden"}es`}
+              title={`La confianza estadística se calcula según la cantidad de ${V.ordenesMin || "ordenes"} comparables:\n• Alta: 30 o más ${V.ordenesMin || "ordenes"}\n• Media: 10 a 29 ${V.ordenesMin || "ordenes"}\n• Baja: menos de 10 ${V.ordenesMin || "ordenes"}`}
               style={{ cursor: "help", textDecoration: "underline dotted", display: "inline-flex", alignItems: "center", gap: "2px" }}
             >
               Confianza {r.conf} <Info size={11} strokeWidth={2.2} style={{ opacity: 0.8 }} aria-hidden="true" />
@@ -808,10 +856,10 @@ export default function DetailsPanel({
           </div>
           <div className="rec-m">
             <span>
-              <b>{pct(r.efAdj)}%</b> efect. ajustada
+              <b>{pct(r.efAdj)}%</b> {V.sinAjuste ? "efectividad" : "efect. ajustada"}
             </span>
             <span>
-              <b>{num(r.den)}</b> {V.ordenMin || "orden"}es comparables
+              <b>{num(r.den)}</b> {V.ordenesMin || "ordenes"} comparables
             </span>
             <span>
               <b>{num(r.pe)}</b> perdidas
@@ -836,11 +884,11 @@ export default function DetailsPanel({
             </div>
           ) : (
             <p className="empty">
-              Muestra insuficiente: no hay suficientes {V.ordenMin || "orden"}es comparables para recomendar con fiabilidad.
+              Muestra insuficiente: no hay suficientes {V.ordenesMin || "ordenes"} comparables para recomendar con fiabilidad.
             </p>
           )}
 
-          <h3>{V.brigada || "Brigada"} recomendada</h3>
+          <h3>{V.brigada || "Brigada"} {V.sinAjuste ? "recomendado" : "recomendada"}</h3>
           {rb.length ? (
             <div className="recs">
               {rb.slice(0, 3).map((r, i) => card(r, i, "brig"))}
@@ -851,7 +899,7 @@ export default function DetailsPanel({
 
           <p className="hint">
             El puntaje usa el <b>límite inferior de Wilson (95%)</b> sobre la
-            efectividad ajustada. Las causas fuera de control no penalizan al {V.tecnicoMin || "técnico"}.
+            efectividad{V.sinAjuste ? "." : ` ajustada. Las causas fuera de control no penalizan al ${V.tecnicoMin || "técnico"}.`}
           </p>
         </>
       );
@@ -898,7 +946,7 @@ export default function DetailsPanel({
       );
     }
 
-    const { E_raw, C_raw, S_raw, T_raw, DAY_raw, M_raw, ORD_raw, B_raw, NIC_raw } = st;
+    const { E_raw, C_raw, S_raw, T_raw, DAY_raw, M_raw, ORD_raw, B_raw, NIC_raw, GEST_RAW } = st;
     const history = [];
 
     if (NIC_raw) {
@@ -909,9 +957,10 @@ export default function DetailsPanel({
             idx: i,
             ord: ORD_raw[i],
             est: E_raw[i],
+            gest: dim.gests && GEST_RAW ? dim.gests[GEST_RAW[i]] : null,
             causa: dim.causas[C_raw[i]],
             sub: dim.subs[S_raw[i]],
-            tec: dim.tecs[T_raw[i]],
+            tec: gestor(dim.tecs[T_raw[i]]),
             m: M_raw[i],
             day: DAY_raw[i],
             barrio: barrioName(B_raw[i]),
@@ -930,7 +979,10 @@ export default function DetailsPanel({
       const estClass = h.est === 0 ? "ok" : h.est === 1 ? "warn" : "bad";
       return [
         <span className="mono" style={{ fontSize: "10.5px" }}>{h.ord || "—"}</span>,
-        <span className={estClass} style={{ fontWeight: "600" }}>{dim.estados[h.est]}</span>,
+        <span className={estClass} style={{ fontWeight: "600" }}>
+          {h.gest || dim.estados[h.est]}
+          {h.gest && <span style={{ display: "block", fontSize: "10px", fontWeight: 400, color: "var(--dim)" }}>{dim.estados[h.est]}</span>}
+        </span>,
         `${dayLabel(h.day)} ${hh}:${mm}`,
         <span style={{ display: "block", fontSize: "10px", lineHeight: "1.1" }}>
           <b>{h.causa}</b>
@@ -965,7 +1017,7 @@ export default function DetailsPanel({
           </div>
         </div>
 
-        <div className="mini-grid" style={{ marginBottom: "14px" }}>
+        <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`} style={{ marginBottom: "14px" }}>
           <div className="mini">
             <span>Visitas</span>
             <b>{history.length}</b>
@@ -974,10 +1026,12 @@ export default function DetailsPanel({
             <span>Efectivas</span>
             <b className="ok">{history.filter(h => h.est === 0).length}</b>
           </div>
+{V.conFallidas !== false && (
           <div className="mini">
             <span>Fallidas</span>
             <b className="warn">{history.filter(h => h.est === 1).length}</b>
           </div>
+          )}
           <div className="mini">
             <span>Perdidas</span>
             <b className="bad">{history.filter(h => h.est === 2).length}</b>

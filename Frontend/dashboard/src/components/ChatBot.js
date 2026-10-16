@@ -370,8 +370,13 @@ function Pensando() {
  *   `vista` es una función —no un objeto— para leer los filtros en el momento de
  *   enviar: si fuera un valor, el envío usaría el de la última renderización.
  */
-export default function ChatBot({ onAccion, vista, onCargue, proceso = "scr" }) {
+export default function ChatBot({ onAccion, vista, onCargue, proceso = "scr", onToggle }) {
   const [open, setOpen] = useState(false);
+
+  // Avisa al tablero para que repliegue lo que flota debajo (el panel de capas).
+  useEffect(() => {
+    onToggle?.(open);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [closing, setClosing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [draft, setDraft] = useState("");

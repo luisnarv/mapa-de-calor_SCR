@@ -28,6 +28,9 @@ export default function FiltroPildora({
   const listaRef = React.useRef(null);
 
   const puesto = valor !== "" && valor != null;
+  // Con 0 o 1 valores posibles filtrar no cambia nada: la píldora se apaga (si ya hay un
+  // valor puesto sigue activa, para poder quitarlo).
+  const sinElegir = !puesto && opciones.length <= 1;
   const elegida = puesto ? opciones.find((o) => String(o.valor) === String(valor)) : null;
 
   const cerrar = React.useCallback((devolverFoco = true) => {
@@ -89,6 +92,14 @@ export default function FiltroPildora({
         className={`hd-pill ${puesto ? "on" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={abierto}
+        disabled={sinElegir}
+        title={
+          sinElegir
+            ? opciones.length
+              ? `Con los filtros actuales solo hay un valor: ${opciones[0].texto}`
+              : "Sin valores con los filtros actuales"
+            : undefined
+        }
         onClick={() => setAbierto((v) => !v)}
       >
         <span className="hd-pill-k">{etiqueta}</span>

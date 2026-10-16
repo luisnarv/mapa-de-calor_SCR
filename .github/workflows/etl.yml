@@ -64,11 +64,13 @@ jobs:
 
           cp Etl/salida/cobros/data.json Etl/salida/cobros/data_*.json \
              Etl/salida/cobros/direcciones.json \
+             Etl/salida/cobros/gestores.json \
              Frontend/dashboard/public/cobros/
 
           cp Etl/salida/cobros/data.json Etl/salida/cobros/data_*.json \
              Etl/salida/cobros/direcciones.json \
              Etl/salida/cobros/observaciones_*.json \
+             Etl/salida/cobros/gestores.json \
              Backend/app/data/cobros/
 
       - name: Commitear los datos (si cambiaron)

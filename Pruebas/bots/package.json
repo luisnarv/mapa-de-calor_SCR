@@ -1,0 +1,17 @@
+{
+  "name": "bots-mapa-cobros",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bots que validan cantidades de datos al aplicar filtros (individuales y combinados) en el tablero de cobros.",
+  "scripts": {
+    "bots": "node run_all.js",
+    "bots:rapido": "node run_all.js --rapido",
+    "bot1": "node run_all.js --bot 1",
+    "bot2": "node run_all.js --bot 2",
+    "bot3": "node run_all.js --bot 3"
+  },
+  "dependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

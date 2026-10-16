@@ -7,6 +7,7 @@ geometría cruza el 99,8%. Lógica idéntica al `Index.py` original.
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,77 @@ def _anillos(geom: dict[str, Any]) -> list:
         [[[round(p[1], 5), round(p[0], 5)] for p in anillo] for anillo in poli]
         for poli in polis
     ]
+
+
+def _sin_tildes(texto: str) -> str:
+    """'MANATÍ' -> 'MANATI': la base escribe los municipios sin tilde, los geojson con ella."""
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+
+
+def asignar_territorio(d: pd.DataFrame, path_barrios: Path, path_municipios: Path) -> pd.DataFrame:
+    """Corrige MUNICIPIO y barrio de cada gestión con lo que dice su GPS.
+
+    El nombre de barrio de la base no es confiable: puede traer un barrio de
+    Soledad pegado a un municipio que no es. Aquí manda el punto: si cae dentro
+    de un polígono de barrio, se toman su nombre y su municipio; si solo cae en un
+    municipio, se corrige el municipio y se deja el barrio de la base; si no cae
+    en nada, no se toca. El municipio de un polígono se saca del polígono de
+    municipio que contiene su punto interior, no de su propiedad `municipio`,
+    porque el geojson de barrios trae tildes dañadas ("SANTO TOM�S").
+
+    Requiere ``LATITUD``/``LONGITUD`` y un índice de posiciones 0..n-1.
+    """
+    gb, gm = _cargar_geojson(path_barrios), _cargar_geojson(path_municipios)
+    if gb is None or gm is None:
+        return d
+    try:
+        import shapely as _sh
+        from shapely.geometry import shape
+        from shapely.strtree import STRtree
+    except ImportError:
+        log.warning("Falta 'shapely'. Se dejan MUNICIPIO y barrio como vienen de la base.")
+        return d
+
+    formas_b = [shape(f["geometry"]) for f in gb["features"]]
+    formas_m = [shape(f["geometry"]) for f in gm["features"]]
+    nom_b = np.array([f["properties"].get("nombre", "") for f in gb["features"]], dtype=object)
+    nom_m = np.array([_sin_tildes(f["properties"].get("nombre", "")) for f in gm["features"]], dtype=object)
+    arbol_m = STRtree(formas_m)
+    arbol_b = STRtree(formas_b)
+
+    # Municipio de cada polígono de barrio (por su punto interior).
+    muni_de_b = np.array([_sin_tildes(f["properties"].get("municipio", "")) for f in gb["features"]], dtype=object)
+    interior = _sh.points(np.array([[g.representative_point().x, g.representative_point().y] for g in formas_b]))
+    ib, im = arbol_m.query(interior, predicate="within")
+    muni_de_b[ib] = nom_m[im]
+    # Los que quedan fuera de todo municipio (borde mal dibujado) toman el más cercano.
+    sin = np.setdiff1d(np.arange(len(formas_b)), ib)
+    if len(sin):
+        ib2, im2 = arbol_m.query_nearest(interior[sin])
+        muni_de_b[sin[ib2]] = nom_m[im2]
+
+    puntos = _sh.points(d["LONGITUD"].values, d["LATITUD"].values)
+    en_muni = np.full(len(d), -1)
+    pm = arbol_m.query(puntos, predicate="within")
+    en_muni[pm[0]] = pm[1]
+    en_barrio = np.full(len(d), -1)
+    pb = arbol_b.query(puntos, predicate="within")
+    en_barrio[pb[0]] = pb[1]
+
+    muni = d["MUNICIPIO"].to_numpy(dtype=object).copy()
+    barrio = d["LOCALIDAD/BARRIO"].to_numpy(dtype=object).copy()
+    ok = en_muni >= 0
+    muni[ok] = nom_m[en_muni[ok]]
+    ok = en_barrio >= 0
+    muni[ok] = muni_de_b[en_barrio[ok]]
+    barrio[ok] = nom_b[en_barrio[ok]]
+
+    cambian = int((muni != d["MUNICIPIO"].to_numpy(dtype=object)).sum())
+    log.info("Territorio por GPS: %s de %s gestiones con municipio corregido; "
+             "%s dentro de un barrio oficial.", f"{cambian:,}", f"{len(d):,}", f"{int(ok.sum()):,}")
+    d = d.copy()
+    d["MUNICIPIO"], d["LOCALIDAD/BARRIO"] = muni, barrio
+    return d
 
 
 def link_barrios(d: pd.DataFrame, path: Path) -> list[dict[str, Any]]:

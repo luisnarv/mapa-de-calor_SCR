@@ -139,7 +139,9 @@ export default function Topbar({
 
   const hayFiltros =
     st.zona !== "" || st.muni !== "" || st.brig !== "" || st.tipo !== "" ||
-    st.act !== "" || mesesPuestos || barrioSel;
+    st.act !== "" || st.gest !== "" || mesesPuestos || barrioSel ||
+    st.causaSel != null || !st.est.every(Boolean) || st.efOcultas.length > 0 || st.hotspot !== 60 ||
+    st.minOrders !== (esCobros ? 1 : 10);
 
   const edad = edadDeLosDatos(st.generated);
   const estadoRefresco =
@@ -164,9 +166,9 @@ export default function Topbar({
         </div>
 
         <div className="hd-ctx">
-          {dim.barrios.length.toLocaleString("es-CO")} barrios ·{" "}
-          {dim.tecs.length.toLocaleString("es-CO")} {esCobros ? "gestores" : "técnicos"} ·{" "}
-          {diaCorto(st.fechaMin)} – {diaCorto(st.fechaMax)}
+          {(st.contexto ? st.contexto.barrios : dim.barrios.length).toLocaleString("es-CO")} barrios ·{" "}
+          {(st.contexto ? st.contexto.gestores : dim.tecs.length).toLocaleString("es-CO")} {esCobros ? "gestores" : "técnicos"} ·{" "}
+          {diaCorto(st.contexto ? st.contexto.desde : st.fechaMin)} – {diaCorto(st.contexto ? st.contexto.hasta : st.fechaMax)}
         </div>
 
         {/* Los filtros van en esta misma fila: como píldoras ya no necesitan una
@@ -205,7 +207,16 @@ export default function Topbar({
               ? `Todas las gestiones (${avail.tipo.size})`
               : `Todos los tipos (${avail.tipo.size})`}
           />
-          {dim.acts && dim.acts.length > 0 && (
+          {dim.gests && dim.gests.length > 0 && (
+            <FiltroPildora
+              etiqueta="Resultado gestión"
+              valor={st.gest}
+              opciones={opcionesDe(dim.gests, avail.gest)}
+              onElegir={(v) => onFilterChange("gest", v)}
+              vacio={`Todos los resultados (${avail.gest.size})`}
+            />
+          )}
+          {!esCobros && dim.acts && dim.acts.length > 0 && (
             <FiltroPildora
               etiqueta="Actividad"
               valor={st.act}
