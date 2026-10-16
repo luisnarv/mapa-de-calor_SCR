@@ -21,7 +21,7 @@ export async function bot3({ bot, oraculo, rapido = false }) {
     { perdidas: false, ocultas: [tiposRecaudo[0]] },
     { perdidas: false, efectivas: false }, // nada marcado: todo debe quedar vacío
   ];
-  const extras = rapido ? [{}] : [{}, { zona: "ATLANTICO SUR" }, { plan: "Cobro Persuasivo", res: "Pago total" }];
+  const extras = rapido ? [{}] : [{}, { zona: "ATLANTICO SUR" }, { plan: "Cobro Persuasivo", res: "Realizó pago" }];
 
   for (const extra of extras) {
     for (const esc of escenarios) {

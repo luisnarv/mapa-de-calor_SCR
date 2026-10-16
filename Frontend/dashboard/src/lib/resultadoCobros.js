@@ -2,9 +2,9 @@
 // Los nombres viven aquí para no repetirlos en cada tabla; si la BD cambia una
 // etiqueta se corrige aquí y en `etl/etl/taxonomy.py`, que las produce.
 //
-// 1. Resultado gestión (`dim.gests`, `pts.x`; BD `estado_final`): el filtro de la barra
+// 1. Resultado gestión (`dim.gests`, `pts.x`; BD `resultado_reportado`): el filtro de la barra
 //    superior y lo que separa Efectiva de Perdida.
-export const PERDIDA = "Visita fallida";
+export const PERDIDA = "Contacto no efectivo";
 
 // 2. Recaudo (`dim.resultados`, `pts.rg`; BD `resultado_gestion`): el submenú de
 //    «Efectivas» y las columnas «con pago» / «sin recaudo».

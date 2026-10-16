@@ -194,6 +194,7 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
           la vista v_aire_cobros_nic_mes.
           {vista.provisionalActual && " (prov.) = el mes en curso aún no cierra: puede subir."}
           {vista.ignoraGestion && " El filtro «Gestión» no aplica a esta tabla (la vista no trae el tipo de gestión)."}
+          {vista.ignoraResultado && " El filtro «Resultado gestión» tampoco aplica a esta tabla (la vista no trae el resultado reportado)."}
           {ranking && (
             <>
               {" "}

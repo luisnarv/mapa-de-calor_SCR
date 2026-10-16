@@ -144,6 +144,20 @@ ESTADOS_GESTION: dict[str, str] = {
 }
 ESTADO_GESTION_PERDIDA: str = "VF"
 
+# `estado_final` solo lo sigue usando la tabla por gestor: la vista v_aire_cobros_nic_mes
+# no trae `resultado_reportado`. Lo que ve el filtro «Resultado gestión» del mapa es esto:
+# el resultado que reportó el gestor, sin tildes y en mayúsculas para comparar. «VF» es la
+# perdida (su resultado reportado es siempre «Contacto no efectivo»). Cualquier otro
+# resultado (PRE-ACUERDO, NO CONTESTA, BUZÓN...) queda fuera: son los valores que se definieron.
+RESULTADOS_REPORTADOS: dict[str, str] = {
+    "PAGO NO APLICADO": "Pago no aplicado",
+    "NO REALIZO ACUERDO DE PAGO": "No realizó acuerdo de pago",
+    "NO REALIZO PAGO FACTURA 1": "No realizó pago factura 1",
+    "REALIZO PAGO": "Realizó pago",
+    "REALIZO ACUERDO DE PAGO": "Realizó acuerdo de pago",
+    "VF": "Contacto no efectivo",
+}
+
 # 2. Recaudo de la gestión (`resultado_gestion`): el submenú de «Efectivas» en Capas
 #    y las columnas «con pago» de las tablas. «Efectiva sin validar» es un acuerdo de
 #    pago que aún no se valida contra los acuerdos materializados. «No efectiva» incluye

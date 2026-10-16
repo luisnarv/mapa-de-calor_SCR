@@ -104,7 +104,7 @@ QUERY_COBROS: str = """
       observaciones AS "OBSERVACION",
       observaciones AS "OBS_COMBINADA",
       REPLACE(punto_gps, '.-', ',-') AS "GPS",
-      estado_final AS "ESTADO_GESTION",
+      CASE WHEN estado_final = 'VF' THEN 'VF' ELSE resultado_reportado END AS "ESTADO_GESTION",
       resultado_gestion AS "RESULTADO_GESTION"
     FROM dbanalitica.historico_aire_cobros
 """

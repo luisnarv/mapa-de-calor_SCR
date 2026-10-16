@@ -107,8 +107,8 @@ export function cargarOraculo() {
   function esperadoGestores(f) {
     const G = gestores;
     const idx = (lista, v) => (v ? lista.findIndex((x) => sinTildes(x) === sinTildes(v)) : -1);
-    const iz = idx(G.zonas, f.zona), im = idx(G.municipios, f.muni), ip = idx(G.planes, f.plan), ie = idx(G.estados, f.res);
-    if ((f.zona && iz < 0) || (f.muni && im < 0) || (f.plan && ip < 0) || (f.res && ie < 0)) {
+    const iz = idx(G.zonas, f.zona), im = idx(G.municipios, f.muni), ip = idx(G.planes, f.plan), ie = -1; // la vista de gestores no trae el resultado reportado: el filtro no le aplica
+    if ((f.zona && iz < 0) || (f.muni && im < 0) || (f.plan && ip < 0)) {
       return { gestores: 0, efectivas: 0, conPago: 0, deuda: 0, recaudo: 0 };
     }
     const sel = new Set(mesesDe(f).map((m) => G.meses.indexOf(m.clave)));

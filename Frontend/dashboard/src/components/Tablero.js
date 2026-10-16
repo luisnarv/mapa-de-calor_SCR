@@ -502,7 +502,8 @@ export default function Tablero({ proceso }) {
       zona: st.zona === "" ? null : dim.zonas[+st.zona],
       muni: st.muni === "" ? null : dim.munis[+st.muni],
       plan: st.brig === "" ? null : dim.brigs[+st.brig],
-      estado: st.gest === "" ? null : dim.gests[+st.gest],
+      // El filtro usa el resultado reportado y la vista solo trae estado_final: no se cruzan.
+      estado: null,
     };
     // Las casillas de Capas también filtran esta tabla: «Visita fallida» es la perdida y los
     // tipos de recaudo ocultos solo aplican a las efectivas.
@@ -577,6 +578,7 @@ export default function Tablero({ proceso }) {
       hayAnterior: iAnt >= 0,
       provisionalActual: G.provisionales.includes(actual),
       ignoraGestion: st.tipo !== "",
+      ignoraResultado: st.gest !== "",
     };
   }, [V, data, gestoresDet, availableMonths, st.activeTab, st.months, st.zona, st.muni, st.brig, st.tipo, st.gest, st.est, st.efOcultas]);
 

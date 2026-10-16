@@ -949,7 +949,7 @@ export default function LeafletMap({
   const mapaVacio = !st.est.some(Boolean) && !dibujandoCargue;
 
   // Con alguna casilla marcada puede no quedar nada que dibujar: filtros que dejan
-  // cero gestiones del estado elegido (p. ej. «Visita fallida» con Perdidas oculto).
+  // cero gestiones del estado elegido (p. ej. «Contacto no efectivo» con Perdidas oculto).
   const sinResultados = React.useMemo(() => {
     if (!st.est.some(Boolean) || dibujandoCargue) return false;
     const I = A.IDX || [];
