@@ -5,10 +5,10 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_feedback_service
+from app.api.deps import _get_openai, get_feedback_service
 from app.main import app
 from app.schemas.chat import ChatRequest
-from app.services.openai_service import OpenAIServiceError, get_openai_service
+from app.services.openai_service import OpenAIServiceError
 
 PREGUNTA = {"messages": [{"role": "user", "content": "hola"}]}
 
@@ -65,7 +65,7 @@ def override(service, feedback: FakeFeedback | None = None) -> FakeFeedback:
     producción: el doble no es una comodidad, es lo que lo impide.
     """
     doble = feedback or FakeFeedback(uuid.uuid4())
-    app.dependency_overrides[get_openai_service] = lambda: service
+    app.dependency_overrides[_get_openai] = lambda: service
     app.dependency_overrides[get_feedback_service] = lambda: doble
     return doble
 

@@ -43,6 +43,8 @@ def _pts(filas: list[tuple[int, int, str]]) -> dict:
         # no las inventa a propósito —un cero por defecto etiquetaría todas
         # las órdenes con la primera subacción del catálogo—.
         "s": [0] * n, "f": [0] * n,
+        # Minutos desde fecha_min: `_cargar` los exige desde que el ETL los emite.
+        "m": [0] * n,
     }
 
 
