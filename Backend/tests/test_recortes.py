@@ -675,3 +675,35 @@ async def test_filtrar_mapa_con_el_de_en_mayusculas_no_tumba_el_chat(runner):
     salida, filtro = await runner.run("filtrar_mapa", {"barrio": "LOS ROBLES DE BARANOA"})
     assert "error" not in salida
     assert filtro.barrio == "BARANOA | LOS ROBLES"
+
+
+# --- Recomendar con las cifras del municipio como si fueran del barrio ----------
+
+@pytest.mark.asyncio
+async def test_al_ampliar_al_municipio_la_nota_dice_que_las_cifras_no_son_del_barrio(runner):
+    """Villa Sabita no da muestra y se sube a Galapa; el modelo escribía «para el
+    barrio Villa Sabita…» con las cifras del municipio. Avisarlo solo en `ampliado`
+    no bastó: la nota, que el modelo copia casi literal, tiene que decirlo."""
+    salida, _ = await runner.run(
+        "ranking", {"dimension": "tecnico", "barrio": "Villa Sabita", "mes": "2026-08"}
+    )
+    assert "ampliado" in salida
+    assert "TODO GALAPA" in salida["nota"] and "NO del barrio" in salida["nota"]
+
+
+# --- «¿Dónde NO hay…?» se contestaba con el top de los que más tienen -----------
+
+@pytest.mark.asyncio
+async def test_ordenar_perdidas_de_menos_a_mas_deja_primero_a_los_que_tienen_cero(runner):
+    """El modelo pidió peores=true (los que MÁS pierden) y concluyó «no hay ningún
+    barrio sin pérdidas». La llamada correcta es peores=false: salen primero los 0."""
+    de_menos, _ = await runner.run("ranking", {
+        "dimension": "barrio", "municipio": "Baranoa", "ordenar_por": "perdidas",
+        "peores": False, "min_ordenes": 1,
+    })
+    de_mas, _ = await runner.run("ranking", {
+        "dimension": "barrio", "municipio": "Baranoa", "ordenar_por": "perdidas",
+        "peores": True, "min_ordenes": 1,
+    })
+    assert de_menos["filas"][0]["pe"] == 0
+    assert de_mas["filas"][0]["pe"] > 0

@@ -493,3 +493,56 @@ def test_el_mismo_recorte_repetido_no_se_duplica():
 
     assert accion["municipio"] == "SOLEDAD"
     assert accion["meses"] == ["2026-08"]
+
+
+# Filtros compatibles: el ranking filtra por municipio y el modelo llama además a
+# filtrar_mapa con el barrio ganador. Eran dos recortes «distintos» y el mapa se
+# quedaba quieto aunque ambos hablaran de lo mismo: en una corrida de 113 preguntas
+# 12 de 16 llamadas a filtrar_mapa no movieron nada y 10 respuestas dijeron que sí.
+
+
+def test_el_ranking_por_municipio_y_el_barrio_ganador_se_funden_en_el_barrio():
+    accion = unificar(
+        {"municipio": "SOLEDAD", "meses": ["2026-10"]},
+        {"barrio": "SOLEDAD | RENACER", "municipio": "SOLEDAD"},
+    )
+
+    assert accion["barrio"] == "SOLEDAD | RENACER"
+    assert accion["municipio"] == "SOLEDAD"
+    assert accion["meses"] == ["2026-10"]
+
+
+def test_el_plan_del_ranking_se_conserva_al_fundirlo_con_el_barrio():
+    """«¿Qué multifamiliar de Barranquilla tiene peor efectividad?»: el mapa debe
+    mostrar el barrio y el plan, no solo uno de los dos."""
+    accion = unificar(
+        {"municipio": "BARRANQUILLA", "brigada": "Multifamiliar", "meses": ["2026-10"]},
+        {"barrio": "BARRANQUILLA | TAYRONA", "municipio": "BARRANQUILLA"},
+    )
+
+    assert accion["barrio"] == "BARRANQUILLA | TAYRONA"
+    assert accion["brigada"] == "Multifamiliar"
+
+
+def test_si_un_mismo_campo_dice_cosas_distintas_el_tablero_sigue_quieto():
+    assert unificar({"municipio": "SOLEDAD"}, {"municipio": "BARRANQUILLA"}) is None
+    assert unificar({"brigada": "Cobro Persuasivo"}, {"brigada": "Visita Personalizada"}) is None
+
+
+def test_un_barrio_de_otro_municipio_no_se_funde_con_el_municipio_pedido():
+    """Fundirlos daría un tablero vacío: el barrio no está en ese municipio."""
+    assert unificar({"municipio": "SOLEDAD"}, {"barrio": "BARRANQUILLA | OLAYA"}) is None
+
+
+def test_el_mismo_municipio_escrito_distinto_no_es_un_conflicto():
+    """El ranking filtra por «Barranquilla» (como lo escribió el modelo) y filtrar_mapa
+    devuelve «BARRANQUILLA» (el nombre oficial): son lo mismo. Pasaba con «Tubará»
+    y «TUBARA» también."""
+    accion = unificar(
+        {"municipio": "Barranquilla", "brigada": "Multifamiliar", "meses": ["2026-10"]},
+        {"barrio": "BARRANQUILLA | Tayrona", "municipio": "BARRANQUILLA"},
+    )
+    assert accion["barrio"] == "BARRANQUILLA | Tayrona" and accion["brigada"] == "Multifamiliar"
+
+    accion = unificar({"municipio": "Tubará"}, {"barrio": "TUBARA | CENTRO", "municipio": "TUBARA"})
+    assert accion["barrio"] == "TUBARA | CENTRO"

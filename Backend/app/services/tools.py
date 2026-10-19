@@ -211,7 +211,11 @@ TOOLS: list[dict[str, Any]] = [
                         "description": (
                             "true para los peores. Con efectividad son los de menor "
                             "valor; con perdidas o fallidas, los de mayor. Por "
-                            "defecto, los mejores."
+                            "defecto, los mejores. Para «¿dónde NO hay…?» (barrios sin "
+                            "pérdidas, sin fallidas) NO uses peores: ordena por ese "
+                            "criterio con peores en false, que deja primero a los que "
+                            "tienen cero, y mira cuántos son 0. La lista de los que "
+                            "más tienen no prueba que no exista alguno sin ellas."
                         ),
                     },
                     "min_ordenes": {
@@ -1118,6 +1122,12 @@ class ToolRunner:
         }
         if ampliado:
             salida["ampliado"] = ampliado
+            # Solo avisarlo en `ampliado` no bastaba: el modelo escribía «para el
+            # barrio Olaya, 9.967 gestiones» con las cifras de todo Barranquilla.
+            salida["nota"] += (
+                f" ESTAS CIFRAS SON DE TODO {municipio}, NO del barrio: dilo al empezar "
+                "la respuesta y no le atribuyas al barrio ni el total ni la efectividad de las filas."
+            )
         elif not filas:
             salida["nota"] = f"Sin resultados en {base} con el mínimo pedido."
         return salida, filtro

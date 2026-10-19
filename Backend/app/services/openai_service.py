@@ -23,6 +23,7 @@ from openai import (
 )
 
 from app.core.config import settings
+from app.core.taxonomy import norm_dato
 from app.schemas.chat import ChatRequest, VistaTablero
 from app.schemas.metrics import FiltroMapa
 from app.services.tools import TOOLS, tools_para_proceso, ToolRunner
@@ -62,21 +63,35 @@ def _unificar_filtros(filtros: list[FiltroMapa]) -> dict[str, Any] | None:
     primera: la respuesta hablaba de dos meses y el mapa enseñaba uno, sin que
     nada avisara. Es el mismo error de los bugs 5 y 6 entrando por otra puerta.
 
-    Cuando los recortes solo se diferencian en el periodo se unen, que es lo que
-    el usuario pidió ver. Cuando se diferencian en algo más —dos barrios
-    distintos— no hay un tablero que muestre las dos cosas a la vez, así que se
-    deja quieto: peor que no moverlo es moverlo a la mitad de la respuesta.
+    Los filtros se funden cuando no se contradicen: ninguna dimensión (barrio,
+    municipio, plan...) toma dos valores distintos. Los meses siempre se unen, que es
+    lo que el usuario pidió ver. Así el ranking por municipio y el barrio ganador que
+    el modelo marca después son un solo recorte (el barrio, dentro de ese municipio),
+    no dos «distintos»: antes el mapa se quedaba quieto aunque ambos hablaran de lo
+    mismo, y la respuesta decía «ya lo marqué». Cuando sí se contradicen —dos barrios
+    distintos— no hay un tablero que muestre las dos cosas a la vez, así que se deja
+    quieto: peor que no moverlo es moverlo a la mitad de la respuesta.
     """
     utiles = [f for f in filtros if f.model_dump(exclude_none=True)]
     if not utiles:
         return None
-    if len(utiles) > 1:
-        sin_meses = [f.model_dump(exclude={"meses"}) for f in utiles]
-        if any(otro != sin_meses[0] for otro in sin_meses[1:]):
-            return None
+
+    # Se comparan sin mayúsculas ni acentos: el ranking filtra por «Barranquilla», como
+    # lo escribió el modelo, y filtrar_mapa devuelve «BARRANQUILLA». Son lo mismo.
+    campos: dict[str, Any] = {}
+    for f in utiles:
+        for campo, valor in f.model_dump(exclude={"meses"}, exclude_none=True).items():
+            if norm_dato(campos.setdefault(campo, valor)) != norm_dato(valor):
+                return None
+
+    # Un barrio de otro municipio no se funde con el pedido: el tablero saldría vacío.
+    barrio, municipio = campos.get("barrio"), campos.get("municipio")
+    if barrio and municipio and norm_dato(barrio.partition(" | ")[0]) != norm_dato(municipio):
+        return None
 
     meses = sorted({m for f in utiles for m in (f.meses or [])})
-    return {"tipo": "filtrar_mapa", **utiles[0].model_dump(), "meses": meses or None}
+    vacio = {campo: None for campo in FiltroMapa.model_fields if campo != "meses"}
+    return {"tipo": "filtrar_mapa", **vacio, **campos, "meses": meses or None}
 
 
 class OpenAIServiceError(Exception):
