@@ -614,6 +614,13 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
         ("«cliente autoreconectado»", "«cambio de dirección»"),
         ("«sector peligroso»", "«zona de riesgo»"),
         ("«arbol frondoso»", "«cliente ausente»"),
+        # La ajustada no existe en cobros: el modelo no debe ni oír hablar de ella.
+        ("Da SIEMPRE las dos cifras, aunque solo te pidan «la efectividad»: ", ""),
+        ("y la ajustada, más", "más"),
+        ("`ef_pct` es «efectividad» y `ef_adj` «efectividad ajustada». ", ""),
+        ("efectividad ajustada", "efectividad"),
+        ("ef_adj_pond", "ef_pond"),
+        ("ef_adj", "ef_pct"),
     ]
 
     def _aplicar(texto: str) -> str:
@@ -630,6 +637,9 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
         params = fn.get("parameters", {}).get("properties", {})
         for param in params.values():
             param["description"] = _aplicar(param.get("description", ""))
+            if "enum" in param:
+                # dict.fromkeys quita los duplicados que deja el reemplazo (ef_adj → ef_pct).
+                param["enum"] = list(dict.fromkeys(_aplicar(v) for v in param["enum"]))
     return tools_cobros
 
 # Criterios donde un valor alto es malo, no bueno.
@@ -699,6 +709,19 @@ def etiqueta_periodo(meses: list[str] | None) -> str:
     return ", ".join(meses)
 
 
+# En cobros el mapa no muestra la efectividad ajustada; si el modelo la ve en el
+# resultado la termina diciendo. `noctrl` es solo su denominador.
+_CAMPOS_AJUSTADA = frozenset({"ef_adj", "ef_adj_pond", "efectividad_ajustada", "noctrl"})
+
+
+def _sin_ajustada(valor: Any) -> Any:
+    if isinstance(valor, dict):
+        return {k: _sin_ajustada(v) for k, v in valor.items() if k not in _CAMPOS_AJUSTADA}
+    if isinstance(valor, list):
+        return [_sin_ajustada(v) for v in valor]
+    return valor
+
+
 class ToolRunner:
     """Ejecuta las herramientas contra la base y acumula el filtro para el mapa."""
 
@@ -716,6 +739,11 @@ class ToolRunner:
         self.cargues = cargues
         self.cargue_id: str | None = None
         self.propension = propension
+
+    @property
+    def _es_cobros(self) -> bool:
+        # Las pruebas de cargue y propensión arman el runner sin métricas.
+        return self.metrics is not None and self.metrics.directorio.name == "cobros"
 
     def cargue_actual(self) -> CargueGuardado | None:
         """El archivo cargado en esta conversación, o None si no hay ninguno.
@@ -783,7 +811,8 @@ class ToolRunner:
         if nombre not in NOMBRES_DE_HERRAMIENTAS:
             return {"error": f"Herramienta desconocida: {nombre}"}, None
         try:
-            return await getattr(self, f"_{nombre}")(**args)
+            resultado, filtro = await getattr(self, f"_{nombre}")(**args)
+            return (_sin_ajustada(resultado) if self._es_cobros else resultado), filtro
         except BarrioNoEncontrado as exc:
             return {
                 "error": "barrio_no_encontrado",
@@ -948,6 +977,9 @@ class ToolRunner:
             "base": base,
             "metricas": datos.model_dump(),
             "nota": (
+                "Da la «efectividad». No escribas el nombre del campo. Di sobre "
+                "qué base está calculada."
+                if self._es_cobros else
                 # El modelo copia esta nota casi literal, así que aquí van ya los
                 # nombres que debe usar: escribir «ef_pct» le hacía soltar el
                 # nombre del campo en la respuesta.
@@ -1022,6 +1054,10 @@ class ToolRunner:
                 base = f"{municipio} · {mes or 'todo el histórico'}"
 
         nota = (
+            "OBLIGATORIO: para CADA entrada muestra la efectividad y el total de "
+            "gestiones. Esto aplica SIEMPRE, aunque la pregunta sea sobre "
+            "perdidas, fallidas o volumen."
+            if self._es_cobros else
             "OBLIGATORIO: para CADA entrada muestra las dos efectividades "
             "(ef_pct y ef_adj) y el total de órdenes. Esto aplica SIEMPRE, "
             "aunque la pregunta sea sobre perdidas, fallidas o volumen. "
@@ -1037,7 +1073,7 @@ class ToolRunner:
             "base": base,
             "dimension": dimension,
             "orden": "peor a mejor" if peores else "mejor a peor",
-            "criterio": ordenar_por,
+            "criterio": ordenar_por.replace("ef_adj", "ef_pct") if self._es_cobros else ordenar_por,
             "min_ordenes": min_ordenes,
             "filas": [f.model_dump() for f in filas],
             "nota": nota,

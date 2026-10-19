@@ -318,7 +318,9 @@ def _cargar(directorio: Path) -> Payload:
         subs=dim["subs"],
         tarifas=dim["tarifas"],
         acts=dim.get("acts", []),
-        causa_ctrl=dim["causa_ctrl"],
+        # En cobros el mapa no descuenta ninguna causa (`V.sinAjuste` en Tablero.js);
+        # sin esto el chat calcularía una «ajustada» que la pantalla no muestra.
+        causa_ctrl=[1] * len(dim["causa_ctrl"]) if directorio.name == "cobros" else dim["causa_ctrl"],
         causa_fam=dim["causa_fam"],
         b_muni=dim["b_muni"],
         b_zona=dim["b_zona"],
