@@ -106,6 +106,8 @@ def asignar_territorio(d: pd.DataFrame, path_barrios: Path, path_municipios: Pat
              "%s dentro de un barrio oficial.", f"{cambian:,}", f"{len(d):,}", f"{int(ok.sum()):,}")
     d = d.copy()
     d["MUNICIPIO"], d["LOCALIDAD/BARRIO"] = muni, barrio
+    # Marca qué nombres vienen de un polígono: `unificar_barrios` los prefiere.
+    d["_BARRIO_POLIGONO"] = ok
     return d
 
 

@@ -19,6 +19,7 @@ from .config import LAT0, LON0, MESES_ES, Settings
 from .direcciones import construir as construir_direcciones
 from .geo import asignar_territorio, link_barrios, load_municipios, load_zonas
 from .logging_conf import get_logger
+from .text import norm_dato
 from .taxonomy import ESTADOS_GESTION, RESULTADOS_GESTION
 
 log = get_logger()
@@ -70,6 +71,34 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
     }
 
 
+def unificar_barrios(d: pd.DataFrame) -> pd.Series:
+    """Una sola escritura por barrio dentro de cada municipio.
+
+    En cobros las gestiones dentro de un polígono toman su nombre («El Bosque») y las
+    que quedan fuera conservan el crudo de la base («EL BOSQUE»); sin unificar, el
+    catálogo parte un mismo barrio en dos y el chat y el mapa eligen la variante
+    equivocada. Se compara por texto normalizado y gana la escritura del polígono
+    (las gestiones sin columna `_BARRIO_POLIGONO`, como SCR, cuentan como crudas) o,
+    si no hay, la más frecuente. Los nombres que normalizan a vacío («-», «.») no
+    se tocan: fundir barrios distintos sin nombre real sería inventar un dato.
+    """
+    cuenta = (d.assign(_p=d["_BARRIO_POLIGONO"] if "_BARRIO_POLIGONO" in d else False)
+              .groupby(["MUNICIPIO", "LOCALIDAD/BARRIO", "_p"]).size()
+              .reset_index(name="n"))
+    cuenta["norm"] = cuenta["LOCALIDAD/BARRIO"].map(norm_dato)
+    cuenta = cuenta[cuenta["norm"] != ""]
+    # Ordena para que el primero de cada grupo sea el ganador: polígono, más
+    # frecuente y, a igualdad, el nombre menor (resultado determinista).
+    ganador = (cuenta.sort_values(["_p", "n", "LOCALIDAD/BARRIO"],
+                                  ascending=[False, False, True])
+               .drop_duplicates(["MUNICIPIO", "norm"])
+               .set_index(["MUNICIPIO", "norm"])["LOCALIDAD/BARRIO"])
+    claves = pd.MultiIndex.from_arrays(
+        [d["MUNICIPIO"], d["LOCALIDAD/BARRIO"].map(norm_dato)])
+    elegido = pd.Series(ganador.reindex(claves).to_numpy(), index=d.index)
+    return elegido.fillna(d["LOCALIDAD/BARRIO"])
+
+
 def _prepare(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     """Filtra a filas con Estado + GPS + fecha válidos y arma BKEY.
 
@@ -96,6 +125,7 @@ def _prepare(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
                 "SUBACCION/SUBANOMALIA", "TARIFA", "CAUSA", "FAMILIA_CAUSA",
                 "ACTIVIDAD"):
         d[col] = d[col].fillna("SIN DATO")
+    d["LOCALIDAD/BARRIO"] = unificar_barrios(d)
     d["BKEY"] = d["MUNICIPIO"] + " | " + d["LOCALIDAD/BARRIO"]
     return d
 

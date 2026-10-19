@@ -39,8 +39,9 @@ def _repartir(proceso: str, salida: Path) -> None:
 
     for archivo in salida.glob("*.json"):
         shutil.copy2(archivo, be / archivo.name)
-        # El frontend no necesita observaciones ni direcciones de NIC.
-        if not archivo.name.startswith("observaciones_"):
+        # El frontend no necesita observaciones ni el recaudo por barrio (solo lo lee el
+        # chat); el workflow del ETL tampoco los copia, y así los dos caminos coinciden.
+        if not archivo.name.startswith(("observaciones_", "recaudo_barrio")):
             shutil.copy2(archivo, fe / archivo.name)
 
     logger.info("Datos de %s copiados a %s y %s", proceso.upper(), be, fe)
