@@ -100,12 +100,16 @@ def _prepare(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     return d
 
 
-def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
+def build_and_write(
+    df: pd.DataFrame, settings: Settings, recaudo: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     """Construye y escribe el payload JSON completo.
 
     Args:
         df: DataFrame enriquecido (salida de `transform.enrich`).
         settings: rutas y opciones de la corrida.
+        recaudo: solo COBROS, el recaudo por cuenta y mes; se reparte por barrio con el
+            mismo `d` del mapa, que es donde se asigna el barrio por GPS.
 
     Returns:
         Resumen ``{"total_all": int, "meses": {...}}`` para logging/verificación.
@@ -241,6 +245,9 @@ def build_and_write(df: pd.DataFrame, settings: Settings) -> dict[str, Any]:
     _escribir(dir_path, indice)
     log.info("JSON direcciones -> %s (%.2f MB)", dir_path.name, dir_path.stat().st_size / 1e6)
 
+    if recaudo is not None:
+        escribir_recaudo_barrio(recaudo, d, settings)
+
     return {"total_all": int(len(d)), "meses": resumen_meses}
 
 
@@ -280,6 +287,42 @@ def escribir_gestores(df: pd.DataFrame, settings: Settings) -> None:
     })
     log.info("JSON gestores -> %s (%s gestores, %s meses, %s filas)",
              path.name, len(listas["gestor"]), len(listas["periodo_mes"]), f"{len(filas):,}")
+
+
+def escribir_recaudo_barrio(recaudo: pd.DataFrame, d: pd.DataFrame, settings: Settings) -> None:
+    """Vuelca el recaudo y el saldo por barrio (solo COBROS) en `recaudo_barrio.json`.
+
+    `recaudo` trae una fila por cuenta y mes (de `v_aire_cobros_nic_mes`) y `d` es el
+    df del mapa, con el barrio ya asignado por GPS. Cada cuenta toma el barrio de su
+    gestión más reciente del mes, el mismo que ve el tablero. Las que no tienen gestión
+    con GPS en el mapa quedan en «SIN BARRIO» de su municipio: así el total sigue siendo
+    el de `gestores.json`. Solo lo lee el chat. Cada fila es
+    ``[mes, municipio, barrio, cuentas, saldo, recaudo_en_pesos]``; los meses en
+    `provisionales` todavía pueden cambiar.
+    """
+    ultima = d[["NIC", "dt", "BKEY"]].assign(periodo_mes=d["dt"].dt.strftime("%Y-%m"))
+    ultima = (ultima.sort_values("dt").drop_duplicates(["NIC", "periodo_mes"], keep="last")
+              [["NIC", "periodo_mes", "BKEY"]])
+    r = recaudo.assign(cuenta=recaudo["cuenta"].astype(str).str.strip()).merge(
+        ultima, how="left", left_on=["cuenta", "periodo_mes"], right_on=["NIC", "periodo_mes"])
+    sin_gps = r["BKEY"].isna()
+    r.loc[sin_gps, "BKEY"] = r.loc[sin_gps, "municipio"].fillna("SIN MUNICIPIO") + " | SIN BARRIO"
+    r[["municipio", "barrio"]] = r["BKEY"].str.split(" | ", n=1, expand=True, regex=False)
+
+    grupos = (r.groupby(["periodo_mes", "municipio", "barrio"], as_index=False)
+              .agg(cuentas=("cuenta", "size"), saldo=("saldo", "sum"), recaudo=("recaudo", "sum"),
+                   provisional=("provisional", "any")))
+    filas = [
+        [str(g.periodo_mes), str(g.municipio), str(g.barrio), int(g.cuentas),
+         round(float(g.saldo), 2), round(float(g.recaudo), 2)]
+        for g in grupos.itertuples(index=False)
+    ]
+    provisionales = sorted(grupos.loc[grupos["provisional"].astype(bool), "periodo_mes"].astype(str).unique().tolist())
+    settings.public_dir.mkdir(parents=True, exist_ok=True)
+    path = settings.public_dir / "recaudo_barrio.json"
+    _escribir(path, {"provisionales": provisionales, "filas": filas})
+    log.info("JSON recaudo_barrio -> %s (%s filas; %s de %s cuentas sin gestión con GPS)",
+             path.name, f"{len(filas):,}", f"{int(sin_gps.sum()):,}", f"{len(r):,}")
 
 
 def _escribir_observaciones(grp: pd.DataFrame, ym: str, destino: Path) -> None:

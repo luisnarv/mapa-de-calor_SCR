@@ -71,6 +71,7 @@ jobs:
              Etl/salida/cobros/direcciones.json \
              Etl/salida/cobros/observaciones_*.json \
              Etl/salida/cobros/gestores.json \
+             Etl/salida/cobros/recaudo_barrio.json \
              Backend/app/data/cobros/
 
       - name: Commitear los datos (si cambiaron)

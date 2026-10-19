@@ -135,6 +135,25 @@ QUERY_GESTORES: str = """
     ORDER BY periodo_mes, gestor
 """
 
+# Recaudo y saldo por cuenta y mes (solo COBROS), de la vista ya sin duplicados. No se
+# agrupa aquí: el barrio lo pone `escribir_recaudo_barrio` con el que el mapa le asignó
+# por GPS a la gestión de la cuenta, porque el `barrio` de la tabla de origen no
+# coincide con el del mapa (el chat nombraba barrios que el mapa mostraba vacíos). Mismo
+# universo que `QUERY_GESTORES` para que los totales de los dos archivos coincidan.
+QUERY_RECAUDO_BARRIO: str = """
+    SELECT
+      periodo_mes,
+      cuenta::text AS cuenta,
+      municipio,
+      COALESCE(saldo, 0) AS saldo,
+      COALESCE(recaudo_sin_irr, 0) AS recaudo,
+      calculo_provisional AS provisional
+    FROM dbanalitica.v_aire_cobros_nic_mes
+    WHERE anio = (SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes)
+      AND gestor IS NOT NULL
+      AND resultado_gestion IS NOT NULL
+"""
+
 # Columnas que deben tratarse como texto (evita el ".0" que pandas pega a floats).
 COLS_TEXTO: tuple[str, ...] = ("ORDEN", "NIC", "ID TECNICO")
 

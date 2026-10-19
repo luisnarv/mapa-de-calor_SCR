@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .config import QUERY_COBROS, QUERY_GESTORES, QUERY_HISTORICO, Settings
+from .config import QUERY_COBROS, QUERY_GESTORES, QUERY_HISTORICO, QUERY_RECAUDO_BARRIO, Settings
 from .database import Database
 from .logging_conf import get_logger
 from .payload import build_and_write, escribir_gestores
@@ -39,6 +39,7 @@ def run(settings: Settings) -> dict[str, Any]:
         df_crudo = db.fetch_ordenes(query)
         estado_map = db.fetch_estado_map() if settings.proceso == "scr" else None
         gestores = db.fetch_ordenes(QUERY_GESTORES) if settings.proceso == "cobros" else None
+        recaudo_barrio = db.fetch_ordenes(QUERY_RECAUDO_BARRIO) if settings.proceso == "cobros" else None
 
     df = enrich(df_crudo, estado_map, proceso=settings.proceso)
 
@@ -47,7 +48,7 @@ def run(settings: Settings) -> dict[str, Any]:
         df.to_csv(settings.csv_path, index=False, encoding="utf-8-sig")
         log.info("CSV consolidado -> %s (%s filas)", settings.csv_path.name, f"{len(df):,}")
 
-    resumen = build_and_write(df, settings)
+    resumen = build_and_write(df, settings, recaudo_barrio)
     if gestores is not None:
         escribir_gestores(gestores, settings)
 
