@@ -8,6 +8,7 @@ redacte la respuesta. Además de datos, una herramienta puede devolver una
 
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 from typing import Any, Sequence
@@ -677,12 +678,21 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
         fn = tool["function"]
         fn["description"] = _aplicar(fn.get("description", ""))
         params = fn.get("parameters", {}).get("properties", {})
-        for param in params.values():
+        for clave, param in params.items():
             param["description"] = _aplicar(param.get("description", ""))
+            if clave == "dimension":
+                param["description"] += (
+                    " Los planes (Cobro Persuasivo, Multifamiliar, Visita Personalizada) "
+                    "son la dimensión 'brigada'."
+                )
             if "enum" in param:
-                # dict.fromkeys quita los duplicados que deja el reemplazo (ef_adj → ef_pct).
-                param["enum"] = list(dict.fromkeys(_aplicar(v) for v in param["enum"]))
+                # Solo se renombran las opciones de la ajustada. Pasarlas por `_aplicar`
+                # convertía 'brigada' en 'plan' y el backend rechazaba la dimensión.
+                param["enum"] = list(dict.fromkeys(_ENUM_COBROS.get(v, v) for v in param["enum"]))
     return [*tools_cobros, TOOL_RECAUDO]
+
+# En cobros no existe la ajustada: sus opciones de orden se leen como las de la cruda.
+_ENUM_COBROS = {"ef_adj": "ef_pct", "ef_adj_pond": "ef_pond"}
 
 # Criterios donde un valor alto es malo, no bueno.
 MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas"})
@@ -786,6 +796,29 @@ class ToolRunner:
     def _es_cobros(self) -> bool:
         # Las pruebas de cargue y propensión arman el runner sin métricas.
         return self.metrics is not None and self.metrics.directorio.name == "cobros"
+
+    def _avisos(self, *, meses: list[str] | None, actividad: str | None, vacio: bool = False) -> str:
+        """Lo que el modelo tiene que decir aunque nadie se lo pregunte: copia estas notas
+        casi literal, así que cada caso que se le escapó se escribe aquí."""
+        avisos = []
+        if vacio:
+            # «0% sobre ninguna gestión» no significa nada: no hay efectividad que calcular.
+            avisos.append("Hay 0 gestiones en este recorte: no existe una efectividad que "
+                          "calcular. NO digas «0%»; di que no hay gestiones.")
+        fecha_max = self.metrics.datos.fecha_max
+        if meses and fecha_max:
+            ultimo = fecha_max[:7]
+            dias = calendar.monthrange(int(ultimo[:4]), int(ultimo[5:7]))[1]
+            if ultimo in meses and int(fecha_max[8:10]) < dias:
+                avisos.append(f"{ultimo} está incompleto: los datos llegan solo hasta {fecha_max}. "
+                              "No lo compares con un mes completo como si fuera uno entero; avísalo.")
+        if actividad:
+            datos = self.metrics.datos
+            i = self.metrics._indice_parcial(datos.acts, actividad)
+            if i is not None and norm_dato(datos.acts[i]) != norm_dato(actividad):
+                avisos.append(f"«{actividad}» no existe: el catálogo solo tiene «{datos.acts[i]}» y la "
+                              "cifra es de esa. Dilo, no la presentes como la que pidió.")
+        return "".join(f" OJO: {a}" for a in avisos)
 
     def cargue_actual(self) -> CargueGuardado | None:
         """El archivo cargado en esta conversación, o None si no hay ninguno.
@@ -1031,6 +1064,7 @@ class ToolRunner:
                 "qué base están calculadas."
             ),
         }
+        salida["nota"] += self._avisos(meses=meses, actividad=actividad, vacio=datos.tot == 0)
         if bkeys and len(bkeys) > 1:
             # Una sola pasada agrupada, no una consulta por barrio.
             detalle = await self.metrics.ranking(
@@ -1120,6 +1154,7 @@ class ToolRunner:
             "filas": [f.model_dump() for f in filas],
             "nota": nota,
         }
+        salida["nota"] += self._avisos(meses=meses, actividad=actividad)
         if ampliado:
             salida["ampliado"] = ampliado
             # Solo avisarlo en `ampliado` no bastaba: el modelo escribía «para el

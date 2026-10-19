@@ -707,3 +707,57 @@ async def test_ordenar_perdidas_de_menos_a_mas_deja_primero_a_los_que_tienen_cer
     })
     assert de_menos["filas"][0]["pe"] == 0
     assert de_mas["filas"][0]["pe"] > 0
+
+
+# --- Seis respuestas que salieron mal en la prueba de 113 preguntas -------------
+
+def test_las_opciones_de_dimension_de_cobros_son_las_que_el_backend_acepta():
+    """Pasar las opciones por los reemplazos de texto convirtió 'brigada' en 'plan':
+    el modelo ofrecía una dimensión que el backend rechazaba y respondía «en COBROS
+    no existe la dimensión plan» a «¿qué rinde más, Cobro Persuasivo o Visita
+    Personalizada?»."""
+    from app.services.tools import tools_para_proceso
+
+    ranking = next(t for t in tools_para_proceso("cobros") if t["function"]["name"] == "ranking")
+    opciones = ranking["function"]["parameters"]["properties"]["dimension"]["enum"]
+
+    assert "brigada" in opciones and "plan" not in opciones
+
+
+@pytest.mark.asyncio
+async def test_cada_dimension_que_cobros_publica_la_acepta_el_ranking(runner):
+    from app.services.tools import tools_para_proceso
+
+    ranking = next(t for t in tools_para_proceso("cobros") if t["function"]["name"] == "ranking")
+    for dimension in ranking["function"]["parameters"]["properties"]["dimension"]["enum"]:
+        salida, _ = await runner.run("ranking", {"dimension": dimension, "municipio": "Soledad"})
+        assert not str(salida.get("error", "")).startswith("Argumentos inválidos"), dimension
+
+
+def test_cero_gestiones_se_avisa_como_cero_gestiones_y_no_como_0_por_ciento(runner):
+    """«Los Olivos: 0% sobre ninguna gestión» no significa nada."""
+    assert "NO digas «0%»" in runner._avisos(meses=None, actividad=None, vacio=True)
+    assert "NO digas «0%»" not in runner._avisos(meses=None, actividad=None, vacio=False)
+
+
+@pytest.mark.asyncio
+async def test_el_mes_en_curso_se_avisa_como_incompleto(runner):
+    """El recorte llega hasta el 15 de octubre: compararlo con septiembre entero como si
+    fueran iguales dio un «mejoró» por una décima."""
+    octubre, _ = await runner.run("efectividad", {"barrio": "Villa Sabita", "mes": "2026-10"})
+    septiembre, _ = await runner.run("efectividad", {"barrio": "Villa Sabita", "mes": "2026-09"})
+
+    assert "2026-10 está incompleto" in octubre["nota"] and "2026-10-15" in octubre["nota"]
+    assert "incompleto" not in septiembre["nota"]
+
+
+@pytest.mark.asyncio
+async def test_un_nombre_aproximado_de_actividad_avisa_cual_se_uso(runner):
+    """«Cobro Persuasivo Residencial» se resolvía a «Cobro Persuasivo» y la respuesta lo
+    presentaba como la actividad pedida."""
+    salida, _ = await runner.run("efectividad", {"actividad": "Brigada Canasta Residencial"})
+
+    assert "«Brigada Canasta Residencial» no existe" in salida["nota"]
+    assert "«Brigada Canasta»" in salida["nota"]
+    exacta, _ = await runner.run("efectividad", {"actividad": "Brigada Canasta"})
+    assert "no existe:" not in exacta["nota"]

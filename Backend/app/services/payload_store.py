@@ -70,6 +70,7 @@ class Payload:
 
     m: array  # minutos desde fecha_min
     fecha_min: str  # YYYY-MM-DD
+    fecha_max: str  # YYYY-MM-DD, el último día con gestiones
 
     generado: str
 
@@ -327,6 +328,7 @@ def _cargar(directorio: Path) -> Payload:
         meses=meses,
         inicio_mes=inicio_mes,
         fecha_min=meta.get("fecha_min", ""),
+        fecha_max=meta.get("fecha_max", ""),
         generado=meta.get("generated", ""),
         **columnas,
     )
