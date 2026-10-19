@@ -1,14 +1,20 @@
-"""Recaudo y saldo por barrio y municipio (solo COBROS).
+"""Recaudo y saldo por barrio, municipio, gestor, zona y plan (solo COBROS).
 
-Lee `recaudo_barrio.json`, que genera el ETL desde `v_aire_cobros_nic_mes`: una fila
-`[mes, municipio, barrio, cuentas, saldo, recaudo]` por barrio y mes. Va aparte del
-payload del mapa porque el tablero no lo usa y las gestiones no traen montos: contar
-gestiones efectivas no responde «dónde se recaudó más», que es plata.
+Dos archivos del ETL, los dos desde `v_aire_cobros_nic_mes` y con el mismo universo de
+cuentas, así que los totales coinciden:
+
+* `recaudo_barrio.json`: una fila `[mes, municipio, barrio, cuentas, saldo, recaudo]`.
+* `gestores.json`: la tabla por gestor del tablero, agrupada por mes, gestor, zona,
+  municipio, plan y resultado de la gestión. No trae barrio: gestor y barrio no se cruzan.
+
+Van aparte del payload del mapa porque las gestiones no traen montos: contar gestiones
+efectivas no responde «dónde se recaudó más», que es plata.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -17,6 +23,7 @@ from app.core.taxonomy import norm_dato
 from app.services.metrics_service import FiltroNoResuelto
 
 NOMBRE_ARCHIVO = "recaudo_barrio.json"
+NOMBRE_GESTORES = "gestores.json"
 Criterio = Literal["recaudo", "saldo", "cuentas"]
 
 
@@ -44,23 +51,44 @@ class Tabla:
         return sorted({f.mes for f in self.filas})
 
 
-# El archivo pesa ~400 KB y lo regenera el ETL a diario: se relee solo si cambió.
-_cache: dict[Path, tuple[float, Tabla]] = {}
+@dataclass(frozen=True)
+class TablaGestores:
+    """`gestores.json`: las filas llevan índices a los catálogos del mismo nombre."""
+
+    gestores: list[str]
+    meses: list[str]
+    zonas: list[str]
+    municipios: list[str]
+    planes: list[str]
+    filas: tuple[tuple, ...]
+    provisionales: frozenset[str]
 
 
-def cargar(directorio: Path) -> Tabla:
-    ruta = directorio / NOMBRE_ARCHIVO
+# Los archivos los regenera el ETL a diario: se releen solo si cambiaron.
+_cache: dict[Path, tuple[float, Tabla | TablaGestores]] = {}
+
+
+def _leer(ruta: Path, construir):
     try:
         firma = ruta.stat().st_mtime
         if ruta not in _cache or _cache[ruta][0] != firma:
-            crudo = json.loads(ruta.read_text(encoding="utf-8"))
-            filas = tuple(FilaRecaudo(*f) for f in crudo["filas"])
-            _cache[ruta] = (firma, Tabla(filas, frozenset(crudo["provisionales"])))
+            _cache[ruta] = (firma, construir(json.loads(ruta.read_text(encoding="utf-8"))))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise RecaudoNoDisponible(
             f"No se pudo leer {ruta}: {exc}. Corre el ETL de cobros para generarlo."
         ) from exc
     return _cache[ruta][1]
+
+
+def cargar(directorio: Path) -> Tabla:
+    return _leer(directorio / NOMBRE_ARCHIVO, lambda c: Tabla(
+        tuple(FilaRecaudo(*f) for f in c["filas"]), frozenset(c["provisionales"])))
+
+
+def cargar_gestores(directorio: Path) -> TablaGestores:
+    return _leer(directorio / NOMBRE_GESTORES, lambda c: TablaGestores(
+        c["gestores"], c["meses"], c["zonas"], c["municipios"], c["planes"],
+        tuple(tuple(f) for f in c["filas"]), frozenset(c["provisionales"])))
 
 
 def _resolver_municipio(tabla: Tabla, texto: str) -> str:
@@ -150,4 +178,74 @@ def consultar(
         },
         "grupos_en_total": len(grupos),
         "filas": resultado,
+    }
+
+
+# La cédula pegada al nombre («ANA PEREZ - 111») no le sirve a nadie y el tablero tampoco
+# la muestra en cobros.
+_CEDULA = re.compile(r"\s*-\s*\d+\s*$")
+
+
+def _resolver(catalogo: list[str], texto: str, campo: str) -> int:
+    coinciden = [i for i, nombre in enumerate(catalogo) if norm_dato(nombre) == norm_dato(texto)]
+    if len(coinciden) != 1:
+        raise FiltroNoResuelto(campo, texto, catalogo)
+    return coinciden[0]
+
+
+def consultar_gestores(
+    tabla: TablaGestores,
+    *,
+    agrupar_por: Literal["gestor", "zona", "plan"],
+    meses: list[str] | None = None,
+    municipio: str | None = None,
+    zona: str | None = None,
+    plan: str | None = None,
+    ordenar_por: Criterio = "recaudo",
+    peores: bool = False,
+    limite: int = 10,
+) -> dict:
+    """Suma recaudo y saldo por gestor, zona o plan, en los meses pedidos.
+
+    Raises:
+        FiltroNoResuelto: si el municipio, la zona o el plan no existen. No se devuelve
+            el total sin filtrar: la cifra sería de otro recorte.
+    """
+    en_meses = {tabla.meses.index(m) for m in meses if m in tabla.meses} if meses else None
+    i_muni = _resolver(tabla.municipios, municipio, "municipio") if municipio else None
+    i_zona = _resolver(tabla.zonas, zona, "zona") if zona else None
+    i_plan = _resolver(tabla.planes, plan, "plan") if plan else None
+
+    posicion = {"gestor": 0, "zona": 2, "plan": 4}[agrupar_por]
+    grupos: dict[int, list[float]] = {}
+    usados: set[int] = set()
+    for f in tabla.filas:
+        if ((en_meses is not None and f[1] not in en_meses) or (i_muni is not None and f[3] != i_muni)
+                or (i_zona is not None and f[2] != i_zona) or (i_plan is not None and f[4] != i_plan)):
+            continue
+        usados.add(f[1])
+        acumulado = grupos.setdefault(f[posicion], [0, 0.0, 0.0])
+        acumulado[0] += f[7]
+        acumulado[1] += f[8]
+        acumulado[2] += f[9]
+
+    catalogo = {"gestor": tabla.gestores, "zona": tabla.zonas, "plan": tabla.planes}[agrupar_por]
+    indice = {"cuentas": 0, "saldo": 1, "recaudo": 2}[ordenar_por]
+    ordenados = sorted(grupos.items(), key=lambda kv: kv[1][indice], reverse=not peores)
+    meses_usados = sorted(tabla.meses[i] for i in usados)
+    return {
+        "agrupado_por": agrupar_por,
+        "meses": meses_usados,
+        "provisional": sorted(set(meses_usados) & tabla.provisionales),
+        # Sin `cuentas`, por la misma razón que en `consultar`.
+        "total_del_recorte": {
+            "saldo": round(sum(v[1] for v in grupos.values()), 2),
+            "recaudo": round(sum(v[2] for v in grupos.values()), 2),
+        },
+        "grupos_en_total": len(grupos),
+        "filas": [
+            {"nombre": _CEDULA.sub("", catalogo[i]), "cuentas": int(v[0]),
+             "saldo": round(v[1], 2), "recaudo": round(v[2], 2)}
+            for i, v in ordenados[:limite]
+        ],
     }

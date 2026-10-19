@@ -21,12 +21,31 @@ FILAS = [
 ]
 
 
+# gestores.json: [gestor, mes, zona, municipio, plan, estado, resultado, cuentas, saldo, recaudo]
+GESTORES = {
+    "gestores": ["ANA PEREZ - 111", "LUIS RUIZ - 222"],
+    "meses": ["2026-08", "2026-09", "2026-10"],
+    "zonas": ["ATLANTICO NORTE", "ATLANTICO SUR"],
+    "municipios": ["BARRANQUILLA", "SOLEDAD"],
+    "planes": ["Cobro Persuasivo", "Multifamiliar"],
+    "estados": ["Pago total"], "resultados": ["Efectiva con pago"],
+    "provisionales": ["2026-10"],
+    "filas": [
+        [0, 0, 0, 0, 0, 0, 0, 10, 1000.0, 100.0],
+        [0, 1, 0, 0, 0, 0, 0, 10, 1000.0, 300.0],
+        [1, 1, 1, 1, 1, 0, 0, 5, 800.0, 500.0],
+        [1, 2, 1, 1, 1, 0, 0, 7, 900.0, 900.0],
+    ],
+}
+
+
 @pytest.fixture
 def carpeta(tmp_path: Path) -> Path:
     destino = tmp_path / "cobros"
     destino.mkdir()
     (destino / recaudo_barrio.NOMBRE_ARCHIVO).write_text(
         json.dumps({"provisionales": ["2026-10"], "filas": FILAS}), encoding="utf-8")
+    (destino / recaudo_barrio.NOMBRE_GESTORES).write_text(json.dumps(GESTORES), encoding="utf-8")
     return destino
 
 
@@ -150,3 +169,85 @@ async def test_en_scr_la_herramienta_no_existe(tmp_path):
     assert salida["error"] == "recaudo_solo_cobros"
     assert "recaudo" not in [t["function"]["name"] for t in tools_para_proceso("scr")]
     assert "recaudo" in [t["function"]["name"] for t in tools_para_proceso("cobros")]
+
+
+# --- Recaudo por gestor, zona y plan (sale de gestores.json) --------------------
+
+@pytest.fixture
+def tabla_gestores(carpeta: Path) -> recaudo_barrio.TablaGestores:
+    return recaudo_barrio.cargar_gestores(carpeta)
+
+
+def test_el_gestor_con_mas_recaudo_y_sin_la_cedula_pegada(tabla_gestores):
+    r = recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="gestor")
+
+    assert [f["nombre"] for f in r["filas"]] == ["LUIS RUIZ", "ANA PEREZ"]
+    assert r["filas"][0]["recaudo"] == 1400.0
+    assert r["total_del_recorte"]["recaudo"] == 1800.0
+
+
+def test_el_filtro_de_mes_cambia_quien_gana_y_marca_el_provisional(tabla_gestores):
+    septiembre = recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="gestor", meses=["2026-09"])
+    octubre = recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="gestor", meses=["2026-10"])
+
+    assert septiembre["filas"][0]["nombre"] == "LUIS RUIZ" and septiembre["filas"][0]["recaudo"] == 500.0
+    assert septiembre["provisional"] == [] and octubre["provisional"] == ["2026-10"]
+
+
+def test_por_zona_y_por_plan_suman_lo_mismo_que_por_gestor(tabla_gestores):
+    por_zona = recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="zona")
+    por_plan = recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="plan")
+
+    assert por_zona["filas"][0]["nombre"] == "ATLANTICO SUR"
+    assert por_plan["filas"][0]["nombre"] == "Multifamiliar"
+    assert por_zona["total_del_recorte"] == por_plan["total_del_recorte"]
+
+
+def test_los_filtros_de_municipio_y_plan_recortan_los_gestores(tabla_gestores):
+    solo_barranquilla = recaudo_barrio.consultar_gestores(
+        tabla_gestores, agrupar_por="gestor", municipio="Barranquilla")
+    solo_multifamiliar = recaudo_barrio.consultar_gestores(
+        tabla_gestores, agrupar_por="gestor", plan="multifamiliar")
+
+    assert [f["nombre"] for f in solo_barranquilla["filas"]] == ["ANA PEREZ"]
+    assert [f["nombre"] for f in solo_multifamiliar["filas"]] == ["LUIS RUIZ"]
+
+
+def test_un_plan_o_zona_inventados_no_devuelven_el_total_sin_filtrar(tabla_gestores):
+    with pytest.raises(FiltroNoResuelto):
+        recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="gestor", plan="Residencial")
+    with pytest.raises(FiltroNoResuelto):
+        recaudo_barrio.consultar_gestores(tabla_gestores, agrupar_por="gestor", zona="Atlántico")
+
+
+@pytest.mark.asyncio
+async def test_la_herramienta_responde_el_gestor_que_mas_recaudo_en_septiembre(carpeta):
+    salida, filtro = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "mes": "2026-09"})
+
+    assert salida["filas"][0]["nombre"] == "LUIS RUIZ"
+    assert salida["base"] == "todo el Atlántico · 2026-09"
+    assert filtro is None, "el mapa no tiene filtro de gestor: no se mueve"
+
+
+@pytest.mark.asyncio
+async def test_por_zona_o_plan_el_mapa_se_mueve_a_la_primera_fila(carpeta):
+    _, por_zona = await runner(carpeta).run("recaudo", {"agrupar_por": "zona", "mes": "2026-09"})
+    _, por_plan = await runner(carpeta).run("recaudo", {"agrupar_por": "plan", "mes": "2026-09"})
+
+    assert por_zona.zona == "ATLANTICO SUR" and por_zona.meses == ["2026-09"]
+    assert por_plan.brigada == "Multifamiliar"
+
+
+@pytest.mark.asyncio
+async def test_pedir_gestor_con_un_barrio_avisa_que_no_se_cruzan(carpeta):
+    """gestores.json llega hasta zona, municipio y plan: darle un barrio sería inventarlo."""
+    salida, _ = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "barrio": "Centro"})
+
+    assert salida["error"] == "recaudo_gestor_no_cruza_barrio"
+
+
+@pytest.mark.asyncio
+async def test_un_plan_inventado_vuelve_como_filtro_no_reconocido(carpeta):
+    salida, _ = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "plan": "Residencial"})
+
+    assert salida["error"] == "filtro_no_reconocido" and salida["campo"] == "plan"

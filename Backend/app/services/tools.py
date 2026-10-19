@@ -586,18 +586,23 @@ TOOL_RECAUDO: dict[str, Any] = {
     "function": {
         "name": "recaudo",
         "description": (
-            "Plata recaudada y deuda (saldo) por barrio o por municipio. Úsala cuando "
-            "pregunten por «recaudo», «cuánto se recaudó», «dónde se recauda más», "
-            "«deuda» o «saldo»: esas son cifras en pesos, no gestiones efectivas, y "
-            "`ranking` no las tiene. No cubre gestor, zona ni plan: si lo piden, dilo. "
-            "Los meses en `provisional` todavía pueden cambiar; avísalo."
+            "Plata recaudada y deuda (saldo) por barrio, municipio, gestor, zona o plan. "
+            "Úsala cuando pregunten por «recaudo», «cuánto se recaudó», «dónde se recauda "
+            "más», «qué gestor recaudó más», «deuda» o «saldo»: esas son cifras en pesos, no "
+            "gestiones efectivas, y `ranking` no las tiene. Gestor, zona y plan no se cruzan "
+            "con barrio: si piden las dos cosas, dilo. Los meses en `provisional` todavía "
+            "pueden cambiar; avísalo."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "agrupar_por": {
-                    "type": "string", "enum": ["barrio", "municipio"],
-                    "description": "Por defecto 'barrio'. 'municipio' suma todos sus barrios.",
+                    "type": "string", "enum": ["barrio", "municipio", "gestor", "zona", "plan"],
+                    "description": (
+                        "Por defecto 'barrio'. 'municipio' suma todos sus barrios. 'gestor', "
+                        "'zona' y 'plan' (Cobro Persuasivo, Multifamiliar, Visita Personalizada) "
+                        "no admiten `barrio`."
+                    ),
                 },
                 "mes": _MES,
                 "municipio": _MUNICIPIO,
@@ -608,6 +613,14 @@ TOOL_RECAUDO: dict[str, Any] = {
                 "ordenar_por": {
                     "type": "string", "enum": ["recaudo", "saldo", "cuentas"],
                     "description": "Por defecto 'recaudo'.",
+                },
+                "zona": {
+                    "type": "string",
+                    "description": "Zona (p. ej. ATLANTICO NORTE). Solo con agrupar_por gestor, zona o plan.",
+                },
+                "plan": {
+                    "type": "string",
+                    "description": "Plan de gestión (Cobro Persuasivo, Multifamiliar, Visita Personalizada). Solo con agrupar_por gestor, zona o plan.",
                 },
                 "peores": {"type": "boolean", "description": "true para los de menor valor en vez de los mayores."},
                 "limite": {"type": "integer", "description": "Cuántas filas devolver. Por defecto 10, máximo 50."},
@@ -1303,6 +1316,8 @@ class ToolRunner:
         mes: Any = None,
         municipio: str | None = None,
         barrio: str | None = None,
+        zona: str | None = None,
+        plan: str | None = None,
         ordenar_por: str = "recaudo",
         peores: bool = False,
         limite: int = 10,
@@ -1310,8 +1325,20 @@ class ToolRunner:
         if not self._es_cobros:
             return {"error": "recaudo_solo_cobros",
                     "sugerencia": "El recaudo por barrio solo existe en COBROS."}, None
+        # gestores.json llega hasta zona, municipio y plan: darle un barrio o un filtro que
+        # no tiene sería inventarlo, así que se avisa en vez de responder con otro recorte.
+        por_gestor = agrupar_por in ("gestor", "zona", "plan")
+        if por_gestor and barrio:
+            return {"error": "recaudo_gestor_no_cruza_barrio", "sugerencia": (
+                "El recaudo por gestor, zona o plan no se cruza con el barrio. Dilo, y ofrece "
+                "el recaudo por barrio o el de gestores por separado.")}, None
+        if not por_gestor and (zona or plan):
+            return {"error": "recaudo_filtro_sin_agrupar", "sugerencia": (
+                "Los filtros zona y plan solo funcionan con agrupar_por gestor, zona o plan. "
+                "Repite con agrupar_por='gestor'.")}, None
         try:
-            tabla = recaudo_barrio.cargar(self.metrics.directorio)
+            tabla = (recaudo_barrio.cargar_gestores if por_gestor else recaudo_barrio.cargar)(
+                self.metrics.directorio)
         except recaudo_barrio.RecaudoNoDisponible as exc:
             return {"error": "recaudo_no_disponible", "detalle": str(exc),
                     "sugerencia": "Dilo tal cual: el dato de recaudo no está cargado; no es que sea 0."}, None
@@ -1321,22 +1348,29 @@ class ToolRunner:
             # Igual que `_recorte`: sin periodo pedido se hereda el de la pantalla.
             meses = sorted(m for m in self.vista.meses if m in tabla.meses) or None
 
-        salida = recaudo_barrio.consultar(
-            tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio,
-            barrio=barrio, ordenar_por=ordenar_por, peores=peores,
-            limite=max(1, min(int(limite), 50)),
-        )
+        limite = max(1, min(int(limite), 50))
+        if por_gestor:
+            salida = recaudo_barrio.consultar_gestores(
+                tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio, zona=zona,
+                plan=plan, ordenar_por=ordenar_por, peores=peores, limite=limite)
+        else:
+            salida = recaudo_barrio.consultar(
+                tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio,
+                barrio=barrio, ordenar_por=ordenar_por, peores=peores, limite=limite)
+        donde = municipio or zona or "todo el Atlántico"
         salida["base"] = " · ".join(
-            p for p in (municipio or "todo el Atlántico", etiqueta_periodo(meses)) if p
-        )
+            p for p in (donde, f"plan {plan}" if plan else None, etiqueta_periodo(meses)) if p)
+        filtro = self._filtro_recaudo(salida, tabla.meses, meses)
         salida["nota"] = (
             "Cifras en pesos: `recaudo` es lo recaudado y `saldo` la deuda de esas cuentas. "
-            "`total_del_recorte` suma TODAS las filas del periodo y municipio pedidos: no es el "
-            "total de un barrio, no lo presentes como tal. Di sobre qué base están calculadas. "
-            "Esta herramienta ya mueve el mapa a la primera fila: NO llames a `filtrar_mapa` "
-            "después (resuelve el barrio a otra variante del nombre y el mapa no se mueve)."
+            "`total_del_recorte` suma TODAS las filas del recorte pedido: no es el total de una "
+            "fila, no lo presentes como tal. Di sobre qué base están calculadas."
+            + (" Esta herramienta ya mueve el mapa a la primera fila: NO llames a `filtrar_mapa` "
+               "después (resuelve el barrio a otra variante del nombre y el mapa no se mueve)."
+               if filtro else
+               " El mapa no tiene filtro de gestor, así que no se mueve: no digas que lo marcaste.")
         )
-        return salida, self._filtro_recaudo(salida, tabla.meses, meses)
+        return salida, filtro
 
     def _filtro_recaudo(
         self, salida: dict[str, Any], disponibles: list[str], meses: list[str] | None,
@@ -1350,7 +1384,14 @@ class ToolRunner:
         if not salida["filas"]:
             return None
         primera = salida["filas"][0]
-        if salida["agrupado_por"] == "municipio":
+        agrupado = salida["agrupado_por"]
+        if agrupado == "gestor":
+            return None  # el tablero no filtra por gestor
+        if agrupado == "zona":
+            filtro = FiltroMapa(zona=primera["nombre"])
+        elif agrupado == "plan":
+            filtro = FiltroMapa(brigada=primera["nombre"])
+        elif agrupado == "municipio":
             filtro = FiltroMapa(municipio=primera["nombre"])
         else:
             clave = f"{primera['municipio']} | {primera['nombre']}"
