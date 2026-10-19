@@ -9,6 +9,7 @@ redacte la respuesta. Además de datos, una herramienta puede devolver una
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Sequence
 
 from app.schemas.chat import VistaTablero
@@ -17,6 +18,7 @@ from app.core.taxonomy import norm_dato
 from app.services.carga_ordenes import Orden
 from app.services.cargue_store import CargueGuardado, CargueStore
 from app.services.propension_service import PropensionServiceError
+from app.services import recaudo_barrio
 from app.services.metrics_service import (
     FiltroNoResuelto,
     BarrioAmbiguo,
@@ -573,7 +575,43 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
-NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in TOOLS)
+# Solo se publica en COBROS (ver `tools_para_proceso`): el SCR no tiene montos.
+TOOL_RECAUDO: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "recaudo",
+        "description": (
+            "Plata recaudada y deuda (saldo) por barrio o por municipio. Úsala cuando "
+            "pregunten por «recaudo», «cuánto se recaudó», «dónde se recauda más», "
+            "«deuda» o «saldo»: esas son cifras en pesos, no gestiones efectivas, y "
+            "`ranking` no las tiene. No cubre gestor, zona ni plan: si lo piden, dilo. "
+            "Los meses en `provisional` todavía pueden cambiar; avísalo."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agrupar_por": {
+                    "type": "string", "enum": ["barrio", "municipio"],
+                    "description": "Por defecto 'barrio'. 'municipio' suma todos sus barrios.",
+                },
+                "mes": _MES,
+                "municipio": _MUNICIPIO,
+                "barrio": {
+                    "type": "string",
+                    "description": "Nombre del barrio, completo o parcial, SIN el municipio (ese va en `municipio`). Si hay homónimos en varios municipios se devuelven todos.",
+                },
+                "ordenar_por": {
+                    "type": "string", "enum": ["recaudo", "saldo", "cuentas"],
+                    "description": "Por defecto 'recaudo'.",
+                },
+                "peores": {"type": "boolean", "description": "true para los de menor valor en vez de los mayores."},
+                "limite": {"type": "integer", "description": "Cuántas filas devolver. Por defecto 10, máximo 50."},
+            },
+        },
+    },
+}
+
+NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in [*TOOLS, TOOL_RECAUDO])
 
 
 def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
@@ -640,7 +678,7 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
             if "enum" in param:
                 # dict.fromkeys quita los duplicados que deja el reemplazo (ef_adj → ef_pct).
                 param["enum"] = list(dict.fromkeys(_aplicar(v) for v in param["enum"]))
-    return tools_cobros
+    return [*tools_cobros, TOOL_RECAUDO]
 
 # Criterios donde un valor alto es malo, no bueno.
 MAYOR_ES_PEOR = frozenset({"perdidas", "pct_perdidas", "fallidas", "pct_fallidas"})
@@ -1214,6 +1252,70 @@ class ToolRunner:
             )
         return salida, None
 
+    async def _recaudo(
+        self,
+        agrupar_por: str = "barrio",
+        mes: Any = None,
+        municipio: str | None = None,
+        barrio: str | None = None,
+        ordenar_por: str = "recaudo",
+        peores: bool = False,
+        limite: int = 10,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        if not self._es_cobros:
+            return {"error": "recaudo_solo_cobros",
+                    "sugerencia": "El recaudo por barrio solo existe en COBROS."}, None
+        try:
+            tabla = recaudo_barrio.cargar(self.metrics.directorio)
+        except recaudo_barrio.RecaudoNoDisponible as exc:
+            return {"error": "recaudo_no_disponible", "detalle": str(exc),
+                    "sugerencia": "Dilo tal cual: el dato de recaudo no está cargado; no es que sea 0."}, None
+
+        meses = expandir_meses(mes, tabla.meses)
+        if meses is None and self.vista:
+            # Igual que `_recorte`: sin periodo pedido se hereda el de la pantalla.
+            meses = sorted(m for m in self.vista.meses if m in tabla.meses) or None
+
+        salida = recaudo_barrio.consultar(
+            tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio,
+            barrio=barrio, ordenar_por=ordenar_por, peores=peores,
+            limite=max(1, min(int(limite), 50)),
+        )
+        salida["base"] = " · ".join(
+            p for p in (municipio or "todo el Atlántico", etiqueta_periodo(meses)) if p
+        )
+        salida["nota"] = (
+            "Cifras en pesos: `recaudo` es lo recaudado y `saldo` la deuda de esas cuentas. "
+            "`total_del_recorte` suma TODAS las filas del periodo y municipio pedidos: no es el "
+            "total de un barrio, no lo presentes como tal. Di sobre qué base están calculadas. "
+            "Esta herramienta ya mueve el mapa a la primera fila: NO llames a `filtrar_mapa` "
+            "después (resuelve el barrio a otra variante del nombre y el mapa no se mueve)."
+        )
+        return salida, self._filtro_recaudo(salida, tabla.meses, meses)
+
+    def _filtro_recaudo(
+        self, salida: dict[str, Any], disponibles: list[str], meses: list[str] | None,
+    ) -> FiltroMapa | None:
+        """Lleva el mapa a lo que respondió: la primera fila, que es la que se nombra.
+
+        Antes la herramienta no devolvía filtro y el mapa solo se movía si el modelo
+        se acordaba de llamar `filtrar_mapa`. El barrio solo se marca si existe en el
+        mapa («SIN BARRIO» no existe): una clave inventada lo dejaría vacío.
+        """
+        if not salida["filas"]:
+            return None
+        primera = salida["filas"][0]
+        if salida["agrupado_por"] == "municipio":
+            filtro = FiltroMapa(municipio=primera["nombre"])
+        else:
+            clave = f"{primera['municipio']} | {primera['nombre']}"
+            if clave not in set(self.metrics.datos.barrios):
+                return None
+            filtro = FiltroMapa(barrio=clave)
+        # Sin meses explícitos el tablero se quedaría en el que tuviera puesto.
+        filtro.meses = meses or sorted(disponibles)
+        return filtro
+
     async def _meses_disponibles(self) -> tuple[dict[str, Any], None]:
         return {"meses": await self.metrics.meses_disponibles()}, None
 
@@ -1221,9 +1323,11 @@ class ToolRunner:
         barrio = kwargs.get("barrio")
         if barrio:
             municipio = kwargs.get("municipio")
-            if not municipio and " de " in barrio.lower():
-                partes = barrio.rsplit(" de ", 1)
-                barrio, municipio = partes[0].strip(), partes[1].strip()
+            # Sin distinguir mayúsculas: «LOS ROBLES DE BARANOA» entraba al `if`
+            # y luego no se podía cortar, y el IndexError tumbaba el chat entero.
+            partido = None if municipio else re.match(r"(.+)\s+de\s+(.+)$", barrio, re.IGNORECASE)
+            if partido:
+                barrio, municipio = partido[1].strip(), partido[2].strip()
             grupo = await self._grupo(barrio, municipio)
             kwargs["barrio"] = grupo[0].bkey
             if not kwargs.get("municipio"):

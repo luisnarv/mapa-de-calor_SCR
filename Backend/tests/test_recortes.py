@@ -663,3 +663,15 @@ async def test_causas_no_efectivas_filtra_por_subaccion(runner):
     assert len(salida["causas"]) == 1
     assert salida["causas"][0]["causa"] == "Imposibilidad tecnica"
     assert salida["causas"][0]["pct"] == 100.0
+
+
+# --- filtrar_mapa se caía con «DE» en mayúsculas --------------------------------
+
+@pytest.mark.asyncio
+async def test_filtrar_mapa_con_el_de_en_mayusculas_no_tumba_el_chat(runner):
+    """«LOS ROBLES DE BARANOA»: el código detectaba « de » sin importar las
+    mayúsculas pero lo cortaba distinguiéndolas, y el IndexError salía como «Error
+    inesperado» al usuario. Pasó con una pregunta real sobre la tasa de financiación."""
+    salida, filtro = await runner.run("filtrar_mapa", {"barrio": "LOS ROBLES DE BARANOA"})
+    assert "error" not in salida
+    assert filtro.barrio == "BARANOA | LOS ROBLES"
