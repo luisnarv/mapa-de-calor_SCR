@@ -147,4 +147,7 @@ class FiltroMapa(BaseModel):
     brigada: str | None = None
     actividad: str | None = None
     tipo_os: str | None = None
+    puntos_gps: bool | None = Field(
+        default=None, description="Enciende la capa de puntos GPS: una gestión por punto."
+    )
     meses: list[str] | None = Field(default=None, description="Claves YYYY-MM")

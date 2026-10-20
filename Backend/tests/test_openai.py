@@ -476,8 +476,16 @@ def test_una_sola_llamada_filtra_como_siempre():
     assert accion == {
         "tipo": "filtrar_mapa", "barrio": None, "barrios": None, "tecnicos": None, "municipio": "SOLEDAD",
         "zona": None, "brigada": None, "actividad": None,
-        "tipo_os": None, "meses": ["2026-08"],
+        "tipo_os": None, "puntos_gps": None, "meses": ["2026-08"],
     }
+
+
+def test_pedir_los_puntos_gps_se_funde_con_el_filtro_del_gestor():
+    """Listar las visitas de un gestor enciende la capa de puntos y deja al gestor marcado."""
+    accion = unificar({"tecnicos": ["ANA PEREZ - 111"], "puntos_gps": True, "meses": ["2026-09"]},
+                      {"tecnicos": ["ANA PEREZ - 111"]})
+
+    assert accion["puntos_gps"] is True and accion["tecnicos"] == ["ANA PEREZ - 111"]
 
 
 def test_un_filtro_vacio_no_mueve_el_tablero():

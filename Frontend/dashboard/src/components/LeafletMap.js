@@ -639,6 +639,9 @@ export default function LeafletMap({
       const pts = [];
       const I = A.IDX || [];
       const selSet = st.barrios?.length ? new Set(st.barrios) : null;
+      // Con gestores (técnicos) elegidos, sus puntos y nada más: el catálogo de técnicos va
+      // por orden, así que se compara el índice de cada visita.
+      const selTec = st.tecs?.length ? new Set(st.tecs) : null;
 
       for (let j = 0; j < I.length; j++) {
         const i = I[j];
@@ -646,6 +649,7 @@ export default function LeafletMap({
         if (!vis[e]) continue;
         if (st.causaPasa && !st.causaPasa(i)) continue;
         if (selSet && !selSet.has(st.B_raw[i])) continue;
+        if (selTec && !selTec.has(st.T_raw[i])) continue;
         if (st.layers.heat) {
           const lt = st.lat(i);
           const ln = st.lon(i);
@@ -760,7 +764,7 @@ export default function LeafletMap({
     } else {
       if (map.hasLayer(ptLayerRef.current)) map.removeLayer(ptLayerRef.current);
     }
-  }, [A, st.layers, st.est, st.causaSel, st.efOcultas, st.hotspot, st.barrios, theme]);
+  }, [A, st.layers, st.est, st.causaSel, st.efOcultas, st.hotspot, st.barrios, st.tecs, theme]);
 
   // 2 bis. Órdenes POR EJECUTAR del archivo cargado en el chat.
   //

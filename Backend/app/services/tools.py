@@ -1526,7 +1526,8 @@ class ToolRunner:
         limite = max(1, min(int(limite), 100))
         datos = self.metrics.visitas_tecnico(
             indices or [], bkeys=bkeys, municipio=municipio, meses=meses, estado=estado, limite=limite)
-        filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres})
+        # Listar visitas pide verlas: se enciende la capa de puntos GPS.
+        filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres, "puntos_gps": True})
         nota = (
             f"Son {datos['total']} en total y se muestran {len(datos['filas'])}: di el total y que la "
             "lista es parcial si hay más. `por_estado` es de TODAS, no solo de las mostradas. "
