@@ -79,19 +79,34 @@ def _unificar_filtros(filtros: list[FiltroMapa]) -> dict[str, Any] | None:
     # Se comparan sin mayúsculas ni acentos: el ranking filtra por «Barranquilla», como
     # lo escribió el modelo, y filtrar_mapa devuelve «BARRANQUILLA». Son lo mismo.
     campos: dict[str, Any] = {}
+    listas: dict[str, list[str]] = {}
     for f in utiles:
         for campo, valor in f.model_dump(exclude={"meses"}, exclude_none=True).items():
-            if norm_dato(campos.setdefault(campo, valor)) != norm_dato(valor):
+            if campo in ("barrios", "tecnicos"):
+                previa = listas.get(campo)
+                if previa is not None and {norm_dato(b) for b in previa} != {norm_dato(b) for b in valor}:
+                    return None
+                listas[campo] = valor
+            elif norm_dato(campos.setdefault(campo, valor)) != norm_dato(valor):
                 return None
+    barrios = listas.get("barrios")
+
+    # Un barrio suelto dentro de la lista pedida es lo mismo; fuera de ella, un conflicto.
+    if barrios is not None and "barrio" in campos:
+        if norm_dato(campos["barrio"]) not in {norm_dato(b) for b in barrios}:
+            return None
+        del campos["barrio"]
 
     # Un barrio de otro municipio no se funde con el pedido: el tablero saldría vacío.
-    barrio, municipio = campos.get("barrio"), campos.get("municipio")
-    if barrio and municipio and norm_dato(barrio.partition(" | ")[0]) != norm_dato(municipio):
-        return None
+    municipio = campos.get("municipio")
+    for barrio in ([campos["barrio"]] if "barrio" in campos else []) + (barrios or []):
+        if municipio and norm_dato(barrio.partition(" | ")[0]) != norm_dato(municipio):
+            return None
 
     meses = sorted({m for f in utiles for m in (f.meses or [])})
     vacio = {campo: None for campo in FiltroMapa.model_fields if campo != "meses"}
-    return {"tipo": "filtrar_mapa", **vacio, **campos, "meses": meses or None}
+    return {"tipo": "filtrar_mapa", **vacio, **campos, "barrios": barrios,
+            "tecnicos": listas.get("tecnicos"), "meses": meses or None}
 
 
 class OpenAIServiceError(Exception):

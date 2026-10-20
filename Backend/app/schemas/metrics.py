@@ -136,6 +136,12 @@ class FiltroMapa(BaseModel):
     """
 
     barrio: str | None = Field(default=None, description="BKEY 'MUNICIPIO | BARRIO'")
+    barrios: list[str] | None = Field(
+        default=None, description="Varios barrios a la vez, cada uno como BKEY 'MUNICIPIO | BARRIO'."
+    )
+    tecnicos: list[str] | None = Field(
+        default=None, description="Técnicos (gestores en COBROS) elegidos, tal como están en el catálogo."
+    )
     municipio: str | None = None
     zona: str | None = None
     brigada: str | None = None

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import recaudo_barrio
-from app.services.metrics_service import FiltroNoResuelto
+from app.services.metrics_service import FiltroNoResuelto, MetricsService
 from app.services.tools import PeriodoVacio, ToolRunner, tools_para_proceso
 
 # [mes, municipio, barrio, cuentas, saldo, recaudo]
@@ -113,8 +113,18 @@ BARRIOS_DEL_MAPA = ["BARRANQUILLA | CENTRO", "BARRANQUILLA | EL TABOR",
                     "SOLEDAD | CENTRO", "PUERTO COLOMBIA | SABANILLA"]
 
 
+# Catálogo de gestores del tablero: trae la cédula pegada, el recaudo no.
+GESTORES_DEL_MAPA = ["ANA PEREZ - 111", "LUIS RUIZ - 222"]
+
+
 def runner(carpeta: Path, barrios: list[str] = BARRIOS_DEL_MAPA) -> ToolRunner:
-    return ToolRunner(SimpleNamespace(directorio=carpeta, datos=SimpleNamespace(barrios=barrios)))
+    datos = SimpleNamespace(barrios=barrios, tecs=GESTORES_DEL_MAPA)
+    # `indices_tecnico` solo lee `datos.tecs`: se usa la real en vez de reescribirla.
+    metrics = SimpleNamespace(
+        directorio=carpeta, datos=datos,
+        indices_tecnico=lambda pedido: MetricsService.indices_tecnico(SimpleNamespace(datos=datos), pedido),
+    )
+    return ToolRunner(metrics)
 
 
 @pytest.mark.asyncio
@@ -226,7 +236,8 @@ async def test_la_herramienta_responde_el_gestor_que_mas_recaudo_en_septiembre(c
 
     assert salida["filas"][0]["nombre"] == "LUIS RUIZ"
     assert salida["base"] == "todo el Atlántico · 2026-09"
-    assert filtro is None, "el mapa no tiene filtro de gestor: no se mueve"
+    # El mapa deja marcado al gestor con el nombre del catálogo (con la cédula).
+    assert filtro.tecnicos == ["LUIS RUIZ - 222"] and filtro.meses == ["2026-09"]
 
 
 @pytest.mark.asyncio
@@ -251,3 +262,10 @@ async def test_un_plan_inventado_vuelve_como_filtro_no_reconocido(carpeta):
     salida, _ = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "plan": "Residencial"})
 
     assert salida["error"] == "filtro_no_reconocido" and salida["campo"] == "plan"
+
+
+def test_el_recaudo_de_varios_barrios_se_suma(tabla):
+    r = recaudo_barrio.consultar(tabla, barrio=["El Tabor", "Sabanilla"])
+
+    assert r["total_del_recorte"]["recaudo"] == 500.0 + 900.0
+    assert {f["nombre"] for f in r["filas"]} == {"EL TABOR", "SABANILLA"}

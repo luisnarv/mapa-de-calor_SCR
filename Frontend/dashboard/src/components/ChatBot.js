@@ -152,8 +152,22 @@ function horaDe(marca) {
 
 /** Convierte el filtro del backend en una línea legible. Null si no filtra nada. */
 function resumirFiltro(accion) {
+  // Varios barrios: sus nombres si caben en el chip, y si no, cuántos son.
+  const barrios = accion.barrios?.length
+    ? accion.barrios.length <= 3
+      ? accion.barrios.map((k) => k.split(" | ").pop()).join(", ")
+      : `${accion.barrios.length} barrios`
+    : null;
+  // Técnicos (gestores): sus nombres sin la cédula si caben, y si no, cuántos son.
+  const tecnicos = accion.tecnicos?.length
+    ? accion.tecnicos.length <= 2
+      ? accion.tecnicos.map((n) => n.replace(/\s*-\s*\d+\s*$/, "")).join(", ")
+      : `${accion.tecnicos.length} técnicos`
+    : null;
   const partes = [
     accion.barrio,
+    barrios,
+    tecnicos,
     accion.municipio,
     accion.zona,
     accion.brigada,

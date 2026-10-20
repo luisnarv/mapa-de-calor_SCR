@@ -129,7 +129,7 @@ def consultar(
     agrupar_por: Literal["barrio", "municipio"] = "barrio",
     meses: list[str] | None = None,
     municipio: str | None = None,
-    barrio: str | None = None,
+    barrio: str | list[str] | None = None,
     ordenar_por: Criterio = "recaudo",
     peores: bool = False,
     limite: int = 10,
@@ -145,7 +145,8 @@ def consultar(
         municipio = _resolver_municipio(tabla, municipio)
         filas = [f for f in filas if f.municipio == municipio]
     if barrio:
-        pares = _resolver_barrio(tabla, barrio, municipio)
+        nombres = [barrio] if isinstance(barrio, str) else barrio
+        pares = set().union(*(_resolver_barrio(tabla, n, municipio) for n in nombres))
         filas = [f for f in filas if (f.municipio, f.barrio) in pares]
 
     grupos: dict[tuple[str, ...], list[float]] = {}

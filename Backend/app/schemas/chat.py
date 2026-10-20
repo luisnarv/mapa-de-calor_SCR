@@ -23,6 +23,12 @@ class VistaTablero(BaseModel):
     """
 
     barrio: str | None = Field(default=None, description="BKEY 'MUNICIPIO | BARRIO'")
+    barrios: list[str] = Field(
+        default_factory=list, description="Barrios filtrados a la vez, como BKEY 'MUNICIPIO | BARRIO'."
+    )
+    tecnicos: list[str] = Field(
+        default_factory=list, description="Técnicos (gestores en COBROS) elegidos en el tablero."
+    )
     municipio: str | None = None
     zona: str | None = None
     brigada: str | None = None
@@ -35,6 +41,8 @@ class VistaTablero(BaseModel):
             (etiqueta, valor)
             for etiqueta, valor in (
                 ("barrio", self.barrio),
+                ("barrios", "; ".join(self.barrios) if self.barrios else None),
+                ("técnicos", "; ".join(self.tecnicos) if self.tecnicos else None),
                 ("municipio", self.municipio),
                 ("zona", self.zona),
                 ("brigada", self.brigada),

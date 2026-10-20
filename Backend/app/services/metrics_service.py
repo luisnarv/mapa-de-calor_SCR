@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +47,14 @@ from app.services.payload_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _palabras(texto: str, *, sin_numeros: bool = False) -> frozenset[str]:
+    """Las palabras de un nombre, sin tildes ni mayúsculas, para compararlo sin importar el orden."""
+    limpio = unicodedata.normalize("NFKD", str(texto).lower())
+    limpio = "".join(c for c in limpio if not unicodedata.combining(c))
+    palabras = re.findall(r"[a-z0-9]+", limpio)
+    return frozenset(p for p in palabras if not (sin_numeros and p.isdigit()))
 
 
 class NicNoEncontrado(Exception):
@@ -316,6 +325,100 @@ class MetricsService:
 
         raise BarrioAmbiguo(texto, exactos or candidatos)
 
+    def indices_tecnico(self, pedido: str | Sequence[str]) -> list[int]:
+        """Índices del catálogo de técnicos (gestores en COBROS) para uno o varios nombres.
+
+        Acepta el nombre en cualquier orden y sin tildes: «Veronica Bellido» encuentra
+        «BELLIDO MAZO VERONICA - 32761740». Un nombre que no existe, o que encaja en
+        más de un técnico (un apellido común), lanza `FiltroNoResuelto` con los
+        candidatos: devolver el total sin filtrar, o elegir uno al azar, daría una cifra
+        de otra persona sin avisar.
+        """
+        catalogo = self.datos.tecs
+        nombres = [pedido] if isinstance(pedido, str) else list(pedido)
+        encontrados: list[int] = []
+        for texto in nombres:
+            pedidas = _palabras(texto)
+            coinciden = [i for i, n in enumerate(catalogo) if pedidas and pedidas <= _palabras(n)]
+            # Con la cédula pegada al nombre pueden quedar varios: si uno solo tiene
+            # exactamente las palabras pedidas (sin números), ese es.
+            exactos = [i for i in coinciden if _palabras(catalogo[i], sin_numeros=True) == _palabras(texto, sin_numeros=True)]
+            elegido = exactos if len(exactos) == 1 else coinciden
+            if len(elegido) != 1:
+                raise FiltroNoResuelto("tecnico", texto, [catalogo[i] for i in elegido] or catalogo[:20])
+            encontrados.append(elegido[0])
+        return list(dict.fromkeys(encontrados))
+
+    def visitas_tecnico(
+        self,
+        tecnicos: Sequence[int],
+        *,
+        bkeys: Sequence[str] | None = None,
+        municipio: str | None = None,
+        meses: Sequence[str] | None = None,
+        estado: str | None = None,
+        limite: int = 30,
+    ) -> dict:
+        """Las visitas (órdenes o gestiones) de uno o varios técnicos, de la más reciente a la más antigua.
+
+        Devuelve el total y el desglose por estado de TODO el recorte, y solo `limite` filas:
+        listar cientos de visitas al modelo no ayuda a nadie y el total sí hay que decirlo.
+        """
+        p = self.datos
+        f_tecs = set(tecnicos)
+        f_barrios = self._indices_barrio(bkeys) if bkeys else None
+        f_muni = self._indice(p.munis, municipio)
+        if municipio is not None and f_muni is None:
+            raise FiltroNoResuelto("municipio", municipio, p.munis)
+        f_meses = {p.meses.index(m) for m in meses if m in p.meses} if meses else None
+        if meses and not f_meses:
+            return {"total": 0, "por_estado": {}, "filas": []}
+        f_estado = ("efectiva", "fallida", "perdida").index(norm_dato(estado)) if estado else None
+
+        inicio = datetime.strptime(p.fecha_min, "%Y-%m-%d")
+        nombres_estado = ("Efectiva", "Fallida", "Perdida")
+        halladas: list[int] = []
+        por_estado = {n: 0 for n in nombres_estado}
+        for i in range(len(p.e)):
+            if p.t[i] not in f_tecs:
+                continue
+            bi = p.b[i]
+            if f_barrios is not None and bi not in f_barrios:
+                continue
+            if f_muni is not None and p.b_muni[bi] != f_muni:
+                continue
+            if f_meses is not None and p.mes[i] not in f_meses:
+                continue
+            if f_estado is not None and p.e[i] != f_estado:
+                continue
+            halladas.append(i)
+            por_estado[nombres_estado[p.e[i]]] += 1
+
+        halladas.sort(key=lambda i: p.m[i], reverse=True)
+        mostradas = halladas[:limite]
+        # El NIC no vive en las columnas en memoria: se lee del archivo del mes solo para las que se muestran.
+        nics: dict[tuple[str, int], str] = {}
+        por_mes: dict[str, list[int]] = {}
+        for i in mostradas:
+            mes_key = p.meses[p.mes[i]]
+            por_mes.setdefault(mes_key, []).append(i - p.inicio_mes[p.mes[i]])
+        for mes_key, posiciones in por_mes.items():
+            for local, nic in leer_nics(self.directorio, mes_key, posiciones).items():
+                nics[(mes_key, local)] = nic
+
+        filas = []
+        for i in mostradas:
+            mes_key = p.meses[p.mes[i]]
+            filas.append({
+                "fecha": (inicio + timedelta(minutes=p.m[i])).strftime("%Y-%m-%d %H:%M"),
+                "barrio": p.barrios[p.b[i]],
+                "estado": nombres_estado[p.e[i]],
+                "causa": p.causas[p.c[i]],
+                "subaccion": p.subs[p.s[i]],
+                "nic": nics.get((mes_key, i - p.inicio_mes[p.mes[i]]), ""),
+            })
+        return {"total": len(halladas), "por_estado": {k: v for k, v in por_estado.items() if v}, "filas": filas}
+
     # --- Métricas -------------------------------------------------------------
 
     async def efectividad(
@@ -331,6 +434,7 @@ class MetricsService:
         tarifa: str | None = None,
         actividad: str | None = None,
         causa: str | None = None,
+        tecnicos: Sequence[int] | None = None,
         etiqueta: str | None = None,
     ) -> Efectividad:
         """Efectividad del recorte indicado. Sin filtros, de todo el histórico.
@@ -341,7 +445,7 @@ class MetricsService:
         conteos = self._agrupar(
             bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
             tipo_os=tipo_os, brigada=brigada, subaccion=subaccion, tarifa=tarifa,
-            actividad=actividad, causa=causa,
+            actividad=actividad, causa=causa, tecnicos=tecnicos,
         )
         nombre = etiqueta or self._etiqueta(bkeys, municipio, zona)
         return _a_dto(conteos.get(0, Conteo()), nombre)
@@ -359,6 +463,7 @@ class MetricsService:
         tarifa: str | None = None,
         actividad: str | None = None,
         causa: str | None = None,
+        tecnicos: Sequence[int] | None = None,
         min_ordenes: int = 10,
         limite: int = 10,
         ascendente: bool = False,
@@ -383,7 +488,7 @@ class MetricsService:
         conteos = self._agrupar(
             bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
             brigada=brigada, subaccion=subaccion, tarifa=tarifa,
-            actividad=actividad, causa=causa, por=dimension,
+            actividad=actividad, causa=causa, tecnicos=tecnicos, por=dimension,
         )
         catalogo = {
             "brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios,
@@ -424,6 +529,7 @@ class MetricsService:
         tarifa: str | None = None,
         actividad: str | None = None,
         causa: str | None = None,
+        tecnicos: Sequence[int] | None = None,
         limite: int = 6,
     ) -> list[FilaCausa]:
         """Causas de las órdenes NO efectivas, de mayor a menor."""
@@ -431,7 +537,7 @@ class MetricsService:
         conteo = self._agrupar(
             bkeys=bkeys, municipio=municipio, zona=zona, meses=meses,
             brigada=brigada, subaccion=subaccion, tarifa=tarifa,
-            actividad=actividad, causa=causa,
+            actividad=actividad, causa=causa, tecnicos=tecnicos,
         ).get(0, Conteo())
 
         total = sum(conteo.causas.values())
@@ -960,6 +1066,7 @@ class MetricsService:
         tarifa: str | None = None,
         actividad: str | None = None,
         causa: str | None = None,
+        tecnicos: Sequence[int] | None = None,
         por: str | None = None,
     ) -> dict[int, Conteo]:
         """Recorre las órdenes una vez, filtrando y acumulando.
@@ -1016,6 +1123,9 @@ class MetricsService:
 
         B, C, E, MES, O, G, S, F = p.b, p.c, p.e, p.mes, p.o, p.g, p.s, p.f
         A = p.a
+        T = p.t
+        # Índices ya resueltos por `indices_tecnico`: vacío significa «ninguno», no «todos».
+        f_tecs = set(tecnicos) if tecnicos is not None else None
         ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
         grupo = {
             "brigada": p.g, "tecnico": p.t, "barrio": p.b,
@@ -1047,6 +1157,8 @@ class MetricsService:
             if f_act is not None and A[i] != f_act:
                 continue
             if f_causa is not None and C[i] != f_causa:
+                continue
+            if f_tecs is not None and T[i] not in f_tecs:
                 continue
 
             clave = b_muni[bi] if grupo_es_municipio else (grupo[i] if grupo is not None else 0)

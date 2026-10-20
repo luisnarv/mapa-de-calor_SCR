@@ -761,3 +761,158 @@ async def test_un_nombre_aproximado_de_actividad_avisa_cual_se_uso(runner):
     assert "«Brigada Canasta»" in salida["nota"]
     exacta, _ = await runner.run("efectividad", {"actividad": "Brigada Canasta"})
     assert "no existe:" not in exacta["nota"]
+
+
+# --- Varios barrios a la vez --------------------------------------------------------
+
+BARRIOS_VARIOS = ["BARRANQUILLA | LAS MALVINAS", "BARRANQUILLA | REBOLO"]
+
+
+@pytest.mark.asyncio
+async def test_varios_barrios_se_suman_y_el_mapa_los_recibe_como_lista(runner):
+    juntos, filtro = await runner.run("efectividad", {"barrio": BARRIOS_VARIOS})
+    uno, _ = await runner.run("efectividad", {"barrio": BARRIOS_VARIOS[0]})
+    otro, _ = await runner.run("efectividad", {"barrio": BARRIOS_VARIOS[1]})
+
+    assert juntos["metricas"]["tot"] == uno["metricas"]["tot"] + otro["metricas"]["tot"]
+    assert "2 barrios" in juntos["base"]
+    assert len(filtro.barrios) == 2 and filtro.barrio is None and filtro.municipio is None
+    assert len(juntos["detalle_por_barrio"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_un_solo_barrio_en_lista_se_trata_como_un_barrio(runner):
+    _, filtro = await runner.run("efectividad", {"barrio": [BARRIOS_VARIOS[0]]})
+
+    assert filtro.barrio is not None and filtro.barrios is None
+
+
+@pytest.mark.asyncio
+async def test_el_ranking_acepta_varios_barrios(runner):
+    salida, _ = await runner.run("ranking", {"dimension": "tecnico", "barrio": BARRIOS_VARIOS})
+
+    assert "error" not in salida and "2 barrios" in salida["base"]
+
+
+@pytest.mark.asyncio
+async def test_filtrar_mapa_con_varios_barrios_manda_la_lista(runner):
+    salida, filtro = await runner.run("filtrar_mapa", {"barrio": BARRIOS_VARIOS, "meses": ["2026-08"]})
+
+    assert len(filtro.barrios) == 2 and filtro.meses == ["2026-08"]
+    assert salida["aplicado"]["barrios"] == filtro.barrios
+
+
+@pytest.mark.asyncio
+async def test_un_barrio_con_de_en_mayusculas_ya_no_tumba_ni_efectividad_ni_ranking(runner):
+    """`_grupo` tenía el mismo corte sensible a mayúsculas que `filtrar_mapa`."""
+    for herramienta in ("efectividad", "ranking"):
+        args = {"barrio": "LOS ROBLES DE BARANOA"} | ({"dimension": "tecnico"} if herramienta == "ranking" else {})
+        salida, _ = await runner.run(herramienta, args)
+        assert not str(salida.get("error", "")).startswith("Argumentos inválidos"), herramienta
+        assert "BARANOA | LOS ROBLES" in salida["base"]
+
+
+@pytest.mark.asyncio
+async def test_varios_barrios_con_un_municipio_de_mas_no_dejan_el_filtro_contradictorio(runner):
+    """«Chupundum, El Concorde y Suan de Malambo»: Suan es de otro municipio. Con el
+    municipio pegado el filtro se contradecía y el mapa no se movía."""
+    salida, filtro = await runner.run(
+        "filtrar_mapa", {"barrio": BARRIOS_VARIOS, "municipio": "Barranquilla"})
+
+    assert len(filtro.barrios) == 2 and filtro.municipio is None
+    assert "municipio" not in salida["aplicado"]
+
+
+# --- Filtrar y consultar por técnico (gestor en COBROS) -----------------------------
+
+def _tecnicos_con_ordenes(runner, cuantos: int = 2) -> list[str]:
+    """Los técnicos del recorte con más órdenes: los únicos con los que se puede probar."""
+    from collections import Counter
+
+    p = runner.metrics.datos
+    return [p.tecs[i] for i, _ in Counter(p.t).most_common(cuantos)]
+
+
+@pytest.mark.asyncio
+async def test_un_tecnico_se_encuentra_con_las_palabras_en_otro_orden(runner):
+    nombre = _tecnicos_con_ordenes(runner, 1)[0]
+    desordenado = " ".join(reversed(nombre.split()))
+
+    exacto, filtro = await runner.run("efectividad", {"tecnico": nombre})
+    otro, _ = await runner.run("efectividad", {"tecnico": desordenado})
+
+    assert exacto["metricas"]["tot"] == otro["metricas"]["tot"] > 0
+    assert filtro.tecnicos == [nombre], "el tablero recibe el nombre de catálogo, no el que escribió el usuario"
+    assert nombre.split(" - ")[0] in exacto["base"]
+
+
+@pytest.mark.asyncio
+async def test_varios_tecnicos_se_suman(runner):
+    uno, otro = _tecnicos_con_ordenes(runner)
+    juntos, filtro = await runner.run("efectividad", {"tecnico": [uno, otro]})
+    solo_uno, _ = await runner.run("efectividad", {"tecnico": uno})
+    solo_otro, _ = await runner.run("efectividad", {"tecnico": otro})
+
+    assert juntos["metricas"]["tot"] == solo_uno["metricas"]["tot"] + solo_otro["metricas"]["tot"]
+    assert filtro.tecnicos == [uno, otro]
+
+
+@pytest.mark.asyncio
+async def test_el_ranking_y_las_causas_aceptan_tecnico(runner):
+    nombre = _tecnicos_con_ordenes(runner, 1)[0]
+    ranking, _ = await runner.run("ranking", {"dimension": "barrio", "tecnico": nombre, "min_ordenes": 1})
+    causas, _ = await runner.run("causas_no_efectivas", {"tecnico": nombre})
+
+    assert "error" not in ranking and ranking["filas"]
+    assert "error" not in causas and nombre.split(" - ")[0] in causas["base"]
+
+
+@pytest.mark.asyncio
+async def test_un_tecnico_inventado_no_devuelve_el_total_sin_filtrar(runner):
+    salida, _ = await runner.run("efectividad", {"tecnico": "Zzz Inventado"})
+
+    assert salida["error"] == "filtro_no_reconocido" and salida["campo"] == "tecnico"
+
+
+def test_un_apellido_comun_devuelve_los_candidatos_en_vez_de_elegir_uno():
+    from types import SimpleNamespace
+
+    from app.services.metrics_service import FiltroNoResuelto, MetricsService
+
+    falso = SimpleNamespace(datos=SimpleNamespace(tecs=["ANA PEREZ - 1", "LUIS PEREZ - 2", "ANA GOMEZ - 3"]))
+    with pytest.raises(FiltroNoResuelto) as error:
+        MetricsService.indices_tecnico(falso, "Perez")
+    assert error.value.catalogo == ["ANA PEREZ - 1", "LUIS PEREZ - 2"]
+    assert MetricsService.indices_tecnico(falso, "perez ana") == [0]
+
+
+@pytest.mark.asyncio
+async def test_filtrar_mapa_deja_elegido_al_tecnico(runner):
+    nombre = _tecnicos_con_ordenes(runner, 1)[0]
+    salida, filtro = await runner.run("filtrar_mapa", {"tecnico": nombre.split(" - ")[0]})
+
+    assert filtro.tecnicos == [nombre] and salida["aplicado"]["tecnicos"] == [nombre]
+
+
+@pytest.mark.asyncio
+async def test_los_trabajos_de_un_tecnico_se_listan_y_cuadran_con_su_efectividad(runner, metrics):
+    """«Muéstrame los trabajos de un gestor»: sin herramienta que listara visitas, el
+    agente respondía con un ranking de gestores que nadie pidió."""
+    tec = metrics.datos.tecs[max(range(len(metrics.datos.tecs)), key=lambda i: metrics.datos.t.count(i))]
+
+    lista, filtro = await runner.run("ordenes_de_tecnico", {"tecnico": tec, "limite": 5})
+    resumen, _ = await runner.run("efectividad", {"tecnico": tec})
+
+    assert len(lista["filas"]) == 5
+    assert lista["total"] == resumen["metricas"]["tot"]
+    assert sum(lista["por_estado"].values()) == lista["total"]
+    fechas = [f["fecha"] for f in lista["filas"]]
+    assert fechas == sorted(fechas, reverse=True)
+    assert filtro.tecnicos == [tec]
+
+
+@pytest.mark.asyncio
+async def test_los_trabajos_sin_decir_de_cual_tecnico_piden_el_nombre(runner):
+    salida, filtro = await runner.run("ordenes_de_tecnico", {"mes": "2026-01"})
+
+    assert salida["error"] == "falta_tecnico" and filtro is None

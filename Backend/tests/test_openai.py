@@ -474,7 +474,7 @@ def test_una_sola_llamada_filtra_como_siempre():
     accion = unificar({"municipio": "SOLEDAD", "meses": ["2026-08"]})
 
     assert accion == {
-        "tipo": "filtrar_mapa", "barrio": None, "municipio": "SOLEDAD",
+        "tipo": "filtrar_mapa", "barrio": None, "barrios": None, "tecnicos": None, "municipio": "SOLEDAD",
         "zona": None, "brigada": None, "actividad": None,
         "tipo_os": None, "meses": ["2026-08"],
     }
@@ -546,3 +546,35 @@ def test_el_mismo_municipio_escrito_distinto_no_es_un_conflicto():
 
     accion = unificar({"municipio": "Tubará"}, {"barrio": "TUBARA | CENTRO", "municipio": "TUBARA"})
     assert accion["barrio"] == "TUBARA | CENTRO"
+
+
+# Varios barrios a la vez: el tablero filtra por una lista y el chat también.
+
+def test_dos_filtros_con_la_misma_lista_de_barrios_se_funden():
+    barrios = ["SOLEDAD | RENACER", "SOLEDAD | LOS CEREZOS"]
+    accion = unificar({"barrios": barrios, "meses": ["2026-10"]}, {"barrios": list(reversed(barrios))})
+
+    assert sorted(accion["barrios"]) == sorted(barrios) and accion["barrio"] is None
+
+
+def test_un_barrio_de_la_lista_se_funde_con_ella_y_uno_ajeno_la_contradice():
+    lista = {"barrios": ["SOLEDAD | RENACER", "SOLEDAD | LOS CEREZOS"]}
+
+    assert unificar(lista, {"barrio": "SOLEDAD | RENACER"})["barrios"] == lista["barrios"]
+    assert unificar(lista, {"barrio": "SOLEDAD | CENTRO"}) is None
+
+
+def test_listas_de_barrios_distintas_dejan_el_tablero_quieto():
+    assert unificar({"barrios": ["SOLEDAD | RENACER", "SOLEDAD | LOS CEREZOS"]},
+                    {"barrios": ["SOLEDAD | RENACER", "SOLEDAD | CENTRO"]}) is None
+
+
+def test_una_lista_con_un_barrio_de_otro_municipio_no_se_funde_con_el_municipio_pedido():
+    assert unificar({"municipio": "SOLEDAD"}, {"barrios": ["SOLEDAD | RENACER", "BARRANQUILLA | OLAYA"]}) is None
+
+
+def test_dos_filtros_con_los_mismos_tecnicos_se_funden_y_distintos_no():
+    a, b = "ANA PEREZ - 1", "LUIS RUIZ - 2"
+
+    assert sorted(unificar({"tecnicos": [a, b]}, {"tecnicos": [b, a], "municipio": "SOLEDAD"})["tecnicos"]) == [a, b]
+    assert unificar({"tecnicos": [a]}, {"tecnicos": [b]}) is None

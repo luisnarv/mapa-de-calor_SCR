@@ -135,7 +135,11 @@ export default function Topbar({
       .filter((o) => disponibles.has(o.valor));
 
   const barrioSel =
-    st.selBarrio != null ? (dim.barrios[st.selBarrio] || "").split(" | ").pop() : null;
+    st.barrios?.length > 1
+      ? `${st.barrios.length} barrios`
+      : st.selBarrio != null
+        ? (dim.barrios[st.selBarrio] || "").split(" | ").pop()
+        : null;
 
   const hayFiltros =
     st.zona !== "" || st.muni !== "" || st.brig !== "" || st.tipo !== "" ||
@@ -282,18 +286,17 @@ export default function Topbar({
             )}
           </div>
 
-          {/* El barrio no tiene desplegable propio —son 1.240— pero sí llega desde
-              el mapa o el chat, y hasta ahora no había forma de ver que estaba
-              puesto ni de soltarlo. */}
+          {/* Los barrios elegidos (en la cola de triaje, el mapa o el chat): hasta ahora
+              no había forma de ver que estaban puestos ni de soltarlos. */}
           {barrioSel && (
             <div className="hd-f">
               <button
                 type="button"
                 className="hd-pill on"
                 onClick={() => onFilterChange("selBarrio", null)}
-                aria-label={`Quitar el filtro de barrio ${barrioSel}`}
+                aria-label={`Quitar la selección de ${barrioSel}`}
               >
-                <span className="hd-pill-k">Barrio</span>
+                <span className="hd-pill-k">{st.barrios?.length > 1 ? "Barrios" : "Barrio"}</span>
                 <span className="hd-pill-v">: {barrioSel}</span>
                 <span className="hd-pill-ic" aria-hidden="true">
                   <X size={13} strokeWidth={2.4} />

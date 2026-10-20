@@ -4,10 +4,13 @@ import React, { useState } from "react";
 import { Info, Star } from "lucide-react";
 
 import { useTheme, riskColor as riskColorOf, riskInk } from "@/lib/theme";
+import SelectorMultiple from "@/components/SelectorMultiple";
 
 export default function DetailsPanel({
   st,
   A,
+  Asel,
+  AselTec,
   ELIG,
   dim,
   geo,
@@ -78,8 +81,11 @@ export default function DetailsPanel({
   };
 
   // --- 1. BARRIO / GLOBAL PANEL ---
-  const renderBarrio = () => {
-    const b = st.selBarrio;
+  // `AA` y `EE` son los datos sobre los que se calcula: todos, o solo los barrios elegidos
+  // (`multi`) cuando se ven acumulados.
+  const renderBarrioDe = (b, AA, EE, multi = null) => {
+    const A = AA;
+    const ELIG = EE;
 
     // GLOBAL OVERVIEW
     if (b == null) {
@@ -89,7 +95,7 @@ export default function DetailsPanel({
         .sort((x, y) => y[1] - x[1]);
       const topRisky = ELIG.slice()
         .sort((x, y) => (y[1].risk ?? -1) - (x[1].risk ?? -1))
-        .slice(0, 5);
+        .slice(0, multi ? 10 : 5);
       const subRows = [...A.sub.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 
       return (
@@ -107,13 +113,17 @@ export default function DetailsPanel({
                 fontWeight: "600"
               }}
             >
-              GLO
+              {multi ? multi.n : "GLO"}
             </div>
             <div>
-              <h2>Resumen de Operación</h2>
+              <h2>{multi ? "Resumen acumulado" : "Resumen de Operación"}</h2>
               <span className="pb-sub">
-                {st.zona === "" ? "Todo el departamento" : "Zona: " + dim.zonas[+st.zona]}{" "}
-                &middot; {st.muni === "" ? "Todos los municipios" : dim.munis[+st.muni]}
+                {multi
+                  ? multi.nombres
+                  : <>
+                      {st.zona === "" ? "Todo el departamento" : "Zona: " + dim.zonas[+st.zona]}{" "}
+                      &middot; {st.muni === "" ? "Todos los municipios" : dim.munis[+st.muni]}
+                    </>}
               </span>
             </div>
           </div>
@@ -139,7 +149,7 @@ export default function DetailsPanel({
             </div>
           </div>
 
-          <h3>Efectividad Global</h3>
+          <h3>{multi ? "Efectividad acumulada" : "Efectividad Global"}</h3>
           <table className="cmp" style={{ marginBottom: "14px" }}>
             <tbody>
               <tr>
@@ -168,7 +178,8 @@ export default function DetailsPanel({
           </table>
 
           <h3>
-            Barrios con mayor riesgo <span className="hint">clic para analizar</span>
+            {multi ? "Barrios elegidos" : "Barrios con mayor riesgo"}{" "}
+            <span className="hint">clic para analizar</span>
           </h3>
           {topRisky.length ? (
             <table className="mt rk" style={{ marginBottom: "14px" }}>
@@ -261,13 +272,15 @@ export default function DetailsPanel({
               )
             : <p className="empty">Sin datos.</p>}
 
-          <p
-            className="hint"
-            style={{ marginTop: "16px", lineHeight: "1.45", color: "var(--dim)" }}
-          >
-            * Selecciona un barrio en la columna de riesgo o haz clic en cualquier
-            círculo del mapa para ver el diagnóstico específico de esa zona.
-          </p>
+          {!multi && (
+            <p
+              className="hint"
+              style={{ marginTop: "16px", lineHeight: "1.45", color: "var(--dim)" }}
+            >
+              * Selecciona un barrio en la columna de riesgo o haz clic en cualquier
+              círculo del mapa para ver el diagnóstico específico de esa zona.
+            </p>
+          )}
         </>
       );
     }
@@ -632,24 +645,49 @@ export default function DetailsPanel({
   };
 
   // --- 2. TECNICO PANEL ---
-  const renderTecnico = () => {
-    const opts = [...A.tec.entries()]
-      .sort((a, b) => b[1].tot - a[1].tot)
-      .map(([t]) => (
-        <option key={t} value={t}>
-          {gestor(dim.tecs[t])}
-        </option>
-      ));
+  const renderBarrio = () => {
+    const sel = st.barrios || [];
+    if (sel.length < 2 || !Asel) return renderBarrioDe(st.selBarrio, A, ELIG);
 
-    let body = (
-      <p className="empty">
-        Selecciona un {V.tecnicoMin || "técnico"} para ver su cobertura, recorrido y desempeño.
-      </p>
+    // Varios barrios: lo acumulado, o cada uno por separado.
+    const elegidos = new Set(sel);
+    const modo = st.vistaMulti === "separado" ? "separado" : "acumulado";
+    const nombres = sel.length <= 3 ? sel.map(barrioName).join(", ") : `${sel.length} barrios seleccionados`;
+    return (
+      <>
+        <div className="multi-modo" role="tablist" aria-label="Cómo ver los barrios elegidos">
+          {[["acumulado", "Acumulado"], ["separado", "Por separado"]].map(([valor, texto]) => (
+            <button
+              key={valor}
+              type="button"
+              role="tab"
+              aria-selected={modo === valor}
+              className={`mm-seg${modo === valor ? " on" : ""}`}
+              onClick={() => onFilterChange("vistaMulti", valor)}
+            >
+              {texto}
+            </button>
+          ))}
+        </div>
+
+        {modo === "acumulado"
+          ? renderBarrioDe(null, Asel, ELIG.filter(([b]) => elegidos.has(b)), { n: sel.length, nombres })
+          : sel.map((b, i) => (
+              <details key={b} className="multi-b" open={i === 0}>
+                <summary>
+                  {barrioName(b)} <span className="dim">{barrioMuni(b)}</span>
+                </summary>
+                {renderBarrioDe(b, A, ELIG)}
+              </details>
+            ))}
+      </>
     );
+  };
 
-    if (st.selTec != null && A.tec.has(st.selTec)) {
-      const o = A.tec.get(st.selTec);
-      const R = techRoute(st.selTec);
+  // El análisis de un técnico, o el acumulado de varios: `o` es su agregado y `R` su recorrido.
+  const cuerpoTecnico = (o, R, acumulado = false) => {
+    let body = null;
+    if (o) {
       const mainBrigList = [...o.brig.entries()].sort((a, b) => b[1] - a[1]);
       const mainBrig = mainBrigList.length ? mainBrigList[0][0] : null;
       const bo = mainBrig ? A.brig.get(mainBrig) : null;
@@ -693,10 +731,10 @@ export default function DetailsPanel({
             </div>
             <div className="mini">
               <span>Mediana por {V.ordenMin || "orden"}</span>
-              <b>{num(R.medMin)} min</b>
+              <b>{R.medMin == null ? "—" : `${num(R.medMin)} min`}</b>
             </div>
             <div className="mini">
-              <span>Días en campo</span>
+              <span>{acumulado ? "Días-persona" : "Días en campo"}</span>
               <b>{num(R.days)}</b>
             </div>
           </div>
@@ -790,21 +828,78 @@ export default function DetailsPanel({
       );
     }
 
+    return body;
+  };
+
+  const renderTecnico = () => {
+    // Los elegidos que siguen con órdenes con los filtros actuales.
+    const sel = (st.tecs || []).filter((t) => A.tec.has(t));
+    const opciones = [...A.tec.entries()]
+      .sort((a, b) => b[1].tot - a[1].tot)
+      .map(([t, o]) => ({ valor: t, texto: gestor(dim.tecs[t]), extra: num(o.tot) }));
+
+    let body;
+    if (!sel.length) {
+      body = (
+        <p className="empty">
+          Selecciona uno o varios {V.tecnicosMin || "técnicos"} para ver su cobertura, recorrido y desempeño.
+        </p>
+      );
+    } else if (sel.length === 1 || !AselTec) {
+      body = cuerpoTecnico(A.tec.get(sel[0]), techRoute(sel[0]));
+    } else {
+      // Varios: lo acumulado, o cada uno por separado.
+      const modo = st.vistaMultiTec === "separado" ? "separado" : "acumulado";
+      const grupo = {
+        tot: AselTec.tot, ef: AselTec.ef, fa: AselTec.fa, pe: AselTec.pe,
+        efPct: AselTec.efPct, faPct: AselTec.faPct, pePct: AselTec.pePct, efAdj: AselTec.efAdj,
+        brig: new Map([...AselTec.brig].map(([g, x]) => [g, x.tot])),
+        barrios: new Set(AselTec.barrio.keys()),
+        causa: AselTec.causa
+      };
+      // Distancia y días se suman; la mediana de los tiempos no se puede sumar.
+      const rutas = sel.map((t) => techRoute(t));
+      const suma = {
+        km: rutas.reduce((a, r) => a + r.km, 0),
+        days: rutas.reduce((a, r) => a + r.days, 0),
+        medMin: null
+      };
+      body = (
+        <>
+          <div className="multi-modo" role="tablist" aria-label="Cómo ver los elegidos">
+            {[["acumulado", "Acumulado"], ["separado", "Por separado"]].map(([valor, texto]) => (
+              <button
+                key={valor}
+                type="button"
+                role="tab"
+                aria-selected={modo === valor}
+                className={`mm-seg${modo === valor ? " on" : ""}`}
+                onClick={() => onFilterChange("vistaMultiTec", valor)}
+              >
+                {texto}
+              </button>
+            ))}
+          </div>
+          {modo === "acumulado"
+            ? cuerpoTecnico(grupo, suma, true)
+            : sel.map((t, i) => (
+                <details key={t} className="multi-b" open={i === 0}>
+                  <summary>{gestor(dim.tecs[t])}</summary>
+                  {cuerpoTecnico(A.tec.get(t), rutas[i])}
+                </details>
+              ))}
+        </>
+      );
+    }
+
     return (
       <>
-        <div className="sel-wrap">
-          <label>{V.tecnico || "Técnico"}</label>
-          <select
-            id="tecSel"
-            value={st.selTec ?? ""}
-            onChange={(e) =>
-              onFilterChange("selTec", e.target.value === "" ? null : +e.target.value)
-            }
-          >
-            <option value="">— elegir —</option>
-            {opts}
-          </select>
-        </div>
+        <SelectorMultiple
+          etiqueta={V.tecnico || "Técnico"}
+          opciones={opciones}
+          elegidos={sel}
+          onCambio={(lista) => onFilterChange("tecs", lista)}
+        />
         {body}
       </>
     );

@@ -159,8 +159,15 @@ export default function Tablero({ proceso }) {
     minOrders: proceso === "cobros" ? 1 : 10,
     hotspot: 60,
     adjusted: true,
+    // Barrios elegidos en la cola de triaje (índices en dim.barrios). `selBarrio` es el
+    // mismo barrio cuando hay uno solo, y null con varios: así todo lo que ya miraba
+    // `selBarrio` sigue funcionando.
+    barrios: [],
+    vistaMulti: "acumulado",
+    // Técnicos (gestores en COBROS) elegidos en su pestaña, y cómo verlos.
+    vistaMultiTec: "acumulado",
     selBarrio: null,
-    selTec: null,
+    tecs: [],
     selNic: null,
     tab: "barrio",
     dock: "tendencias",
@@ -224,8 +231,9 @@ export default function Tablero({ proceso }) {
       efOcultas: [],
       d0: 0,
       d1: maxD,
+      barrios: [],
       selBarrio: null,
-      selTec: null,
+      tecs: [],
       selNic: null,
       months: recent ? [recent.label] : []
     }));
@@ -663,7 +671,9 @@ export default function Tablero({ proceso }) {
   }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // 2. AGGREGATION ENGINE
-  const A = useMemo(() => {
+  // Es una función de los índices para poder agregar también solo los barrios elegidos
+  // (`Asel`, el acumulado del detalle) sin duplicar el cálculo.
+  const agregar = useCallback((IDX) => {
     const defaultAgg = {
       tot: 0,
       ef: 0,
@@ -854,7 +864,25 @@ export default function Tablero({ proceso }) {
 
     A.IDX = IDX;
     return A;
-  }, [IDX, rawArrays, data, V]);
+  }, [rawArrays, data, V]);
+
+  const A = useMemo(() => agregar(IDX), [agregar, IDX]);
+
+  // Lo mismo, solo con las órdenes de los barrios elegidos: es el acumulado del detalle.
+  const Asel = useMemo(() => {
+    if (!st.barrios || st.barrios.length < 2) return null;
+    const sel = new Set(st.barrios);
+    const B = rawArrays.B;
+    return agregar(IDX.filter((i) => sel.has(B[i])));
+  }, [agregar, IDX, rawArrays, st.barrios]);
+
+  // Igual, con las órdenes de los técnicos (gestores) elegidos.
+  const AselTec = useMemo(() => {
+    if (!st.tecs || st.tecs.length < 2 || !rawArrays) return null;
+    const sel = new Set(st.tecs);
+    const Tc = rawArrays.T;
+    return agregar(IDX.filter((i) => sel.has(Tc[i])));
+  }, [agregar, IDX, rawArrays, st.tecs]);
 
   // 3. RISK ENGINE (0-100)
   const ELIG = useMemo(() => {
@@ -1307,40 +1335,54 @@ export default function Tablero({ proceso }) {
       if (key === "zona") {
         next.muni = "";
         next.brig = "";
+        next.barrios = [];
         next.selBarrio = null;
       }
       if (key === "muni") {
         next.brig = "";
+        next.barrios = [];
         next.selBarrio = null;
       }
+      if (key === "selBarrio") {
+        next.barrios = value == null ? [] : [value];
+      }
       if (key === "minOrders" || key === "adjusted") {
+        next.barrios = [];
         next.selBarrio = null;
       }
       return next;
     });
   };
 
+  // Deja la selección en `lista`. Con un solo barrio `selBarrio` lo repite, que es lo que
+  // lee todo lo que analiza un barrio; con varios queda null y el detalle pasa a acumulado.
+  const conBarrios = (prev, lista) => ({
+    ...prev,
+    barrios: lista,
+    selBarrio: lista.length === 1 ? lista[0] : null,
+    jerBarrio: lista.length === 1 ? lista[0] : null,
+    ...(lista.length ? { tab: "barrio", jerBrig: null } : {})
+  });
+
   const handleSelectBarrio = (b) => {
     setSt((prev) => {
-      // Segundo clic sobre el mismo barrio → quitar la selección y volver a
-      // mostrar todos los barrios y sus límites.
-      if (prev.selBarrio === b) {
-        return { ...prev, selBarrio: null, jerBarrio: null };
-      }
-      return {
-        ...prev,
-        selBarrio: b,
-        tab: "barrio",
-        // Sync hierarchy tab
-        jerBarrio: b,
-        jerBrig: null
-      };
+      // Segundo clic sobre el mismo barrio (si es el único elegido) → quitar la
+      // selección y volver a mostrar todos los barrios y sus límites.
+      if (prev.barrios.length === 1 && prev.barrios[0] === b) return conBarrios(prev, []);
+      return conBarrios(prev, [b]);
     });
   };
 
-  // Limpia solo el barrio remarcado (sin tocar el resto de filtros)
+  // La casilla de cada barrio en la cola de triaje: suma o quita ese barrio de la selección.
+  const handleToggleBarrio = (b) => {
+    setSt((prev) =>
+      conBarrios(prev, prev.barrios.includes(b) ? prev.barrios.filter((x) => x !== b) : [...prev.barrios, b])
+    );
+  };
+
+  // Limpia solo los barrios remarcados (sin tocar el resto de filtros)
   const handleClearBarrio = () => {
-    setSt((prev) => ({ ...prev, selBarrio: null, jerBarrio: null }));
+    setSt((prev) => conBarrios(prev, []));
   };
 
   // Lo que el usuario tiene filtrado, en nombres. Sin esto el chat responde sobre
@@ -1356,6 +1398,8 @@ export default function Tablero({ proceso }) {
 
     return {
       barrio: st.selBarrio != null ? dim.barrios[st.selBarrio] ?? null : null,
+      barrios: (st.barrios || []).map((i) => dim.barrios[i]).filter(Boolean),
+      tecnicos: (st.tecs || []).map((i) => dim.tecs[i]).filter(Boolean),
       municipio: nombre(dim.munis, st.muni),
       zona: nombre(dim.zonas, st.zona),
       brigada: nombre(dim.brigs, st.brig),
@@ -1417,6 +1461,10 @@ export default function Tablero({ proceso }) {
     setSt((prev) => {
       const next = { ...prev };
 
+      // Con barrios resueltos (uno o varios) se abre su análisis.
+      let conBarrios = false;
+      let conTecnicos = false;
+
       const zona = idxDe(dim.zonas, accion.zona);
       if (zona !== null) next.zona = zona;
       const muni = idxDe(dim.munis, accion.municipio);
@@ -1430,13 +1478,39 @@ export default function Tablero({ proceso }) {
         if (act !== null) next.act = act;
       }
 
+      // Varios barrios: BKEYs, igual que en dim.barrios. Un barrio que el catálogo no
+      // conoce se salta en vez de vaciar el tablero.
+      if (accion.barrios?.length) {
+        const lista = accion.barrios.map((k) => idxDe(dim.barrios, k)).filter((i) => i !== null).map(Number);
+        if (lista.length) {
+          next.barrios = lista;
+          next.selBarrio = lista.length === 1 ? lista[0] : null;
+          next.jerBarrio = lista.length === 1 ? lista[0] : null;
+          next.tab = "barrio";
+          conBarrios = true;
+        }
+      }
+
+      // Técnicos (gestores en COBROS): nombres de catálogo, igual que en dim.tecs. Uno que el
+      // catálogo no conoce se salta en vez de vaciar el análisis.
+      if (accion.tecnicos?.length) {
+        const lista = accion.tecnicos.map((n) => idxDe(dim.tecs, n)).filter((i) => i !== null).map(Number);
+        if (lista.length) {
+          next.tecs = lista;
+          if (!conBarrios) next.tab = "tecnico";
+          conTecnicos = true;
+        }
+      }
+
       // El barrio llega como BKEY ("MUNICIPIO | BARRIO"), igual que en dim.barrios.
       const b = idxDe(dim.barrios, accion.barrio);
       if (b !== null) {
+        next.barrios = [+b];
         next.selBarrio = +b;
         next.tab = "barrio";
         next.jerBarrio = +b;
         next.jerBrig = null;
+        conBarrios = true;
       }
 
       // st.months guarda etiquetas ("Agosto de 2026"), no claves YYYY-MM.
@@ -1449,7 +1523,7 @@ export default function Tablero({ proceso }) {
 
       // Con un barrio resuelto se abre su análisis, igual que al hacer clic en el
       // mapa; sin barrio no hay nada que detallar y se deja la vista de mapa.
-      next.activeTab = b !== null ? "detalle" : "mapa";
+      next.activeTab = conBarrios || conTecnicos ? "detalle" : "mapa";
       return next;
     });
   };
@@ -1472,8 +1546,9 @@ export default function Tablero({ proceso }) {
       adjusted: true,
       est: [true, true, true],
       efOcultas: [],
+      barrios: [],
       selBarrio: null,
-      selTec: null,
+      tecs: [],
       // Vuelve al mes en curso (mantiene el arranque liviano; los históricos se
       // vuelven a descargar solo si se seleccionan).
       months: (() => {
@@ -1617,6 +1692,8 @@ export default function Tablero({ proceso }) {
               handleSelectBarrio(b);
               handleFilterChange("activeTab", "detalle");
             }}
+            // Marcar casillas no cambia de pestaña: se eligen varios y luego «Ver detalle».
+            onToggleBarrio={handleToggleBarrio}
             V={V}
           />
         </aside>
@@ -1627,6 +1704,8 @@ export default function Tablero({ proceso }) {
           <DetailsPanel
             st={computedSt}
             A={A}
+            Asel={Asel}
+            AselTec={AselTec}
             ELIG={ELIG}
             dim={data.dim}
             geo={data.geo}
@@ -2088,6 +2167,7 @@ export default function Tablero({ proceso }) {
           dim={data.dim}
           onFilterChange={handleFilterChange}
           onSelectBarrio={handleSelectBarrio}
+          onToggleBarrio={handleToggleBarrio}
           V={V}
         />
 
@@ -2385,6 +2465,8 @@ export default function Tablero({ proceso }) {
         <DetailsPanel
           st={computedSt}
           A={A}
+          Asel={Asel}
+          AselTec={AselTec}
           ELIG={ELIG}
           dim={data.dim}
           geo={data.geo}

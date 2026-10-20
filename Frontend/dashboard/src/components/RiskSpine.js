@@ -11,6 +11,7 @@ export default function RiskSpine({
   dim,
   onFilterChange,
   onSelectBarrio,
+  onToggleBarrio,
   V = {}
 }) {
   const [q, setQ] = useState("");
@@ -151,6 +152,20 @@ export default function RiskSpine({
         · {rows.length} barrios · ≥{st.minOrders} {V.ordenesMin || "ordenes"}
       </div>
 
+      {st.barrios?.length > 0 && (
+        <div className="sp-sel">
+          <span>
+            <b>{st.barrios.length}</b> {st.barrios.length === 1 ? "barrio seleccionado" : "barrios seleccionados"}
+          </span>
+          <button type="button" onClick={() => onFilterChange("activeTab", "detalle")}>
+            Ver detalle
+          </button>
+          <button type="button" onClick={() => onFilterChange("selBarrio", null)}>
+            Quitar
+          </button>
+        </div>
+      )}
+
       <div id="spine">
         {rows.slice(0, 400).map(([b, o]) => {
           const hot = o.risk >= st.hotspot;
@@ -175,10 +190,21 @@ export default function RiskSpine({
             <div
               key={b}
               className={`sp-row${hot ? " hot" : ""}${
-                st.selBarrio === b ? " sel" : ""
+                st.barrios?.includes(b) ? " sel" : ""
               }`}
               onClick={() => onSelectBarrio(b)}
             >
+              {/* Varios barrios: la casilla suma o quita este barrio de la selección; el
+                  clic en la tarjeta sigue enfocando solo este. */}
+              <input
+                type="checkbox"
+                className="sp-chk"
+                checked={!!st.barrios?.includes(b)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => onToggleBarrio(b)}
+                aria-label={`Seleccionar ${barrioName(b)} junto con otros barrios`}
+                title="Seleccionar varios barrios"
+              />
               <div
                 className="sp-risk"
                 style={{ background: riskColor(o.risk), color: riskInk(P, o.risk) }}

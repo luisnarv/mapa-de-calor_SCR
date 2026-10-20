@@ -45,13 +45,24 @@ _TERMINOS_SCR = frozenset({
 TOPE_RESUMEN = 5
 
 _BARRIO = {
-    "type": "string",
+    "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
     "description": (
+        "Varios barrios: pasa una LISTA de nombres, y las cifras salen sumadas con el "
+        "desglose por barrio. El mapa los muestra juntos. "
         "Barrio a consultar. Si en los filtros activos de su pantalla hay uno, pasa "
         "esa clave completa tal cual ('MUNICIPIO | BARRIO'): hay barrios homónimos "
         "en varios municipios y la clave evita la ambigüedad. Si el usuario nombra "
         "otro barrio, pasa su nombre tal como lo dijo: «El Bosque de Barranquilla» "
         "va aquí entero, el código lo separa solo. No quites ni alteres el texto."
+    ),
+}
+_TECNICO = {
+    "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+    "description": (
+        "Nombre del técnico, completo o parcial y en cualquier orden («Veronica Bellido»). "
+        "Varios: pasa una LISTA y las cifras salen sumadas de todos. Si el nombre encaja en "
+        "más de uno (un apellido común) vuelven los candidatos: pregunta cuál. Deja ese "
+        "técnico elegido en el tablero."
     ),
 }
 _MES = {
@@ -222,6 +233,14 @@ TOOLS: list[dict[str, Any]] = [
                     "min_ordenes": {
                         "type": "integer",
                         "description": "Mínimo de órdenes para entrar al ranking. Por defecto 10.",
+                    },
+                    "limite": {
+                        "type": "integer",
+                        "description": (
+                            "Cuántas filas devolver (10 por defecto). Con dimension=tecnico, "
+                            "pasa 1 cuando preguntan por UN técnico («¿cuál es el mejor?»): "
+                            "así queda elegido en el tablero. Para un listado, no lo pases."
+                        ),
                     },
                     "subaccion": _SUBACCION, "tarifa": _TARIFA,
                     "actividad": _ACTIVIDAD, "causa": _CAUSA,
@@ -607,8 +626,8 @@ TOOL_RECAUDO: dict[str, Any] = {
                 "mes": _MES,
                 "municipio": _MUNICIPIO,
                 "barrio": {
-                    "type": "string",
-                    "description": "Nombre del barrio, completo o parcial, SIN el municipio (ese va en `municipio`). Si hay homónimos en varios municipios se devuelven todos.",
+                    "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    "description": "Nombre del barrio (o lista de nombres), completo o parcial, SIN el municipio (ese va en `municipio`). Si hay homónimos en varios municipios se devuelven todos.",
                 },
                 "ordenar_por": {
                     "type": "string", "enum": ["recaudo", "saldo", "cuentas"],
@@ -628,6 +647,39 @@ TOOL_RECAUDO: dict[str, Any] = {
         },
     },
 }
+
+TOOLS.append({
+    "type": "function",
+    "function": {
+        "name": "ordenes_de_tecnico",
+        "description": (
+            "Lista las visitas de un técnico, una por una (fecha, barrio, estado, causa, NIC), de la "
+            "más reciente a la más antigua. Úsala cuando pidan «los trabajos», «las visitas», "
+            "«las órdenes» o «las gestiones» de un técnico: son lo mismo. Para totales o "
+            "porcentajes usa `efectividad`, no esta."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tecnico": {**_TECNICO, "description": (
+                    "OBLIGATORIO. Nombre del técnico, completo o parcial y en cualquier orden. Si "
+                    "el usuario no dijo cuál, NO elijas uno: pregúntale."
+                )},
+                "mes": _MES,
+                "barrio": _BARRIO,
+                "municipio": _MUNICIPIO,
+                "estado": {"type": "string", "enum": ["efectiva", "fallida", "perdida"]},
+                "limite": {"type": "integer", "description": "Cuántas filas mostrar (30 por defecto, máx. 100)."},
+            },
+            "required": ["tecnico"],
+        },
+    },
+})
+
+# El filtro por técnico lo comparten las consultas y el filtro del mapa.
+for _t in TOOLS:
+    if _t["function"]["name"] in ("efectividad", "ranking", "causas_no_efectivas", "filtrar_mapa"):
+        _t["function"]["parameters"]["properties"]["tecnico"] = _TECNICO
 
 NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in [*TOOLS, TOOL_RECAUDO])
 
@@ -705,6 +757,9 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
     return [*tools_cobros, TOOL_RECAUDO]
 
 # En cobros no existe la ajustada: sus opciones de orden se leen como las de la cruda.
+# La cédula pegada al nombre en COBROS («ANA PEREZ - 111») no le sirve a quien lee.
+_CEDULA = re.compile(r"\s*-\s*\d+\s*$")
+
 _ENUM_COBROS = {"ef_adj": "ef_pct", "ef_adj_pond": "ef_pond"}
 
 # Criterios donde un valor alto es malo, no bueno.
@@ -833,6 +888,17 @@ class ToolRunner:
                               "cifra es de esa. Dilo, no la presentes como la que pidió.")
         return "".join(f" OJO: {a}" for a in avisos)
 
+    def _tecnicos(self, tecnico: str | list[str] | None) -> tuple[list[int] | None, list[str]]:
+        """Índices y nombres de catálogo de los técnicos pedidos; `None` si no se pidió ninguno."""
+        if not tecnico:
+            return None, []
+        indices = self.metrics.indices_tecnico(tecnico)
+        return indices, [self.metrics.datos.tecs[i] for i in indices]
+
+    def _rotulo_tecnicos(self, nombres: list[str]) -> str:
+        quien = ("gestor", "gestores") if self._es_cobros else ("técnico", "técnicos")
+        return f"{quien[len(nombres) > 1]} {', '.join(_CEDULA.sub('', n) for n in nombres)}"
+
     def cargue_actual(self) -> CargueGuardado | None:
         """El archivo cargado en esta conversación, o None si no hay ninguno.
 
@@ -870,9 +936,9 @@ class ToolRunner:
         mismo municipio se devuelven juntos y la métrica los suma; devolver un
         menú de diez sería no responder.
         """
-        if not municipio and " de " in barrio.lower():
-            partes = barrio.rsplit(" de ", 1)
-            barrio, municipio = partes[0].strip(), partes[1].strip()
+        partido = None if municipio else re.match(r"(.+)\s+de\s+(.+)$", barrio, re.IGNORECASE)
+        if partido:
+            barrio, municipio = partido[1].strip(), partido[2].strip()
         try:
             return [await self._resolver(barrio, municipio)]
         except BarrioAmbiguo as ambiguo:
@@ -962,7 +1028,7 @@ class ToolRunner:
 
     async def _recorte(
         self,
-        barrio: str | None,
+        barrio: str | list[str] | None,
         municipio: str | None,
         mes: str | None,
         brigada: str | None = None,
@@ -986,13 +1052,20 @@ class ToolRunner:
             meses = en_pantalla or None
 
         bkeys = None
-        if barrio:
-            grupo = await self._grupo(barrio, municipio)
-            bkeys = [c.bkey for c in grupo]
-            municipio = municipio or grupo[0].municipio
+        nombres = [barrio] if isinstance(barrio, str) else [n for n in (barrio or []) if n]
+        if nombres:
+            claves: list[str] = []
+            for nombre in nombres:
+                grupo = await self._grupo(nombre, municipio)
+                claves += [c.bkey for c in grupo]
+            bkeys = list(dict.fromkeys(claves))
+            if len(nombres) == 1:
+                municipio = municipio or grupo[0].municipio
 
         if bkeys and len(bkeys) == 1:
             donde = bkeys[0]
+        elif bkeys and len(nombres) > 1:
+            donde = f"{len(bkeys)} barrios ({', '.join(nombres)})"
         elif bkeys:
             donde = f"{len(bkeys)} barrios de {municipio} con ese nombre"
         else:
@@ -1003,10 +1076,11 @@ class ToolRunner:
             partes.append(f"brigada {brigada}")
 
         filtro = FiltroMapa(
-            # El tablero solo marca un barrio a la vez; con varios se encuadra el
-            # municipio, que es lo más cercano que se puede mostrar.
+            # Un barrio se marca como barrio; varios, como lista: el tablero filtra por
+            # varios a la vez. Con barrios puestos el municipio sobra.
             barrio=bkeys[0] if bkeys and len(bkeys) == 1 else None,
-            municipio=None if bkeys and len(bkeys) == 1 else municipio,
+            barrios=bkeys if bkeys and len(bkeys) > 1 else None,
+            municipio=None if bkeys else municipio,
             zona=None if bkeys or municipio else zona,
             brigada=brigada,
             meses=meses,
@@ -1032,8 +1106,12 @@ class ToolRunner:
         actividad: str | None = None,
         zona: str | None = None,
         causa: str | None = None,
+        tecnico: str | list[str] | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        tecnicos, nombres_tec = self._tecnicos(tecnico)
+        if nombres_tec:
+            base += f" · {self._rotulo_tecnicos(nombres_tec)}"
         if subaccion:
             base += f" · {subaccion}"
         if tarifa:
@@ -1047,6 +1125,8 @@ class ToolRunner:
         # la cifra sería de estrato 3 y el mapa, de todos. Mejor no moverlo.
         if subaccion or tarifa or actividad or causa:
             filtro = None
+        if nombres_tec:
+            filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres_tec})
         datos = await self.metrics.efectividad(
             bkeys=bkeys,
             municipio=None if bkeys else municipio,
@@ -1058,6 +1138,7 @@ class ToolRunner:
             tarifa=tarifa,
             actividad=actividad,
             causa=causa,
+            tecnicos=tecnicos,
             etiqueta=base,
         )
 
@@ -1086,8 +1167,8 @@ class ToolRunner:
             )
             salida["detalle_por_barrio"] = [f.model_dump() for f in detalle]
             salida["nota_agrupacion"] = (
-                f"El nombre corresponde a {len(bkeys)} barrios del catálogo y las "
-                "cifras están sumadas. Dilo, y ofrece el desglose."
+                f"El recorte suma {len(bkeys)} barrios y las cifras están sumadas; el "
+                "desglose va en `detalle_por_barrio`. Dilo, y ofrece el desglose."
             )
         return salida, filtro
 
@@ -1106,13 +1187,20 @@ class ToolRunner:
         actividad: str | None = None,
         zona: str | None = None,
         causa: str | None = None,
+        tecnico: str | list[str] | None = None,
+        limite: int | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        tecnicos, nombres_tec = self._tecnicos(tecnico)
+        if nombres_tec:
+            base += f" · {self._rotulo_tecnicos(nombres_tec)}"
 
         # Mismo motivo que en `_efectividad`: el tablero no sabe filtrar por estas,
         # y moverlo a un recorte más ancho que la respuesta es peor que dejarlo quieto.
         if subaccion or tarifa or actividad or causa:
             filtro = None
+        if nombres_tec:
+            filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres_tec})
 
         # "Peor" se invierte según el criterio: con efectividad el peor es el de
         # menor valor, pero con pérdidas o fallidas el peor es el que más tiene.
@@ -1125,7 +1213,8 @@ class ToolRunner:
                 meses=meses, brigada=brigada, min_ordenes=minimo,
                 ascendente=ascendente, ordenar_por=ordenar_por,
                 subaccion=subaccion, tarifa=tarifa, actividad=actividad,
-                causa=causa,
+                causa=causa, tecnicos=tecnicos,
+                **({"limite": max(1, min(int(limite), 50))} if limite else {}),
             )
 
         filas = await consultar(bkeys, None if bkeys else municipio, min_ordenes)
@@ -1178,6 +1267,12 @@ class ToolRunner:
             )
         elif not filas:
             salida["nota"] = f"Sin resultados en {base} con el mínimo pedido."
+        elif (dimension == "tecnico" and not nombres_tec and limite == 1
+              and not (subaccion or tarifa or actividad or causa)):
+            # «¿Quién es el mejor?» deja a ese técnico (gestor) elegido en el tablero; antes
+            # dependía de que el modelo llamara `filtrar_mapa`. Con más filas es un listado:
+            # elegir al primero sería marcar a alguien que nadie pidió.
+            filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": [filas[0].nombre]})
         return salida, filtro
 
     async def _causas_no_efectivas(
@@ -1191,8 +1286,12 @@ class ToolRunner:
         tarifa: str | None = None,
         actividad: str | None = None,
         causa: str | None = None,
+        tecnico: str | list[str] | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        tecnicos, nombres_tec = self._tecnicos(tecnico)
+        if nombres_tec:
+            base += f" · {self._rotulo_tecnicos(nombres_tec)}"
         if subaccion:
             base += f" · {subaccion}"
         if tarifa:
@@ -1203,11 +1302,13 @@ class ToolRunner:
             base += f" · causa {causa}"
         if subaccion or tarifa or actividad or causa:
             filtro = None
+        if nombres_tec:
+            filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres_tec})
         filas = await self.metrics.causas(
             bkeys=bkeys, municipio=None if bkeys else municipio,
             zona=None if bkeys or municipio else zona,
             meses=meses, brigada=brigada, subaccion=subaccion, tarifa=tarifa,
-            actividad=actividad, causa=causa,
+            actividad=actividad, causa=causa, tecnicos=tecnicos,
         )
         return {"base": base, "causas": [f.model_dump() for f in filas]}, filtro
 
@@ -1368,7 +1469,7 @@ class ToolRunner:
             + (" Esta herramienta ya mueve el mapa a la primera fila: NO llames a `filtrar_mapa` "
                "después (resuelve el barrio a otra variante del nombre y el mapa no se mueve)."
                if filtro else
-               " El mapa no tiene filtro de gestor, así que no se mueve: no digas que lo marcaste.")
+               " El mapa no se movió: no digas que lo marcaste.")
         )
         return salida, filtro
 
@@ -1386,8 +1487,13 @@ class ToolRunner:
         primera = salida["filas"][0]
         agrupado = salida["agrupado_por"]
         if agrupado == "gestor":
-            return None  # el tablero no filtra por gestor
-        if agrupado == "zona":
+            # El nombre sale de gestores.json y debe existir tal cual en el catálogo del
+            # tablero; si no resuelve a uno solo, el mapa se queda quieto en vez de vaciarse.
+            try:
+                filtro = FiltroMapa(tecnicos=self._tecnicos(primera["nombre"])[1])
+            except FiltroNoResuelto:
+                return None
+        elif agrupado == "zona":
             filtro = FiltroMapa(zona=primera["nombre"])
         elif agrupado == "plan":
             filtro = FiltroMapa(brigada=primera["nombre"])
@@ -1402,11 +1508,57 @@ class ToolRunner:
         filtro.meses = meses or sorted(disponibles)
         return filtro
 
+    async def _ordenes_de_tecnico(
+        self,
+        tecnico: str | list[str] | None = None,
+        mes: Any = None,
+        barrio: str | list[str] | None = None,
+        municipio: str | None = None,
+        estado: str | None = None,
+        limite: int = 30,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        if not tecnico:
+            return {"error": "falta_tecnico", "sugerencia": (
+                "No dijeron de cuál. Pregunta el nombre; no elijas uno ni listes varios.")}, None
+        indices, nombres = self._tecnicos(tecnico)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, None)
+        base = f"{self._rotulo_tecnicos(nombres)} · {base}"
+        limite = max(1, min(int(limite), 100))
+        datos = self.metrics.visitas_tecnico(
+            indices or [], bkeys=bkeys, municipio=municipio, meses=meses, estado=estado, limite=limite)
+        filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres})
+        nota = (
+            f"Son {datos['total']} en total y se muestran {len(datos['filas'])}: di el total y que la "
+            "lista es parcial si hay más. `por_estado` es de TODAS, no solo de las mostradas. "
+            "ESCRIBE las filas en tu respuesta (fecha, barrio, estado, causa): el usuario no ve "
+            "esta lista en ninguna otra parte, así que no digas que «te la mostraste»."
+        )
+        if estado:
+            nota += f" Solo cuenta las {estado}s."
+        return {"base": base, **datos, "nota": nota + self._avisos(meses=meses, actividad=None, vacio=not datos["total"])}, filtro
+
     async def _meses_disponibles(self) -> tuple[dict[str, Any], None]:
         return {"meses": await self.metrics.meses_disponibles()}, None
 
     async def _filtrar_mapa(self, **kwargs: Any) -> tuple[dict[str, Any], FiltroMapa]:
+        # Los técnicos elegidos se mandan con el nombre del catálogo, que es el que
+        # conoce el tablero.
+        if kwargs.get("tecnico"):
+            kwargs["tecnicos"] = self._tecnicos(kwargs["tecnico"])[1]
         barrio = kwargs.get("barrio")
+        if isinstance(barrio, list):
+            nombres = [n for n in barrio if n]
+            barrio = nombres[0] if len(nombres) == 1 else None
+            kwargs["barrio"] = barrio
+            if len(nombres) > 1:
+                claves: list[str] = []
+                for nombre in nombres:
+                    claves += [c.bkey for c in await self._grupo(nombre, kwargs.get("municipio"))]
+                kwargs["barrios"] = list(dict.fromkeys(claves))
+                # Cada clave ya trae su municipio. Dejarlo daba un filtro contradictorio
+                # cuando uno de los barrios era de otro («Suan», que además es un
+                # municipio) y el mapa se quedaba quieto aunque la respuesta dijera que sí.
+                kwargs["municipio"] = None
         if barrio:
             municipio = kwargs.get("municipio")
             # Sin distinguir mayúsculas: «LOS ROBLES DE BARANOA» entraba al `if`

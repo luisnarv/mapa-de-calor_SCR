@@ -510,13 +510,13 @@ export default function LeafletMap({
       }
     }
 
-    if ((st.layers.bpoly || st.selBarrio != null) && geo.bp) {
-      const sel = st.selBarrio;
+    if ((st.layers.bpoly || st.barrios?.length) && geo.bp) {
+      const sel = st.barrios?.length ? new Set(st.barrios) : null;
       for (const p of geo.bp) {
-        // Con un barrio seleccionado, dibujar ÚNICAMENTE su límite (aunque la
+        // Con barrios seleccionados, dibujar ÚNICAMENTE sus límites (aunque la
         // capa de límites o la de marcadores por barrio estén desactivadas).
-        if (sel != null) {
-          if (p.b !== sel) continue;
+        if (sel) {
+          if (!sel.has(p.b)) continue;
         } else if (p.b >= 0) {
           // Filter by selected zone
           if (st.zona !== "" && dim.b_zona[p.b] !== +st.zona) continue;
@@ -638,13 +638,14 @@ export default function LeafletMap({
       const sets = [[], [], []];
       const pts = [];
       const I = A.IDX || [];
+      const selSet = st.barrios?.length ? new Set(st.barrios) : null;
 
       for (let j = 0; j < I.length; j++) {
         const i = I[j];
         const e = st.E_raw[i];
         if (!vis[e]) continue;
         if (st.causaPasa && !st.causaPasa(i)) continue;
-        if (st.selBarrio !== null && st.B_raw[i] !== st.selBarrio) continue;
+        if (selSet && !selSet.has(st.B_raw[i])) continue;
         if (st.layers.heat) {
           const lt = st.lat(i);
           const ln = st.lon(i);
@@ -662,8 +663,8 @@ export default function LeafletMap({
         // Rampas de calor de marca: efectivas (verde) · fallidas (lima) · perdidas (peligro)
         const grads = P.heat;
         const techo = [28, 14, 6];
-        const heatRadius = st.selBarrio !== null ? 25 : 14;
-        const heatBlur = st.selBarrio !== null ? 15 : 20;
+        const heatRadius = selSet ? 25 : 14;
+        const heatBlur = selSet ? 15 : 20;
 
         for (const e of [0, 1, 2]) {
           if (sets[e].length) {
@@ -693,10 +694,8 @@ export default function LeafletMap({
         // Si hay un barrio seleccionado desde la cola de triaje (o el mapa),
         // dibujamos SOLO ese barrio y lo remarcamos; si no hay selección,
         // se muestran todos como de costumbre.
-        const sel = st.selBarrio;
-
         for (const [b, o] of A.barrio) {
-          if (sel != null && b !== sel) continue;
+          if (selSet && !selSet.has(b)) continue;
 
           const c = geo.bc[b];
           if (!c) continue;
@@ -704,7 +703,7 @@ export default function LeafletMap({
           const n = (vis[0] ? efVis : 0) + (vis[1] ? o.fa : 0) + (vis[2] ? o.pe : 0);
           if (!n) continue;
 
-          const isSel = sel != null && b === sel;
+          const isSel = !!selSet && selSet.has(b);
           const hot = o.risk != null && o.risk >= st.hotspot;
           const rad = Math.min(20, 7 + Math.sqrt(n) * 0.7);
           const col = riskColor(o.risk);
@@ -761,7 +760,7 @@ export default function LeafletMap({
     } else {
       if (map.hasLayer(ptLayerRef.current)) map.removeLayer(ptLayerRef.current);
     }
-  }, [A, st.layers, st.est, st.causaSel, st.efOcultas, st.hotspot, st.selBarrio, theme]);
+  }, [A, st.layers, st.est, st.causaSel, st.efOcultas, st.hotspot, st.barrios, theme]);
 
   // 2 bis. Órdenes POR EJECUTAR del archivo cargado en el chat.
   //
@@ -927,6 +926,16 @@ export default function LeafletMap({
     if (basemapRef.current) basemapRef.current.getMaplibreMap().setStyle(BASEMAP[theme]);
     if (ptLayerRef.current && ptLayerRef.current._c) ptLayerRef.current._draw();
   }, [theme]);
+
+  // Al filtrar varios barrios el mapa los encuadra todos (uno solo se centra como el enfocado).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !st.barrios?.length || st.selBarrio != null) return;
+    const centros = st.barrios.map((b) => geo.bc[b]).filter(Boolean);
+    if (!centros.length) return;
+    if (centros.length === 1) map.flyTo(centros[0], 15, { duration: 0.6 });
+    else map.fitBounds(centros, { padding: [60, 60], maxZoom: 15, duration: 0.6 });
+  }, [st.barrios]);
 
   // Handle map flyTo when a neighborhood selection is triggered
   useEffect(() => {
