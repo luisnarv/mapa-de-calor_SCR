@@ -266,34 +266,29 @@ export function useTheme() {
 
 /* ---------- helpers de color de datos ---------- */
 
-/* En COBROS no existe «fallida», y el ámbar del riesgo medio es su color. Por eso
-   el índice usa una rampa propia (azul · violeta · magenta) que no se parece a
-   ningún estado de la gestión. Es un interruptor del módulo y no un parámetro:
-   riskColor se llama desde una veintena de sitios, todos dentro de un mismo
+/* En COBROS el índice tiene cuatro niveles (SCR, tres) y se pinta con los mismos verde y
+   rojo de los puntos GPS: efectiva y perdida. Es un interruptor del módulo y no un
+   parámetro: riskColor se llama desde una veintena de sitios, todos dentro de un mismo
    tablero, y la ruta fija el proceso una vez al montarlo. */
 let rampaCobros = false;
 export function usarRampaCobros(activa) {
   rampaCobros = activa;
 }
 
-const RIESGO_COBROS = {
-  light: {
-    fill: ["#3B8EC9", "#8A63D2", "#C2185B", "#7F0D3A"],
-    text: ["#1F6A9E", "#5E3BA8", "#A0124A", "#7F0D3A"],
-    ink: ["#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"],
-  },
-  dark: {
-    fill: ["#5BB4F0", "#B08CFF", "#FF6FA5", "#FF2D55"],
-    text: ["#5BB4F0", "#B08CFF", "#FF6FA5", "#FF5C7A"],
-    ink: [DARK.base, DARK.base, DARK.base, DARK.base],
-  },
-};
+// El cuarto nivel (crítico) es un rojo más cerrado que el de las perdidas: sin él, «alto» y
+// «crítico» serían el mismo color.
+const CRITICO_COBROS = { light: "#8E1B12", dark: "#FF1744" };
 
 // Cobros separa un cuarto nivel (crítico, desde 81); SCR sigue con tres.
 const nivelCobros = (r) => (r >= 81 ? 3 : r >= 61 ? 2 : r >= 31 ? 1 : 0);
 
 function rampa(p) {
-  return RIESGO_COBROS[p.name] || RIESGO_COBROS.dark;
+  const critico = CRITICO_COBROS[p.name] || CRITICO_COBROS.dark;
+  return {
+    fill: [p.st[0], p.st[1], p.st[2], critico],
+    text: [p.stText[0], p.stText[1], p.stText[2], critico],
+    ink: [p.stInk[0], p.stInk[1], p.stInk[2], p.name === "light" ? "#FFFFFF" : p.stInk[2]],
+  };
 }
 
 /** Color del índice de riesgo (0–100). `text: true` devuelve la variante con contraste AA. */
