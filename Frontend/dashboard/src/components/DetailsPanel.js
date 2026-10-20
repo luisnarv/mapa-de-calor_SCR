@@ -16,7 +16,6 @@ export default function DetailsPanel({
   geo,
   dayLabel,
   recommend,
-  techRoute,
   zoneAvg,
   actionsFor,
   onFilterChange,
@@ -685,7 +684,7 @@ export default function DetailsPanel({
   };
 
   // El análisis de un técnico, o el acumulado de varios: `o` es su agregado y `R` su recorrido.
-  const cuerpoTecnico = (o, R, acumulado = false) => {
+  const cuerpoTecnico = (o) => {
     let body = null;
     if (o) {
       const mainBrigList = [...o.brig.entries()].sort((a, b) => b[1] - a[1]);
@@ -718,26 +717,14 @@ export default function DetailsPanel({
               <b className="bad">{pct(o.pePct)}%</b>
             </div>
           </div>
-          <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`}>
-            {!V.sinAjuste && (
-            <div className="mini">
-              <span>Efect. ajustada</span>
-              <b className="ok">{pct(o.efAdj)}%</b>
+          {!V.sinAjuste && (
+            <div className="mini-grid" style={{ gridTemplateColumns: "1fr" }}>
+              <div className="mini">
+                <span>Efect. ajustada</span>
+                <b className="ok">{pct(o.efAdj)}%</b>
+              </div>
             </div>
-            )}
-            <div className="mini">
-              <span>Distancia</span>
-              <b>{num(R.km)} km</b>
-            </div>
-            <div className="mini">
-              <span>Mediana por {V.ordenMin || "orden"}</span>
-              <b>{R.medMin == null ? "—" : `${num(R.medMin)} min`}</b>
-            </div>
-            <div className="mini">
-              <span>{acumulado ? "Días-persona" : "Días en campo"}</span>
-              <b>{num(R.days)}</b>
-            </div>
-          </div>
+          )}
 
           <h3>Distribución de resultados</h3>
           <div className="dist-bar">
@@ -846,7 +833,7 @@ export default function DetailsPanel({
         </p>
       );
     } else if (sel.length === 1 || !AselTec) {
-      body = cuerpoTecnico(A.tec.get(sel[0]), techRoute(sel[0]));
+      body = cuerpoTecnico(A.tec.get(sel[0]));
     } else {
       // Varios: lo acumulado, o cada uno por separado.
       const modo = st.vistaMultiTec === "separado" ? "separado" : "acumulado";
@@ -856,13 +843,6 @@ export default function DetailsPanel({
         brig: new Map([...AselTec.brig].map(([g, x]) => [g, x.tot])),
         barrios: new Set(AselTec.barrio.keys()),
         causa: AselTec.causa
-      };
-      // Distancia y días se suman; la mediana de los tiempos no se puede sumar.
-      const rutas = sel.map((t) => techRoute(t));
-      const suma = {
-        km: rutas.reduce((a, r) => a + r.km, 0),
-        days: rutas.reduce((a, r) => a + r.days, 0),
-        medMin: null
       };
       body = (
         <>
@@ -881,11 +861,11 @@ export default function DetailsPanel({
             ))}
           </div>
           {modo === "acumulado"
-            ? cuerpoTecnico(grupo, suma, true)
+            ? cuerpoTecnico(grupo)
             : sel.map((t, i) => (
                 <details key={t} className="multi-b" open={i === 0}>
                   <summary>{gestor(dim.tecs[t])}</summary>
-                  {cuerpoTecnico(A.tec.get(t), rutas[i])}
+                  {cuerpoTecnico(A.tec.get(t))}
                 </details>
               ))}
         </>

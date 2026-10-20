@@ -1236,58 +1236,6 @@ export default function Tablero({ proceso }) {
     return [];
   };
 
-  // 5. TECH COV / ROUTES ENGINE
-  const techRoute = (tIdx) => {
-    const res = { pts: [], legs: [], km: 0, medMin: 0, days: 0 };
-    if (!data || !rawArrays) return res;
-    const { T, M, DAY } = rawArrays;
-    const pts = [];
-
-    for (let j = 0; j < IDX.length; j++) {
-      const i = IDX[j];
-      if (T[i] === tIdx) pts.push(i);
-    }
-    pts.sort((a, b) => M[a] - M[b]);
-
-    const days = new Map();
-    for (const i of pts) {
-      const d = DAY[i];
-      if (!days.has(d)) days.set(d, []);
-      days.get(d).push(i);
-    }
-
-    const haversine = (a1, o1, a2, o2) => {
-      const R = 6371,
-        tr = Math.PI / 180;
-      const dLa = (a2 - a1) * tr,
-        dLo = (o2 - o1) * tr;
-      const h =
-        Math.sin(dLa / 2) ** 2 +
-        Math.cos(a1 * tr) * Math.cos(a2 * tr) * Math.sin(dLo / 2) ** 2;
-      return 2 * R * Math.asin(Math.sqrt(h));
-    };
-
-    let km = 0;
-    const gaps = [];
-    const legs = [];
-
-    for (const [, arr] of days) {
-      for (let k = 1; k < arr.length; k++) {
-        const a = arr[k - 1],
-          b = arr[k];
-        const dist = haversine(lat(a), lon(a), lat(b), lon(b));
-        const dt = M[b] - M[a];
-        if (dist < 60) km += dist; // descarta saltos absurdos de GPS
-        if (dt >= 2 && dt <= 240) gaps.push(dt);
-      }
-      if (arr.length > 1) legs.push(arr);
-    }
-
-    gaps.sort((a, b) => a - b);
-    const med = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
-    return { pts, legs, km, medMin: med, days: days.size };
-  };
-
   // Helper date formatter
   const dayLabel = (d) => {
     const D0 = new Date((data ? data.meta.fecha_min : "2026-05-01") + "T00:00:00");
@@ -1718,7 +1666,6 @@ export default function Tablero({ proceso }) {
             geo={data.geo}
             dayLabel={dayLabel}
             recommend={recommend}
-            techRoute={techRoute}
             zoneAvg={zoneAvg}
             actionsFor={actionsFor}
             onFilterChange={handleFilterChange}
@@ -2479,7 +2426,6 @@ export default function Tablero({ proceso }) {
           geo={data.geo}
           dayLabel={dayLabel}
           recommend={recommend}
-          techRoute={techRoute}
           zoneAvg={zoneAvg}
           actionsFor={actionsFor}
           onFilterChange={handleFilterChange}
