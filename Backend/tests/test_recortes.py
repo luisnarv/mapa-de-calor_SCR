@@ -916,3 +916,201 @@ async def test_los_trabajos_sin_decir_de_cual_tecnico_piden_el_nombre(runner):
     salida, filtro = await runner.run("ordenes_de_tecnico", {"mes": "2026-01"})
 
     assert salida["error"] == "falta_tecnico" and filtro is None
+
+
+# --- Orden, conteos y comparaciones (batería de 105 preguntas del coordinador) ------------
+
+
+@pytest.mark.asyncio
+async def test_sin_decir_peores_el_ranking_por_perdidas_deja_primero_al_que_mas_pierde(runner):
+    """«Top 5 técnicos por pérdidas» salió con el de 1 pérdida arriba: el valor por defecto de
+    `peores` era justo el orden de «dónde NO hay pérdidas»."""
+    mas, _ = await runner.run("ranking", {"dimension": "tecnico", "ordenar_por": "perdidas", "min_ordenes": 1})
+    menos, _ = await runner.run(
+        "ranking", {"dimension": "tecnico", "ordenar_por": "perdidas", "orden": "menos", "min_ordenes": 1})
+
+    perdidas = [f["pe"] for f in mas["filas"]]
+    assert perdidas == sorted(perdidas, reverse=True) and perdidas[0] > perdidas[-1]
+    asc = [f["pe"] for f in menos["filas"]]
+    assert asc == sorted(asc) and mas["orden"] == "de más a menos"
+
+
+@pytest.mark.asyncio
+async def test_el_ranking_dice_cuantos_hay_antes_de_recortar(runner, metrics):
+    """«¿Cuántos técnicos trabajaron en agosto?» respondía «al menos 10»: no había cómo contarlos."""
+    salida, _ = await runner.run("ranking", {"dimension": "tecnico", "min_ordenes": 1, "limite": 1})
+
+    assert len(salida["filas"]) == 1
+    assert salida["total_en_recorte"] == len({t for t in metrics.datos.t})
+
+
+@pytest.mark.asyncio
+async def test_se_puede_ordenar_por_zona(runner):
+    salida, _ = await runner.run("ranking", {"dimension": "zona", "ordenar_por": "ef_pct", "min_ordenes": 1})
+
+    assert salida["filas"] and all(f["nombre"].startswith("ATLANTICO") for f in salida["filas"])
+
+
+@pytest.mark.asyncio
+async def test_los_barrios_que_se_nombran_en_un_ranking_quedan_marcados_con_su_clave(runner):
+    """Decía «filtré el mapa para estos barrios» y la acción solo traía el mes; marcarlos por
+    nombre además chocaba con los homónimos («¿La Central de Soledad o de Repelón?»)."""
+    salida, filtro = await runner.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "perdidas", "orden": "mas", "limite": 3, "min_ordenes": 1})
+
+    assert filtro.barrios == [f["nombre"] for f in salida["filas"]] and len(filtro.barrios) == 3
+
+
+@pytest.mark.asyncio
+async def test_comparar_tecnicos_da_una_fila_por_cada_uno(runner, metrics):
+    """«Compara a A y a B» los sumaba juntos y no decía quién rinde más."""
+    tecs = sorted(set(metrics.datos.t), key=lambda i: -metrics.datos.t.count(i))[:2]
+    nombres = [metrics.datos.tecs[i] for i in tecs]
+
+    salida, _ = await runner.run("efectividad", {"tecnico": nombres})
+
+    assert {f["nombre"] for f in salida["detalle_por_tecnico"]} == set(nombres)
+    assert sum(f["tot"] for f in salida["detalle_por_tecnico"]) == salida["metricas"]["tot"]
+
+
+@pytest.mark.asyncio
+async def test_si_el_mapa_no_se_movio_la_nota_lo_dice(runner):
+    """«Ya te marqué el estrato 6» cuando el tablero no tiene filtro de estrato."""
+    salida, filtro = await runner.run(
+        "ranking", {"dimension": "tarifa", "ordenar_por": "ef_pct", "min_ordenes": 1, "tarifa": "RESIDENCIAL | ESTRATO 3"})
+
+    assert filtro is None and "no digas que lo marcaste" in salida["nota"]
+
+
+@pytest.mark.asyncio
+async def test_un_nombre_de_persona_en_barrio_se_resuelve_como_tecnico(runner, metrics):
+    """«Mapa de calor de Alexander de los Reyes»: el modelo lo mandaba como barrio y la
+    respuesta era «no encontré el barrio»."""
+    nombre = metrics.datos.tecs[metrics.datos.t[0]]
+
+    salida, filtro = await runner.run("filtrar_mapa", {"barrio": nombre, "capas": ["calor"]})
+
+    assert filtro.tecnicos == [nombre] and filtro.barrio is None and filtro.capas == ["calor"]
+    # Algo que no es barrio ni técnico sigue siendo un barrio no encontrado.
+    salida, filtro = await runner.run("filtrar_mapa", {"barrio": "Zzzxqw"})
+    assert salida["error"] == "barrio_no_encontrado" and filtro is None
+
+
+# --- Análisis mensual: periodos, series, concentración, altas y bajas, cruces, riesgo ------
+
+
+@pytest.mark.asyncio
+async def test_comparar_periodos_es_la_resta_de_las_dos_consultas(runner, metrics):
+    """«¿Subió o bajó?»: la diferencia tiene que ser la de las dos cifras que da `efectividad`."""
+    a, b = metrics.datos.meses[-3:-1]
+
+    salida, filtro = await runner.run("comparar_periodos", {"mes_a": a, "mes_b": b})
+    ea, _ = await runner.run("efectividad", {"mes": a})
+    eb, _ = await runner.run("efectividad", {"mes": b})
+
+    total = salida["total"]
+    assert total["efectividad_a"] == round(ea["metricas"]["ef_adj"], 1) and total["efectividad_b"] == round(eb["metricas"]["ef_adj"], 1)
+    assert total["delta_efectividad_pp"] == round(total["efectividad_b"] - total["efectividad_a"], 1)
+    assert filtro is None and "no digas que lo marcaste" in salida["nota"]
+
+
+@pytest.mark.asyncio
+async def test_comparar_periodos_por_causa_muestra_que_causas_crecieron(runner, metrics):
+    a, b = metrics.datos.meses[-3:-1]
+
+    salida, _ = await runner.run(
+        "comparar_periodos", {"dimension": "causa", "mes_a": a, "mes_b": b, "ordenar_por": "volumen", "orden": "mas"})
+
+    deltas = [f["delta_tot"] for f in salida["filas"]]
+    assert deltas == sorted(deltas, reverse=True) and salida["periodo_a"] == a and salida["periodo_b"] == b
+
+
+@pytest.mark.asyncio
+async def test_serie_mensual_repite_la_efectividad_de_cada_mes(runner, metrics):
+    salida, _ = await runner.run("serie_mensual", {"municipio": "Soledad"})
+
+    for fila in salida["serie"]:
+        e, _ = await runner.run("efectividad", {"municipio": "Soledad", "mes": fila["mes"]})
+        assert fila["efectividad"] == e["metricas"]["ef_adj"] and fila["tot"] == e["metricas"]["tot"]
+    caidas = salida["meses_seguidos_en_caida"]
+    serie = [f["efectividad"] for f in salida["serie"]]
+    assert all(serie[-i - 1] < serie[-i - 2] for i in range(caidas))
+    assert caidas == len(serie) - 1 or serie[-caidas - 1] >= serie[-caidas - 2]
+
+
+@pytest.mark.asyncio
+async def test_concentracion_cuenta_cuantos_explican_el_porcentaje(runner, metrics):
+    salida, _ = await runner.run(
+        "concentracion", {"dimension": "barrio", "ordenar_por": "perdidas", "porcentaje": 50, "mes": "todo", "limite": 50})
+
+    n, total = salida["cuantos_lo_explican"], salida["total"]
+    valores = [f["perdidas"] for f in salida["primeros"]]
+    assert sum(valores[:n]) * 100 >= 50 * total
+    assert n == 1 or sum(valores[: n - 1]) * 100 < 50 * total
+    assert salida["entidades_con_valor"] <= salida["entidades_en_total"]
+
+
+@pytest.mark.asyncio
+async def test_las_bajas_son_quienes_trabajaron_el_mes_anterior_y_ya_no_aparecen(runner, metrics):
+    datos, por_mes = metrics.datos, metrics.tecnicos_por_mes()
+    k = len(datos.meses) - 2  # el último suele estar incompleto
+    esperadas = {datos.tecs[t] for t, m in por_mes.items() if (k - 1) in m and k not in m}
+    nuevas = {datos.tecs[t] for t, m in por_mes.items() if min(m) == k}
+
+    bajas, _ = await runner.run("altas_y_bajas", {"tipo": "bajas", "mes": datos.meses[k], "limite": 100})
+    altas, _ = await runner.run("altas_y_bajas", {"tipo": "altas", "mes": datos.meses[k], "limite": 100})
+
+    assert {f["nombre"] for f in bajas["filas"]} == esperadas and bajas["total"] == len(esperadas)
+    assert {f["nombre"] for f in altas["filas"]} == nuevas
+    primero, _ = await runner.run("altas_y_bajas", {"tipo": "altas", "mes": datos.meses[0]})
+    assert primero["error"] == "sin_mes_anterior"
+
+
+@pytest.mark.asyncio
+async def test_cruzar_reparte_el_total_entre_las_combinaciones(runner, metrics):
+    mes = metrics.datos.meses[-2]
+
+    cruce, _ = await runner.run(
+        "cruzar", {"dimension_a": "brigada", "dimension_b": "municipio", "min_ordenes": 1, "mes": mes, "limite": 50})
+    total, _ = await runner.run("efectividad", {"mes": mes})
+
+    assert sum(f["tot"] for f in cruce["filas"]) <= total["metricas"]["tot"]
+    if cruce["total_combinaciones"] <= 50:
+        assert sum(f["tot"] for f in cruce["filas"]) == total["metricas"]["tot"]
+    mas, _ = await runner.run("cruzar", {"dimension_a": "tipo_os", "dimension_b": "zona", "mes": mes})
+    assert mas["filas"] and mas["filas"][0]["tot"] >= mas["filas"][-1]["tot"]
+
+
+@pytest.mark.asyncio
+async def test_el_desempeno_contra_el_grupo_es_la_diferencia_de_dos_cifras(runner, metrics):
+    mes = metrics.datos.meses[-2]
+
+    salida, _ = await runner.run("desempeno_vs_grupo", {"grupo": "brigada", "mes": mes, "min_ordenes": 20, "limite": 5})
+
+    assert salida["filas"]
+    for f in salida["filas"]:
+        assert f["diferencia_pp"] == round(f["efectividad"] - f["efectividad_del_grupo"], 1)
+        grupo, _ = await runner.run("efectividad", {"brigada": f["brigada"], "mes": mes})
+        assert f["efectividad_del_grupo"] == round(grupo["metricas"]["ef_adj"], 1)
+    diferencias = [f["diferencia_pp"] for f in salida["filas"]]
+    assert diferencias == sorted(diferencias)  # por defecto, primero los que quedan más por debajo
+
+
+@pytest.mark.asyncio
+async def test_los_barrios_criticos_salen_ordenados_y_se_marcan_si_piden_pocos(runner, metrics):
+    salida, filtro = await runner.run("barrios_criticos", {"mes": metrics.datos.meses[-2], "limite": 3, "min_ordenes": 10})
+
+    riesgos = [f["riesgo"] for f in salida["filas"]]
+    assert riesgos == sorted(riesgos, reverse=True) and all(0 <= r <= 100 for r in riesgos)
+    assert filtro.barrios == [f["barrio"] for f in salida["filas"]]
+    sin_limite, sin_filtro = await runner.run("barrios_criticos", {"mes": metrics.datos.meses[-2]})
+    assert sin_filtro is None and len(sin_limite["filas"]) == 10
+
+
+def test_el_indice_de_riesgo_de_cobros_corta_en_1_2_y_3_veces_el_promedio():
+    """Los cortes de `Tablero.js`: 1× cae en 30, 2× en 60 y 3× en 80; de ahí a 100."""
+    from app.services.riesgo import _cuantil, _nivel_cobros
+
+    assert [_nivel_cobros(m) for m in (0, 0.5, 0.99, 1, 1.5, 2, 3, 6, 9)] == [0, 15, 30, 31, 46, 61, 81, 100, 100]
+    assert _cuantil([1.0, 2.0, 3.0, 4.0, 5.0], 0.9) == 4.6 and _cuantil([], 0.9) == 0.0
+

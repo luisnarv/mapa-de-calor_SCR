@@ -20,7 +20,11 @@ from app.services.carga_ordenes import Orden
 from app.services.cargue_store import CargueGuardado, CargueStore
 from app.services.propension_service import PropensionServiceError
 from app.services import recaudo_barrio
+from app.schemas.metrics import Efectividad
+from app.services import riesgo
 from app.services.metrics_service import (
+    CRITERIOS,
+    DIMENSIONES,
     FiltroNoResuelto,
     BarrioAmbiguo,
     BarrioNoEncontrado,
@@ -189,7 +193,7 @@ TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "dimension": {
                         "type": "string",
-                        "enum": ["brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad", "municipio", "causa"],
+                        "enum": ["brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad", "municipio", "zona", "causa"],
                         "description": "Qué se compara. En COBROS, 'causa' lista las anomalías.",
                     },
                     "barrio": _BARRIO,
@@ -218,16 +222,24 @@ TOOLS: list[dict[str, Any]] = [
                             "se ejecutaron pero sí se pagan, que es otra cosa."
                         ),
                     },
+                    "orden": {
+                        "type": "string",
+                        "enum": ["mas", "menos"],
+                        "description": (
+                            "Cuál extremo va primero del criterio elegido: «mas» deja "
+                            "arriba al que MÁS tiene (más pérdidas, más volumen, mayor "
+                            "efectividad) y «menos» al que MENOS. Úsalo siempre que "
+                            "ordenes por perdidas, fallidas, volumen o efectivas. Para "
+                            "«¿dónde NO hay…?» (barrios sin pérdidas) usa «menos», que "
+                            "deja primero a los que tienen cero, y mira cuántos son 0."
+                        ),
+                    },
                     "peores": {
                         "type": "boolean",
                         "description": (
-                            "true para los peores. Con efectividad son los de menor "
-                            "valor; con perdidas o fallidas, los de mayor. Por "
-                            "defecto, los mejores. Para «¿dónde NO hay…?» (barrios sin "
-                            "pérdidas, sin fallidas) NO uses peores: ordena por ese "
-                            "criterio con peores en false, que deja primero a los que "
-                            "tienen cero, y mira cuántos son 0. La lista de los que "
-                            "más tienen no prueba que no exista alguno sin ellas."
+                            "Solo para efectividad: true para los peores (los de menor "
+                            "valor). Por defecto, los mejores. Con perdidas o fallidas "
+                            "usa `orden`, no esto."
                         ),
                     },
                     "min_ordenes": {
@@ -639,8 +651,23 @@ TOOL_RECAUDO: dict[str, Any] = {
                     "description": "Nombre del barrio (o lista de nombres), completo o parcial, SIN el municipio (ese va en `municipio`). Si hay homónimos en varios municipios se devuelven todos.",
                 },
                 "ordenar_por": {
-                    "type": "string", "enum": ["recaudo", "saldo", "cuentas"],
-                    "description": "Por defecto 'recaudo'.",
+                    "type": "string",
+                    "enum": ["recaudo", "saldo", "cuentas", "recaudo_sobre_saldo", "recaudo_por_gestion",
+                             "variacion_saldo", "variacion_recaudo"],
+                    "description": (
+                        "Por defecto 'recaudo'. 'recaudo_sobre_saldo' es la tasa de recuperación: lo "
+                        "recaudado ÷ la deuda al cierre. 'recaudo_por_gestion' es lo recaudado ÷ las gestiones "
+                        "(solo por gestor, zona o plan). 'variacion_saldo' y 'variacion_recaudo' ordenan por "
+                        "cuánto cambió respecto de `comparar_con`."
+                    ),
+                },
+                "comparar_con": {
+                    "type": "string",
+                    "description": (
+                        "Un mes «YYYY-MM» contra el que se compara `mes`: cada fila trae el saldo y el recaudo "
+                        "de los dos y su variación. Para «¿en qué barrios subió la deuda de agosto a septiembre?»: "
+                        "mes «2026-09», comparar_con «2026-08», ordenar_por «variacion_saldo»."
+                    ),
                 },
                 "zona": {
                     "type": "string",
@@ -650,8 +677,20 @@ TOOL_RECAUDO: dict[str, Any] = {
                     "type": "string",
                     "description": "Plan de gestión (Cobro Persuasivo, Multifamiliar, Visita Personalizada). Solo con agrupar_por gestor, zona o plan.",
                 },
+                "gestor": {
+                    **_TECNICO,
+                    "description": (
+                        "Nombre del gestor (o lista), completo o parcial y en cualquier orden. Úsalo "
+                        "para «cuánto recaudó Fulano»: el resultado es de ese gestor, no de un "
+                        "municipio ni de un barrio. Con él, el mapa deja marcado al gestor."
+                    ),
+                },
                 "peores": {"type": "boolean", "description": "true para los de menor valor en vez de los mayores."},
-                "limite": {"type": "integer", "description": "Cuántas filas devolver. Por defecto 10, máximo 50."},
+                "limite": {"type": "integer", "description": (
+                    "Cuántas filas devolver. Por defecto 10, máximo 50. Pasa 1 cuando preguntan por "
+                    "UNO («¿qué barrio recaudó más?»): así el mapa lo marca. En una pregunta de "
+                    "totales («¿cuánto se recaudó?») el mapa no se mueve."
+                )},
             },
         },
     },
@@ -664,8 +703,8 @@ TOOLS.append({
         "description": (
             "Lista las visitas de un técnico, una por una (fecha, barrio, estado, causa, NIC), de la "
             "más reciente a la más antigua. Úsala cuando pidan «los trabajos», «las visitas», "
-            "«las órdenes» o «las gestiones» de un técnico: son lo mismo. Para totales o "
-            "porcentajes usa `efectividad`, no esta."
+            "«las órdenes» o «las gestiones» de un técnico: son lo mismo. Para totales, conteos o "
+            "porcentajes usa `efectividad` (si preguntan «¿cuántas visitas hizo?», no listes nada)."
         ),
         "parameters": {
             "type": "object",
@@ -684,6 +723,134 @@ TOOLS.append({
         },
     },
 })
+
+_ORDEN_DELTA = {
+    "type": "string", "enum": ["mas", "menos"],
+    "description": "«mas»: primero los que más subieron (o más tienen); «menos»: primero los que más bajaron.",
+}
+_CRITERIOS_CRUCE = ["ef_adj", "ef_pct", "perdidas", "pct_perdidas", "fallidas", "pct_fallidas", "volumen", "efectivas"]
+_FILTROS_AMBITO = {
+    "municipio": _MUNICIPIO, "barrio": _BARRIO, "zona": {"type": "string"}, "brigada": _BRIGADA,
+    "tecnico": _TECNICO,
+}
+
+TOOLS.extend([
+    {"type": "function", "function": {
+        "name": "comparar_periodos",
+        "description": (
+            "Compara DOS periodos (agosto contra septiembre) en efectividad, pérdidas y volumen, en "
+            "total o desglosado por una dimensión. Úsala para «¿subió o bajó?», «¿quién viene "
+            "mejorando o empeorando?», «¿por qué cayó?» (dimension «causa»: qué causas crecieron), "
+            "«efectividad vs el mes pasado de cada municipio». Sin periodos compara el último mes con el "
+            "anterior. La diferencia es de B menos A, en puntos porcentuales. En COBROS, «brigada» es el plan."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "dimension": {"type": "string", "enum": ["ninguna", *DIMENSIONES],
+                          "description": "Por qué se desglosa. «ninguna» da solo el total de cada periodo."},
+            "mes_a": {**_MES, "description": "Periodo base (el anterior). Un mes «YYYY-MM» o una lista."},
+            "mes_b": {**_MES, "description": "Periodo nuevo, el que se compara contra el base."},
+            **_FILTROS_AMBITO,
+            "min_ordenes": {"type": "integer", "description": "Mínimo de órdenes en CADA periodo para entrar (30 por defecto)."},
+            "ordenar_por": {"type": "string", "enum": ["efectividad", "perdidas", "volumen"],
+                            "description": "Cuál diferencia ordena la lista. Por defecto efectividad."},
+            "orden": _ORDEN_DELTA,
+            "limite": {"type": "integer", "description": "Filas a devolver (10 por defecto)."},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "serie_mensual",
+        "description": (
+            "La efectividad y las pérdidas de UNA entidad (un técnico, barrio, municipio, brigada o el total) "
+            "mes por mes, con cuántos meses lleva seguidos en caída. Úsala para «¿cómo ha evolucionado…?», "
+            "«¿lleva meses cayendo?», «¿cuál fue su mejor mes?»."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "mes": {**_MES, "description": "Meses a incluir. Por defecto todos los que hay."},
+            **_FILTROS_AMBITO,
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "concentracion",
+        "description": (
+            "Cuántos barrios, técnicos, municipios… explican un porcentaje del total de pérdidas, fallidas, "
+            "volumen o efectivas (Pareto). Úsala para «¿cuántos barrios explican el 50 % de las pérdidas?», "
+            "«¿qué técnicos concentran las fallidas?»."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "dimension": {"type": "string", "enum": list(DIMENSIONES), "description": "Qué se agrupa. Por defecto barrio."},
+            "ordenar_por": {"type": "string", "enum": ["perdidas", "fallidas", "volumen", "efectivas"],
+                            "description": "Qué se reparte. Por defecto perdidas."},
+            "porcentaje": {"type": "integer", "description": "Qué parte del total (50 por defecto)."},
+            "mes": _MES, "municipio": _MUNICIPIO, "zona": {"type": "string"}, "brigada": _BRIGADA,
+            "limite": {"type": "integer", "description": "Cuántos de los primeros mostrar (10 por defecto)."},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "altas_y_bajas",
+        "description": (
+            "Técnicos que aparecen por primera vez en un mes (altas) o que trabajaron el mes anterior y ya "
+            "no aparecen (bajas). Úsala para «técnicos que dejaron de aparecer», «técnicos nuevos», «sin "
+            "actividad el último mes»."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "tipo": {"type": "string", "enum": ["altas", "bajas"]},
+            "mes": {"type": "string", "description": "Mes de referencia «YYYY-MM». Por defecto el último con datos."},
+            "limite": {"type": "integer", "description": "Filas a devolver (30 por defecto)."},
+        }, "required": ["tipo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "cruzar",
+        "description": (
+            "Efectividad de cada combinación de dos dimensiones: técnico × barrio, brigada × municipio, "
+            "tipo de orden × tarifa… Úsala cuando la pregunta mezcla dos cosas («¿en qué barrio le va peor "
+            "a cada brigada?», «¿qué técnico rinde peor en qué municipio?»). En COBROS, «brigada» es el plan."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "dimension_a": {"type": "string", "enum": list(DIMENSIONES)},
+            "dimension_b": {"type": "string", "enum": list(DIMENSIONES)},
+            "ordenar_por": {"type": "string", "enum": _CRITERIOS_CRUCE, "description": "Por defecto volumen."},
+            "orden": {"type": "string", "enum": ["mas", "menos"],
+                      "description": "«mas» deja arriba al que más tiene del criterio; «menos» al que menos."},
+            "min_ordenes": {"type": "integer", "description": "Mínimo por combinación (10 por defecto)."},
+            "mes": _MES, **_FILTROS_AMBITO,
+            "limite": {"type": "integer", "description": "Filas a devolver (10 por defecto)."},
+        }, "required": ["dimension_a", "dimension_b"]},
+    }},
+    {"type": "function", "function": {
+        "name": "barrios_criticos",
+        "description": (
+            "Los barrios más críticos según el índice de riesgo (0 a 100) de la cola de triaje del tablero: "
+            "es el mismo número que ve el usuario en pantalla. Úsala para «¿qué barrios son críticos?», "
+            "«¿dónde está el mayor riesgo?», «¿cuáles están en riesgo alto?». En SCR combina pérdidas, "
+            "fallidas controlables, volumen, tendencia y el desempeño histórico de sus técnicos; en COBROS, "
+            "cuántas veces el promedio de pérdidas pierde el barrio."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "municipio": _MUNICIPIO, "zona": {"type": "string"}, "brigada": _BRIGADA, "mes": _MES,
+            "min_ordenes": {"type": "integer",
+                            "description": "Mínimo de órdenes del barrio (10 en SCR, 1 en COBROS, como el tablero)."},
+            "solo_altos": {"type": "boolean", "description": "true: solo los de riesgo Alta o Crítica (61 o más)."},
+            "limite": {"type": "integer", "description": "Cuántos devolver. Hasta 10 quedan marcados en el mapa."},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "desempeno_vs_grupo",
+        "description": (
+            "Compara a cada técnico con el promedio de su brigada, municipio o zona: cuántos puntos queda por "
+            "encima o por debajo. Úsala para «¿quién está por debajo del promedio de su brigada?» o «el técnico "
+            "X contra su brigada» (pasa `tecnico`). En COBROS, la brigada es el plan."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "grupo": {"type": "string", "enum": ["brigada", "municipio", "zona"]},
+            "tecnico": _TECNICO,
+            "mes": _MES,
+            "min_ordenes": {"type": "integer", "description": "Mínimo de órdenes del técnico en el grupo (30 por defecto)."},
+            "orden": {"type": "string", "enum": ["mas", "menos"],
+                      "description": "«menos» (por defecto): primero los que quedan más por debajo del grupo."},
+            "limite": {"type": "integer", "description": "Filas a devolver (10 por defecto)."},
+        }},
+    }},
+])
 
 # El filtro por técnico lo comparten las consultas y el filtro del mapa.
 for _t in TOOLS:
@@ -840,7 +1007,15 @@ def etiqueta_periodo(meses: list[str] | None) -> str:
 
 # En cobros el mapa no muestra la efectividad ajustada; si el modelo la ve en el
 # resultado la termina diciendo. `noctrl` es solo su denominador.
-_CAMPOS_AJUSTADA = frozenset({"ef_adj", "ef_adj_pond", "efectividad_ajustada", "noctrl"})
+# Herramientas que pueden dejar algo marcado en el mapa; si no lo hicieron, hay que decirlo.
+_SEÑALAN_EN_EL_MAPA = frozenset({
+    "efectividad", "ranking", "causas_no_efectivas", "recaudo", "comparar_periodos", "serie_mensual",
+    "concentracion", "altas_y_bajas", "cruzar", "desempeno_vs_grupo", "barrios_criticos",
+})
+
+# En COBROS tampoco existe la gestión «fallida» (siempre 0): verla en la salida llevaba a
+# responder «hubo muy pocas fallidas» en vez de «ese estado no existe».
+_CAMPOS_AJUSTADA = frozenset({"ef_adj", "ef_adj_pond", "efectividad_ajustada", "noctrl", "fa"})
 
 
 def _sin_ajustada(valor: Any) -> Any:
@@ -975,6 +1150,10 @@ class ToolRunner:
             return {"error": f"Herramienta desconocida: {nombre}"}, None
         try:
             resultado, filtro = await getattr(self, f"_{nombre}")(**args)
+            if (filtro is None and nombre in _SEÑALAN_EN_EL_MAPA and isinstance(resultado, dict)
+                    and isinstance(resultado.get("nota"), str) and "no se movió" not in resultado["nota"]):
+                # Sin esto el modelo decía «ya te marqué el estrato 6» cuando el mapa no se movió.
+                resultado["nota"] += " El mapa no se movió con esta consulta: no digas que lo marcaste."
             return (_sin_ajustada(resultado) if self._es_cobros else resultado), filtro
         except BarrioNoEncontrado as exc:
             return {
@@ -1168,6 +1347,17 @@ class ToolRunner:
             ),
         }
         salida["nota"] += self._avisos(meses=meses, actividad=actividad, vacio=datos.tot == 0)
+        if tecnicos and len(tecnicos) > 1:
+            # Comparar es dar las cifras de cada uno: sumados juntos no se distingue quién rinde más.
+            detalle_tec = await self.metrics.ranking(
+                dimension="tecnico", bkeys=bkeys, municipio=None if bkeys else municipio, meses=meses,
+                brigada=brigada, tecnicos=tecnicos, min_ordenes=0, limite=len(tecnicos),
+            )
+            salida["detalle_por_tecnico"] = [f.model_dump() for f in detalle_tec]
+            salida["nota_agrupacion_tecnicos"] = (
+                f"`metricas` suma {len(tecnicos)} técnicos juntos. Si piden compararlos o dar sus "
+                "cifras, usa `detalle_por_tecnico`: una fila por cada uno, con sus propias órdenes."
+            )
         if bkeys and len(bkeys) > 1:
             # Una sola pasada agrupada, no una consulta por barrio.
             detalle = await self.metrics.ranking(
@@ -1188,7 +1378,8 @@ class ToolRunner:
         municipio: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
-        peores: bool = False,
+        peores: bool | None = None,
+        orden: str | None = None,
         min_ordenes: int = 10,
         ordenar_por: str = "ef_adj",
         subaccion: str | None = None,
@@ -1211,9 +1402,16 @@ class ToolRunner:
         if nombres_tec:
             filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres_tec})
 
-        # "Peor" se invierte según el criterio: con efectividad el peor es el de
-        # menor valor, pero con pérdidas o fallidas el peor es el que más tiene.
-        ascendente = not peores if ordenar_por in MAYOR_ES_PEOR else peores
+        # `orden` manda: «mas» es el que más tiene, sin importar el criterio. Sin él, con
+        # efectividad `peores` pide los de menor valor; y con pérdidas o fallidas el peor es
+        # el que más tiene, así que omitir `peores` deja primero a los que MÁS pierden
+        # (el valor por defecto era lo contrario: «top 5 por pérdidas» salía con el de 1).
+        if orden:
+            ascendente = orden == "menos"
+        elif ordenar_por in MAYOR_ES_PEOR:
+            ascendente = peores is False
+        else:
+            ascendente = bool(peores)
 
         async def consultar(en_barrios, en_municipio, minimo):
             return await self.metrics.ranking(
@@ -1259,7 +1457,8 @@ class ToolRunner:
         salida = {
             "base": base,
             "dimension": dimension,
-            "orden": "peor a mejor" if peores else "mejor a peor",
+            "orden": "de menos a más" if ascendente else "de más a menos",
+            "total_en_recorte": filas.total,
             "criterio": ordenar_por.replace("ef_adj", "ef_pct") if self._es_cobros else ordenar_por,
             "min_ordenes": min_ordenes,
             "filas": [f.model_dump() for f in filas],
@@ -1282,6 +1481,18 @@ class ToolRunner:
             # dependía de que el modelo llamara `filtrar_mapa`. Con más filas es un listado:
             # elegir al primero sería marcar a alguien que nadie pidió.
             filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": [filas[0].nombre]})
+        elif (dimension == "barrio" and limite and 1 <= len(filas) <= 10
+              and not (subaccion or tarifa or actividad or causa)):
+            # Los barrios que se nombran en la respuesta quedan marcados, con su clave
+            # («MUNICIPIO | BARRIO»): marcarlos por nombre chocaba con los homónimos y dejaba
+            # al modelo preguntando «¿La Central de Soledad o la de Repelón?» sin que viniera al caso.
+            claves = [f.nombre for f in filas]
+            municipios = {c.partition(" | ")[0] for c in claves}
+            filtro = (filtro or FiltroMapa()).model_copy(update={
+                "barrio": claves[0] if len(claves) == 1 else None,
+                "barrios": claves if len(claves) > 1 else None,
+                "municipio": filtro.municipio if filtro and len(municipios) == 1 else None,
+            })
         return salida, filtro
 
     async def _causas_no_efectivas(
@@ -1428,16 +1639,23 @@ class ToolRunner:
         barrio: str | None = None,
         zona: str | None = None,
         plan: str | None = None,
+        gestor: str | list[str] | None = None,
         ordenar_por: str = "recaudo",
         peores: bool = False,
-        limite: int = 10,
+        limite: int | None = None,
+        comparar_con: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         if not self._es_cobros:
             return {"error": "recaudo_solo_cobros",
                     "sugerencia": "El recaudo por barrio solo existe en COBROS."}, None
         # gestores.json llega hasta zona, municipio y plan: darle un barrio o un filtro que
         # no tiene sería inventarlo, así que se avisa en vez de responder con otro recorte.
-        por_gestor = agrupar_por in ("gestor", "zona", "plan")
+        # Un gestor nombrado se consulta en gestores.json, que es donde está su recaudo: el
+        # agrupado por defecto («barrio») no lo tiene y respondía con otro recorte.
+        por_gestor = agrupar_por in ("gestor", "zona", "plan") or bool(gestor) or ordenar_por == "recaudo_por_gestion"
+        if (gestor or ordenar_por == "recaudo_por_gestion") and agrupar_por in ("barrio", "municipio"):
+            agrupar_por = "gestor"
+        nombres_gestor = self._tecnicos(gestor)[1] if gestor else None
         if por_gestor and barrio:
             return {"error": "recaudo_gestor_no_cruza_barrio", "sugerencia": (
                 "El recaudo por gestor, zona o plan no se cruza con el barrio. Dilo, y ofrece "
@@ -1458,21 +1676,65 @@ class ToolRunner:
             # Igual que `_recorte`: sin periodo pedido se hereda el de la pantalla.
             meses = sorted(m for m in self.vista.meses if m in tabla.meses) or None
 
-        limite = max(1, min(int(limite), 50))
-        if por_gestor:
-            salida = recaudo_barrio.consultar_gestores(
-                tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio, zona=zona,
-                plan=plan, ordenar_por=ordenar_por, peores=peores, limite=limite)
+        pidio_limite = limite is not None
+        limite = max(1, min(int(limite or 10), 50))
+        variacion = ordenar_por in ("variacion_saldo", "variacion_recaudo")
+        if variacion and not comparar_con:
+            return {"error": "falta_comparar_con", "sugerencia": (
+                "Una variación necesita dos meses: pasa `mes` y `comparar_con`.")}, None
+
+        async def consulta(meses_de: list[str] | None, tope: int, criterio: str) -> dict[str, Any]:
+            if por_gestor:
+                # Las gestiones salen del payload (el recaudo, de gestores.json): el recaudo por gestión
+                # es la razón entre los dos, con los mismos meses y recortes.
+                conteo = []
+                if criterio == "recaudo_por_gestion":
+                    dimension = {"gestor": "tecnico", "zona": "zona", "plan": "brigada"}[agrupar_por]
+                    conteo = await self.metrics.ranking(
+                        dimension=dimension, municipio=municipio, zona=zona if agrupar_por != "zona" else None,
+                        brigada=plan, meses=meses_de, min_ordenes=0, limite=10**6, ordenar_por="volumen")
+                return recaudo_barrio.consultar_gestores(
+                    tabla, agrupar_por=agrupar_por, meses=meses_de, municipio=municipio, zona=zona,
+                    plan=plan, gestores=nombres_gestor, gestiones={f.nombre: f.tot for f in conteo},
+                    ordenar_por=criterio, peores=peores, limite=tope)
+            return recaudo_barrio.consultar(
+                tabla, agrupar_por=agrupar_por, meses=meses_de, municipio=municipio,
+                barrio=barrio, ordenar_por=criterio, peores=peores, limite=tope)
+
+        if variacion:
+            antes_meses = expandir_meses(comparar_con, tabla.meses)
+            todos = 10**6
+            ahora, antes = await consulta(meses, todos, "recaudo"), await consulta(antes_meses, todos, "recaudo")
+            filas = recaudo_barrio.comparar(ahora, antes)
+            filas.sort(key=lambda f: f[ordenar_por], reverse=True)
+            # Los dos extremos a la vez: «subió» y «bajó» son la misma consulta y el modelo acertaba
+            # el sentido solo a veces (explicaba una caída con los barrios que habían subido).
+            salida = {**ahora, "filas": (filas[::-1] if peores else filas)[:limite], "grupos_en_total": len(filas),
+                      "mayores_aumentos": filas[:limite], "mayores_caidas": filas[::-1][:limite],
+                      "comparado_con": antes["meses"], "provisional": sorted({*ahora["provisional"], *antes["provisional"]})}
         else:
-            salida = recaudo_barrio.consultar(
-                tabla, agrupar_por=agrupar_por, meses=meses, municipio=municipio,
-                barrio=barrio, ordenar_por=ordenar_por, peores=peores, limite=limite)
+            salida = await consulta(meses, limite, ordenar_por)
         donde = municipio or zona or "todo el Atlántico"
         salida["base"] = " · ".join(
-            p for p in (donde, f"plan {plan}" if plan else None, etiqueta_periodo(meses)) if p)
-        filtro = self._filtro_recaudo(salida, tabla.meses, meses)
+            p for p in (self._rotulo_tecnicos(nombres_gestor) if nombres_gestor else None,
+                        donde, f"plan {plan}" if plan else None, etiqueta_periodo(meses)) if p)
+        if nombres_gestor:
+            # Preguntaron por esos gestores: el mapa los marca, y no «el primero de la lista».
+            filtro = FiltroMapa(tecnicos=nombres_gestor, meses=meses or sorted(tabla.meses))
+        elif pidio_limite and limite <= 3:
+            filtro = self._filtro_recaudo(salida, tabla.meses, meses)
+        else:
+            # Una pregunta de totales o un listado no señala nada: antes el mapa saltaba al
+            # primer barrio del agrupado por defecto («¿cuánto se recaudó en octubre?»).
+            filtro = None
         salida["nota"] = (
-            "Cifras en pesos: `recaudo` es lo recaudado y `saldo` la deuda de esas cuentas. "
+            "Cifras en pesos: `recaudo` es lo recaudado (se suma entre meses) y `saldo` la deuda de "
+            "esas cuentas, que es la del último mes con datos (`saldo_al_cierre_de`), NO una suma "
+            "de meses: dilo así. Si hay más filas que las mostradas (`grupos_en_total`) di «X de N». "
+            "`recaudo_sobre_saldo` es una razón (0,05 = 5 %): da el porcentaje y di que es recaudo ÷ saldo, "
+            "no una tasa oficial. Con `comparar_con`, cada fila trae el valor de los dos meses y su variación; "
+            "si alguno es provisional, avísalo. Para «¿por qué bajó?» usa `mayores_caidas` y para «subió» "
+            "`mayores_aumentos`: traen los dos extremos. "
             "`total_del_recorte` suma TODAS las filas del recorte pedido: no es el total de una "
             "fila, no lo presentes como tal. Di sobre qué base están calculadas."
             + (" Esta herramienta ya mueve el mapa a la primera fila: NO llames a `filtrar_mapa` "
@@ -1480,6 +1742,8 @@ class ToolRunner:
                if filtro else
                " El mapa no se movió: no digas que lo marcaste.")
         )
+        # Con un mes a medias, «bajó el recaudo» suele ser solo que faltan días: se avisa en la nota.
+        salida["nota"] += self._avisos(meses=sorted({*(meses or []), *salida.get("comparado_con", [])}), actividad=None)
         return salida, filtro
 
     def _filtro_recaudo(
@@ -1547,6 +1811,297 @@ class ToolRunner:
             nota += f" Solo cuenta las {estado}s."
         return {"base": base, **datos, "nota": nota + self._avisos(meses=meses, actividad=None, vacio=not datos["total"])}, filtro
 
+    # --- Análisis mensual: periodos, series, concentración, altas y bajas, cruces ----------
+
+    def _metrica(self, fila: Efectividad) -> float:
+        """La efectividad con la que se compara: la ajustada en SCR y la cruda en COBROS."""
+        return fila.ef_pct if self._es_cobros else fila.ef_adj
+
+    async def _comparar_periodos(
+        self,
+        dimension: str = "ninguna",
+        mes_a: Any = None,
+        mes_b: Any = None,
+        municipio: str | None = None,
+        barrio: str | list[str] | None = None,
+        zona: str | None = None,
+        brigada: str | None = None,
+        tecnico: str | list[str] | None = None,
+        min_ordenes: int = 30,
+        ordenar_por: str = "efectividad",
+        orden: str = "menos",
+        limite: int = 10,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        disponibles = await self.metrics.meses_disponibles()  # del más reciente al más antiguo
+        meses_b = expandir_meses(mes_b or disponibles[0], disponibles)
+        meses_a = expandir_meses(mes_a or (disponibles[1] if len(disponibles) > 1 else None), disponibles)
+        if not meses_a or not meses_b:
+            return {"error": "faltan_periodos", "sugerencia": "Pide los dos periodos a comparar."}, None
+        bkeys, municipio, _, _, _ = await self._recorte(barrio, municipio, "todo", brigada, zona=zona)
+        tecnicos, nombres_tec = self._tecnicos(tecnico)
+        ambito = dict(
+            bkeys=bkeys, municipio=None if bkeys else municipio, zona=None if bkeys or municipio else zona,
+            brigada=brigada, tecnicos=tecnicos,
+        )
+
+        async def por_periodo(meses: list[str]) -> dict[str, Efectividad]:
+            filas = await self.metrics.ranking(
+                dimension=dimension, meses=meses, min_ordenes=0, limite=10**6, ordenar_por="volumen", **ambito)
+            return {f.nombre: f for f in filas}
+
+        def resumen(a: Efectividad, b: Efectividad, nombre: str) -> dict[str, Any]:
+            return {
+                "nombre": nombre, "tot_a": a.tot, "tot_b": b.tot, "delta_tot": b.tot - a.tot,
+                "efectividad_a": round(self._metrica(a), 1), "efectividad_b": round(self._metrica(b), 1),
+                "delta_efectividad_pp": round(self._metrica(b) - self._metrica(a), 1),
+                "perdidas_a": a.pe, "perdidas_b": b.pe, "delta_perdidas": b.pe - a.pe,
+            }
+
+        total_a = await self.metrics.efectividad(meses=meses_a, **ambito)
+        total_b = await self.metrics.efectividad(meses=meses_b, **ambito)
+        salida: dict[str, Any] = {
+            "periodo_a": etiqueta_periodo(meses_a), "periodo_b": etiqueta_periodo(meses_b),
+            "total": resumen(total_a, total_b, "TOTAL"),
+        }
+        if dimension != "ninguna":
+            a, b = await por_periodo(meses_a), await por_periodo(meses_b)
+            vacio = lambda n: Efectividad(nombre=n, tot=0, ef=0, fa=0, pe=0, noctrl=0, ef_pct=0.0, ef_adj=0.0)  # noqa: E731
+            # Con efectividad solo vale quien tiene muestra en los DOS periodos; con volumen,
+            # pérdidas o causas, que desaparezca en uno de ellos es justo lo que interesa.
+            solo_volumen = ordenar_por != "efectividad" or dimension == "causa"
+            filas = []
+            for nombre in dict.fromkeys([*a, *b]):
+                fa, fb = a.get(nombre) or vacio(nombre), b.get(nombre) or vacio(nombre)
+                if (max(fa.tot, fb.tot) < 1) if solo_volumen else (min(fa.tot, fb.tot) < min_ordenes):
+                    continue
+                filas.append(resumen(fa, fb, nombre))
+            clave = {"efectividad": "delta_efectividad_pp", "perdidas": "delta_perdidas", "volumen": "delta_tot"}[ordenar_por]
+            filas.sort(key=lambda r: r[clave], reverse=orden == "mas")
+            salida["filas"] = filas[: max(1, min(int(limite), 50))]
+            salida["total_filas"] = len(filas)
+        cuales = "la efectividad" if self._es_cobros else "la efectividad ajustada"
+        salida["nota"] = (
+            f"`delta_efectividad_pp` es {cuales} de B menos A en puntos porcentuales; positivo es que mejoró. "
+            "Las pérdidas y el volumen van en cantidades. Di siempre los dos periodos."
+            + self._avisos(meses=meses_b, actividad=None)
+        )
+        contexto = [self._rotulo_tecnicos(nombres_tec)] if nombres_tec else []
+        salida["base"] = " · ".join(
+            [*contexto, municipio or zona or "todo el Atlántico"] + ([f"brigada {brigada}"] if brigada else []))
+        return salida, None
+
+    async def _serie_mensual(
+        self,
+        mes: Any = "todo",
+        municipio: str | None = None,
+        barrio: str | list[str] | None = None,
+        zona: str | None = None,
+        brigada: str | None = None,
+        tecnico: str | list[str] | None = None,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        disponibles = sorted(await self.metrics.meses_disponibles())
+        meses = sorted(expandir_meses(mes or "todo", disponibles) or disponibles)
+        clave = "ef_pct" if self._es_cobros else "ef_adj"
+        filas, filtro, base = [], None, ""
+        for m in meses:
+            resultado, filtro = await self._efectividad(
+                barrio=barrio, municipio=municipio, mes=m, brigada=brigada, zona=zona, tecnico=tecnico)
+            base = resultado["base"].rsplit(" · ", 1)[0] if " · " in resultado["base"] else resultado["base"]
+            d = resultado["metricas"]
+            if d["tot"]:
+                filas.append({"mes": m, "tot": d["tot"], "efectividad": d[clave], "perdidas": d["pe"],
+                              "pct_perdidas": round(100 * d["pe"] / d["tot"], 1)})
+        if not filas:
+            return {"error": "sin_datos", "sugerencia": "Ese recorte no tiene órdenes en ningún mes."}, None
+        caidas = 0
+        for anterior, actual in zip(reversed(filas[:-1]), reversed(filas[1:])):
+            if actual["efectividad"] >= anterior["efectividad"]:
+                break
+            caidas += 1
+        mejor = max(filas, key=lambda f: f["efectividad"])
+        peor = min(filas, key=lambda f: f["efectividad"])
+        salida = {
+            "base": base, "serie": filas, "meses_seguidos_en_caida": caidas,
+            "mejor_mes": mejor["mes"], "peor_mes": peor["mes"],
+            "variacion_primero_a_ultimo_pp": round(filas[-1]["efectividad"] - filas[0]["efectividad"], 1),
+            "nota": ("`efectividad` es " + ("la efectividad" if self._es_cobros else "la efectividad ajustada")
+                     + " de cada mes. `meses_seguidos_en_caida` cuenta hacia atrás desde el último mes."
+                     + self._avisos(meses=[filas[-1]["mes"]], actividad=None)),
+        }
+        if filtro and filtro.model_dump(exclude_none=True, exclude={"meses"}):
+            return salida, filtro.model_copy(update={"meses": meses})
+        return salida, None
+
+    async def _concentracion(
+        self,
+        dimension: str = "barrio",
+        ordenar_por: str = "perdidas",
+        porcentaje: int = 50,
+        mes: Any = None,
+        municipio: str | None = None,
+        zona: str | None = None,
+        brigada: str | None = None,
+        limite: int = 10,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona)
+        filas = await self.metrics.ranking(
+            dimension=dimension, municipio=municipio, zona=None if municipio else zona, meses=meses,
+            brigada=brigada, min_ordenes=0, limite=10**6, ordenar_por="volumen")
+        atributo = {"perdidas": "pe", "fallidas": "fa", "volumen": "tot", "efectivas": "ef"}[ordenar_por]
+        valores = sorted(((getattr(f, atributo), f.nombre) for f in filas), reverse=True)
+        total = sum(v for v, _ in valores)
+        if not total:
+            return {"base": base, "error": "sin_datos", "sugerencia": f"No hay {ordenar_por} en este recorte."}, None
+        porcentaje = max(1, min(int(porcentaje), 100))
+        acumulado, cuantos = 0, 0
+        for v, _ in valores:
+            acumulado += v
+            cuantos += 1
+            if acumulado * 100 >= porcentaje * total:
+                break
+        con_valor = sum(1 for v, _ in valores if v > 0)
+        corrido, primeros = 0, []
+        for v, nombre in valores[: max(1, min(int(limite), 50))]:
+            corrido += v
+            primeros.append({"nombre": nombre, ordenar_por: v, "pct_del_total": round(100 * v / total, 1),
+                             "pct_acumulado": round(100 * corrido / total, 1)})
+        return {
+            "base": base, "dimension": dimension, "criterio": ordenar_por, "total": total,
+            "porcentaje_pedido": porcentaje, "cuantos_lo_explican": cuantos,
+            "entidades_con_valor": con_valor, "entidades_en_total": len(valores),
+            "pct_de_las_entidades": round(100 * cuantos / con_valor, 1) if con_valor else 0.0,
+            "primeros": primeros,
+            "nota": "Di cuántas son de cuántas: «X de N (el Y %)».",
+        }, None
+
+    async def _altas_y_bajas(
+        self, tipo: str, mes: str | None = None, limite: int = 30,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        datos = self.metrics.datos
+        meses = datos.meses  # del más antiguo al más reciente
+        referencia = mes or meses[-1]
+        if referencia not in meses:
+            raise PeriodoVacio(referencia, list(reversed(meses)))
+        k = meses.index(referencia)
+        if k == 0:
+            return {"error": "sin_mes_anterior",
+                    "sugerencia": "Ese es el primer mes con datos: no hay con qué compararlo."}, None
+        filas = []
+        for t, por_mes in self.metrics.tecnicos_por_mes().items():
+            if tipo == "altas" and min(por_mes) == k:
+                filas.append((por_mes[k], {"nombre": datos.tecs[t], "ordenes_en_el_mes": por_mes[k]}))
+            elif tipo == "bajas" and (k - 1) in por_mes and k not in por_mes:
+                filas.append((por_mes[k - 1], {"nombre": datos.tecs[t], "ordenes_el_mes_anterior": por_mes[k - 1]}))
+        filas.sort(key=lambda x: -x[0])
+        quienes = "gestores" if self._es_cobros else "técnicos"
+        return {
+            "base": f"{quienes} · {tipo} de {referencia} frente a {meses[k - 1]}", "total": len(filas),
+            "filas": [f for _, f in filas[: max(1, min(int(limite), 100))]],
+            "nota": ("Alta = aparece por primera vez en ese mes; baja = trabajó el mes anterior y no aparece en ese. "
+                     "Una baja no prueba que se haya ido: puede estar sin órdenes asignadas."
+                     + self._avisos(meses=[referencia], actividad=None)),
+        }, None
+
+    async def _cruzar(
+        self,
+        dimension_a: str,
+        dimension_b: str,
+        ordenar_por: str = "volumen",
+        orden: str = "mas",
+        min_ordenes: int = 10,
+        mes: Any = None,
+        municipio: str | None = None,
+        barrio: str | list[str] | None = None,
+        zona: str | None = None,
+        brigada: str | None = None,
+        tecnico: str | list[str] | None = None,
+        limite: int = 10,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        if ordenar_por not in _CRITERIOS_CRUCE:
+            ordenar_por = "ef_pct" if ordenar_por == "ef_adj" else "volumen"
+        bkeys, municipio, meses, base, _ = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        tecnicos, _ = self._tecnicos(tecnico)
+        pares = await self.metrics.cruce(
+            dimension_a=dimension_a, dimension_b=dimension_b, min_ordenes=min_ordenes, bkeys=bkeys,
+            municipio=None if bkeys else municipio, zona=None if bkeys or municipio else zona, meses=meses,
+            brigada=brigada, tecnicos=tecnicos)
+        pares.sort(key=lambda x: CRITERIOS[ordenar_por](x[2]), reverse=orden == "mas")
+        campos = ("tot", "ef", "fa", "pe", "ef_pct", "ef_adj")
+        return {
+            "base": base, "criterio": ordenar_por, "orden": "de más a menos" if orden == "mas" else "de menos a más",
+            "total_combinaciones": len(pares),
+            "filas": [
+                {dimension_a: a, dimension_b: b, **{k: v for k, v in f.model_dump().items() if k in campos}}
+                for a, b, f in pares[: max(1, min(int(limite), 50))]
+            ],
+            "nota": "Una fila es una combinación (a, b). Di de cuántas combinaciones es la lista.",
+        }, None
+
+    async def _barrios_criticos(
+        self,
+        municipio: str | None = None,
+        zona: str | None = None,
+        brigada: str | None = None,
+        mes: Any = None,
+        min_ordenes: int | None = None,
+        solo_altos: bool = False,
+        limite: int | None = None,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona)
+        filas = riesgo.calcular(
+            self.metrics, cobros=self._es_cobros, min_ordenes=min_ordenes, meses=meses,
+            municipio=municipio, zona=None if municipio else zona, brigada=brigada)
+        if solo_altos:
+            filas = [f for f in filas if f["riesgo"] >= 61]
+        total = len(filas)
+        filas = filas[: max(1, min(int(limite or 10), 50))]
+        salida = {
+            "base": base, "total_barrios": total, "filas": filas,
+            "nota": ("`riesgo` es el índice de la cola de triaje (0 a 100); `nivel` es Baja, Media, Alta"
+                     + (" o Crítica" if self._es_cobros else "") + ". Es el mismo que ve el usuario en pantalla."
+                     + (" `veces_el_promedio` es cuántas veces el promedio pierde ese barrio; avisa si `muestra_pequena`."
+                        if self._es_cobros else " `tendencia_pp` es cuánto subió la tasa de no efectivas en la segunda mitad del periodo.")
+                     + self._avisos(meses=meses, actividad=None)),
+        }
+        filtro = None
+        if limite and 1 <= len(filas) <= 10:
+            claves = [f["barrio"] for f in filas]
+            filtro = FiltroMapa(barrio=claves[0] if len(claves) == 1 else None,
+                                barrios=claves if len(claves) > 1 else None, meses=meses)
+        return salida, filtro
+
+    async def _desempeno_vs_grupo(
+        self,
+        grupo: str = "brigada",
+        tecnico: str | list[str] | None = None,
+        mes: Any = None,
+        min_ordenes: int = 30,
+        orden: str = "menos",
+        limite: int = 10,
+    ) -> tuple[dict[str, Any], FiltroMapa | None]:
+        _, _, meses, base, _ = await self._recorte(None, None, mes)
+        tecnicos, _ = self._tecnicos(tecnico)
+        referencia = {
+            f.nombre: f for f in await self.metrics.ranking(
+                dimension=grupo, meses=meses, min_ordenes=0, limite=10**6, ordenar_por="volumen")
+        }
+        pares = await self.metrics.cruce(
+            dimension_a="tecnico", dimension_b=grupo, min_ordenes=min_ordenes, meses=meses, tecnicos=tecnicos)
+        filas = [
+            {"tecnico": a, grupo: b, "tot": f.tot, "efectividad": round(self._metrica(f), 1),
+             "efectividad_del_grupo": round(self._metrica(referencia[b]), 1),
+             "diferencia_pp": round(self._metrica(f) - self._metrica(referencia[b]), 1)}
+            for a, b, f in pares if b in referencia
+        ]
+        filas.sort(key=lambda r: r["diferencia_pp"], reverse=orden == "mas")
+        return {
+            "base": base, "grupo": grupo, "total_filas": len(filas),
+            "filas": filas[: max(1, min(int(limite), 50))],
+            "nota": ("`diferencia_pp` es la efectividad del técnico menos la de todo su grupo, en puntos porcentuales; "
+                     "negativo es que queda por debajo. El promedio del grupo incluye al propio técnico."
+                     + self._avisos(meses=meses, actividad=None)),
+        }, None
+
     async def _meses_disponibles(self) -> tuple[dict[str, Any], None]:
         return {"meses": await self.metrics.meses_disponibles()}, None
 
@@ -1573,13 +2128,24 @@ class ToolRunner:
             municipio = kwargs.get("municipio")
             # Sin distinguir mayúsculas: «LOS ROBLES DE BARANOA» entraba al `if`
             # y luego no se podía cortar, y el IndexError tumbaba el chat entero.
+            texto_pedido = barrio
             partido = None if municipio else re.match(r"(.+)\s+de\s+(.+)$", barrio, re.IGNORECASE)
             if partido:
                 barrio, municipio = partido[1].strip(), partido[2].strip()
-            grupo = await self._grupo(barrio, municipio)
-            kwargs["barrio"] = grupo[0].bkey
-            if not kwargs.get("municipio"):
-                kwargs["municipio"] = grupo[0].municipio
+            try:
+                grupo = await self._grupo(barrio, municipio)
+            except BarrioNoEncontrado as no_es_barrio:
+                # «Mapa de calor de Alexander de los Reyes»: el modelo pone el nombre de una persona
+                # en `barrio`. Si no es un barrio pero sí un técnico, es un técnico.
+                try:
+                    nombres_tec = self._tecnicos(texto_pedido)[1]
+                except FiltroNoResuelto:
+                    raise no_es_barrio from None
+                kwargs["barrio"], kwargs["tecnicos"] = None, nombres_tec
+            else:
+                kwargs["barrio"] = grupo[0].bkey
+                if not kwargs.get("municipio"):
+                    kwargs["municipio"] = grupo[0].municipio
 
         filtro = FiltroMapa(**{k: v for k, v in kwargs.items() if k in FiltroMapa.model_fields})
         aplicado = filtro.model_dump(exclude_none=True)

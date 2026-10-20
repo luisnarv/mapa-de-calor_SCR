@@ -62,7 +62,8 @@ def test_el_barrio_con_mas_recaudo_se_ordena_por_plata(tabla):
 
 def test_un_barrio_suma_sus_meses_y_no_se_mezcla_con_su_homonimo(tabla):
     r = recaudo_barrio.consultar(tabla, barrio="centro", municipio="Barranquilla")
-    assert r["filas"][0]["recaudo"] == 400.0 and r["filas"][0]["cuentas"] == 20
+    # El recaudo suma los dos meses; las cuentas son las del último, no 10 + 10.
+    assert r["filas"][0]["recaudo"] == 400.0 and r["filas"][0]["cuentas"] == 10
     assert r["grupos_en_total"] == 1
 
 
@@ -93,7 +94,36 @@ def test_peores_y_orden_por_otro_criterio(tabla):
     peor = recaudo_barrio.consultar(tabla, peores=True, limite=1)
     assert peor["filas"][0]["recaudo"] == 50.0
     por_saldo = recaudo_barrio.consultar(tabla, ordenar_por="saldo", limite=1)
-    assert por_saldo["filas"][0]["saldo"] == 1000.0 + 1000.0
+    # El saldo es la foto del último mes del grupo, no la suma de sus meses.
+    assert por_saldo["filas"][0]["saldo"] == 1000.0
+
+
+def test_el_saldo_no_se_suma_entre_meses(tabla, carpeta):
+    """Caso real: «¿qué gestor tiene más deuda?» sumaba las fotos de 10 meses y daba 67.904
+    millones para quien en septiembre debía 9.470."""
+    gestores = recaudo_barrio.cargar_gestores(carpeta)
+
+    septiembre = recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor", meses=["2026-09"])
+    todo = recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor")
+    ana = next(f for f in todo["filas"] if f["nombre"] == "ANA PEREZ")
+
+    assert ana["saldo"] == 1000.0 and ana["recaudo"] == 400.0  # recaudo sí suma: 100 + 300
+    assert next(f for f in septiembre["filas"] if f["nombre"] == "ANA PEREZ")["saldo"] == 1000.0
+    # Octubre es provisional: su saldo es solo lo gestionado hasta hoy, no la deuda.
+    assert todo["saldo_al_cierre_de"] == "2026-09"
+    octubre = recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor", meses=["2026-10"])
+    assert octubre["saldo_al_cierre_de"] == "2026-10"
+
+
+def test_el_recaudo_de_un_gestor_se_filtra_por_nombre(carpeta):
+    gestores = recaudo_barrio.cargar_gestores(carpeta)
+
+    r = recaudo_barrio.consultar_gestores(
+        gestores, agrupar_por="gestor", meses=["2026-09"], gestores=["LUIS RUIZ - 222"])
+
+    assert [f["nombre"] for f in r["filas"]] == ["LUIS RUIZ"] and r["filas"][0]["recaudo"] == 500.0
+    with pytest.raises(FiltroNoResuelto):
+        recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor", gestores=["NADIE"])
 
 
 def test_un_municipio_o_barrio_inventado_no_devuelve_el_total_sin_filtrar(tabla):
@@ -118,7 +148,7 @@ GESTORES_DEL_MAPA = ["ANA PEREZ - 111", "LUIS RUIZ - 222"]
 
 
 def runner(carpeta: Path, barrios: list[str] = BARRIOS_DEL_MAPA) -> ToolRunner:
-    datos = SimpleNamespace(barrios=barrios, tecs=GESTORES_DEL_MAPA)
+    datos = SimpleNamespace(barrios=barrios, tecs=GESTORES_DEL_MAPA, fecha_max="2026-10-15")
     # `indices_tecnico` solo lee `datos.tecs`: se usa la real en vez de reescribirla.
     metrics = SimpleNamespace(
         directorio=carpeta, datos=datos,
@@ -136,26 +166,26 @@ async def test_la_herramienta_responde_con_su_base_y_el_periodo(carpeta):
 
 @pytest.mark.asyncio
 async def test_el_resultado_lleva_el_mapa_al_barrio_nombrado_y_a_sus_meses(carpeta):
-    _, filtro = await runner(carpeta).run("recaudo", {"mes": "2026-09"})
+    _, filtro = await runner(carpeta).run("recaudo", {"mes": "2026-09", "limite": 1})
     assert filtro.barrio == "BARRANQUILLA | EL TABOR" and filtro.meses == ["2026-09"]
 
 
 @pytest.mark.asyncio
 async def test_sin_mes_el_filtro_manda_todos_para_no_quedarse_en_el_que_hubiera(carpeta):
-    _, filtro = await runner(carpeta).run("recaudo", {})
+    _, filtro = await runner(carpeta).run("recaudo", {"limite": 1})
     assert filtro.meses == ["2026-08", "2026-09", "2026-10"]
 
 
 @pytest.mark.asyncio
 async def test_por_municipio_el_mapa_se_encuadra_en_el_municipio(carpeta):
-    _, filtro = await runner(carpeta).run("recaudo", {"agrupar_por": "municipio", "mes": "2026-09"})
+    _, filtro = await runner(carpeta).run("recaudo", {"agrupar_por": "municipio", "mes": "2026-09", "limite": 1})
     assert filtro.municipio == "BARRANQUILLA" and filtro.barrio is None
 
 
 @pytest.mark.asyncio
 async def test_un_barrio_que_el_mapa_no_conoce_no_se_marca(carpeta):
     # Una clave inventada dejaría el tablero vacío: mejor no mover el mapa.
-    _, filtro = await runner(carpeta, barrios=[]).run("recaudo", {})
+    _, filtro = await runner(carpeta, barrios=[]).run("recaudo", {"limite": 1})
     assert filtro is None
 
 
@@ -232,7 +262,7 @@ def test_un_plan_o_zona_inventados_no_devuelven_el_total_sin_filtrar(tabla_gesto
 
 @pytest.mark.asyncio
 async def test_la_herramienta_responde_el_gestor_que_mas_recaudo_en_septiembre(carpeta):
-    salida, filtro = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "mes": "2026-09"})
+    salida, filtro = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "mes": "2026-09", "limite": 1})
 
     assert salida["filas"][0]["nombre"] == "LUIS RUIZ"
     assert salida["base"] == "todo el Atlántico · 2026-09"
@@ -242,8 +272,8 @@ async def test_la_herramienta_responde_el_gestor_que_mas_recaudo_en_septiembre(c
 
 @pytest.mark.asyncio
 async def test_por_zona_o_plan_el_mapa_se_mueve_a_la_primera_fila(carpeta):
-    _, por_zona = await runner(carpeta).run("recaudo", {"agrupar_por": "zona", "mes": "2026-09"})
-    _, por_plan = await runner(carpeta).run("recaudo", {"agrupar_por": "plan", "mes": "2026-09"})
+    _, por_zona = await runner(carpeta).run("recaudo", {"agrupar_por": "zona", "mes": "2026-09", "limite": 1})
+    _, por_plan = await runner(carpeta).run("recaudo", {"agrupar_por": "plan", "mes": "2026-09", "limite": 1})
 
     assert por_zona.zona == "ATLANTICO SUR" and por_zona.meses == ["2026-09"]
     assert por_plan.brigada == "Multifamiliar"
@@ -269,3 +299,67 @@ def test_el_recaudo_de_varios_barrios_se_suma(tabla):
 
     assert r["total_del_recorte"]["recaudo"] == 500.0 + 900.0
     assert {f["nombre"] for f in r["filas"]} == {"EL TABOR", "SABANILLA"}
+
+
+@pytest.mark.asyncio
+async def test_una_pregunta_de_totales_no_mueve_el_mapa(carpeta):
+    """«¿Cuánto se recaudó en octubre?» dejaba el mapa fijo en el primer barrio del agrupado."""
+    salida, filtro = await runner(carpeta).run("recaudo", {"mes": "2026-10"})
+
+    assert salida["total_del_recorte"]["recaudo"] == 900.0 and filtro is None
+
+
+@pytest.mark.asyncio
+async def test_el_recaudo_de_un_gestor_nombrado_es_el_suyo_y_el_mapa_lo_marca(carpeta):
+    """Caso real: «recaudo de Fulano» respondía «no hay registros» o con otro gestor, porque
+    la herramienta no tenía dónde poner un nombre y lo tomaba por municipio."""
+    salida, filtro = await runner(carpeta).run("recaudo", {"gestor": "ana perez", "mes": "2026-09"})
+
+    assert salida["filas"][0]["nombre"] == "ANA PEREZ" and salida["filas"][0]["recaudo"] == 300.0
+    assert filtro.tecnicos == ["ANA PEREZ - 111"] and filtro.meses == ["2026-09"]
+
+
+def test_el_recaudo_sobre_saldo_es_una_razon_y_ordena(carpeta):
+    gestores = recaudo_barrio.cargar_gestores(carpeta)
+
+    r = recaudo_barrio.consultar_gestores(
+        gestores, agrupar_por="gestor", meses=["2026-09"], ordenar_por="recaudo_sobre_saldo")
+
+    # Septiembre: ANA 300 / 1000 y LUIS 500 / 800.
+    assert [f["nombre"] for f in r["filas"]] == ["LUIS RUIZ", "ANA PEREZ"]
+    assert r["filas"][0]["recaudo_sobre_saldo"] == round(500 / 800, 4)
+
+
+def test_el_recaudo_por_gestion_divide_entre_las_gestiones_de_cada_nombre(carpeta):
+    gestores = recaudo_barrio.cargar_gestores(carpeta)
+
+    r = recaudo_barrio.consultar_gestores(
+        gestores, agrupar_por="gestor", meses=["2026-09"], ordenar_por="recaudo_por_gestion",
+        gestiones={"ANA PEREZ - 111": 10, "LUIS RUIZ - 222": 100})
+
+    assert [(f["nombre"], f["recaudo_por_gestion"]) for f in r["filas"]] == [("ANA PEREZ", 30.0), ("LUIS RUIZ", 5.0)]
+    sin_gestiones = recaudo_barrio.consultar_gestores(
+        gestores, agrupar_por="gestor", meses=["2026-09"], ordenar_por="recaudo_por_gestion", gestiones={"ANA PEREZ - 111": 10})
+    assert [f["nombre"] for f in sin_gestiones["filas"]] == ["ANA PEREZ"]  # sin gestiones no hay razón que ordenar
+
+
+def test_la_variacion_une_dos_meses_y_cuenta_como_cero_al_que_no_aparece(carpeta):
+    gestores = recaudo_barrio.cargar_gestores(carpeta)
+    ahora = recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor", meses=["2026-09"], limite=10**6)
+    antes = recaudo_barrio.consultar_gestores(gestores, agrupar_por="gestor", meses=["2026-08"], limite=10**6)
+
+    filas = {f["nombre"]: f for f in recaudo_barrio.comparar(ahora, antes)}
+
+    assert filas["ANA PEREZ"]["variacion_recaudo"] == 200.0 and filas["ANA PEREZ"]["variacion_saldo"] == 0.0
+    assert filas["LUIS RUIZ"]["saldo_anterior"] == 0.0 and filas["LUIS RUIZ"]["variacion_saldo"] == 800.0
+
+
+@pytest.mark.asyncio
+async def test_la_herramienta_pide_los_dos_meses_para_una_variacion(carpeta):
+    salida, _ = await runner(carpeta).run("recaudo", {"agrupar_por": "gestor", "ordenar_por": "variacion_saldo"})
+    assert salida["error"] == "falta_comparar_con"
+
+    ok, _ = await runner(carpeta).run(
+        "recaudo", {"agrupar_por": "gestor", "mes": "2026-09", "comparar_con": "2026-08", "ordenar_por": "variacion_saldo"})
+    assert ok["filas"][0]["nombre"] == "LUIS RUIZ" and ok["comparado_con"] == ["2026-08"]
+

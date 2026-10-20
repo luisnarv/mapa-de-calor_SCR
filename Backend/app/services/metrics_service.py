@@ -17,7 +17,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from app.core.taxonomy import norm, norm_dato
 from app.schemas.metrics import (
@@ -55,6 +55,21 @@ def _palabras(texto: str, *, sin_numeros: bool = False) -> frozenset[str]:
     limpio = "".join(c for c in limpio if not unicodedata.combining(c))
     palabras = re.findall(r"[a-z0-9]+", limpio)
     return frozenset(p for p in palabras if not (sin_numeros and p.isdigit()))
+
+
+DIMENSIONES = (
+    "brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad", "municipio", "zona", "causa", "tipo_os",
+)
+
+
+class Ranking(list):
+    """Las filas de un ranking y, en `total`, cuántas había antes de recortar al límite.
+
+    Sin el total, «¿cuántos técnicos trabajaron?» solo se podía contestar contando las
+    filas que alcanzaban a mostrarse, y el modelo respondía «al menos 10».
+    """
+
+    total: int = 0
 
 
 class NicNoEncontrado(Exception):
@@ -479,7 +494,7 @@ class MetricsService:
         ordena por órdenes perdidas, que son las que no se cobran; responderla con
         efectividad devuelve barrios sin una sola pérdida.
         """
-        if dimension not in ("brigada", "tecnico", "barrio", "subaccion", "tarifa", "actividad", "municipio", "causa"):
+        if dimension not in DIMENSIONES:
             raise ValueError(f"Dimensión no soportada: {dimension}")
         if ordenar_por not in CRITERIOS:
             raise ValueError(f"Criterio no soportado: {ordenar_por}")
@@ -490,11 +505,7 @@ class MetricsService:
             brigada=brigada, subaccion=subaccion, tarifa=tarifa,
             actividad=actividad, causa=causa, tecnicos=tecnicos, por=dimension,
         )
-        catalogo = {
-            "brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios,
-            "subaccion": p.subs, "tarifa": p.tarifas, "actividad": p.acts,
-            "municipio": p.munis, "causa": p.causas,
-        }[dimension]
+        catalogo = self._catalogo(dimension)
 
         # Las medias salen de TODO el recorte, incluidos los grupos que luego
         # descarta `min_ordenes`: son la referencia contra la que se compara cada
@@ -515,7 +526,49 @@ class MetricsService:
             filas.append(fila)
 
         filas.sort(key=CRITERIOS[ordenar_por], reverse=not ascendente)
-        return filas[:limite]
+        recortadas = Ranking(filas[:limite])
+        recortadas.total = len(filas)
+        return recortadas
+
+    def _catalogo(self, dimension: str) -> list[str]:
+        p = self.datos
+        return {
+            "brigada": p.brigs, "tecnico": p.tecs, "barrio": p.barrios, "subaccion": p.subs,
+            "tarifa": p.tarifas, "actividad": p.acts, "municipio": p.munis, "zona": p.zonas,
+            "causa": p.causas, "tipo_os": p.tipos,
+        }[dimension]
+
+    async def cruce(
+        self,
+        *,
+        dimension_a: str,
+        dimension_b: str,
+        min_ordenes: int = 10,
+        **filtros,
+    ) -> list[tuple[str, str, Efectividad]]:
+        """Efectividad de cada par (a, b): técnico × barrio, brigada × municipio...
+
+        Una sola pasada por las órdenes con la clave doble; hacerlo preguntando por cada
+        valor de `a` cuesta una pasada completa por cada uno (147 técnicos, 147 pasadas).
+        Devuelve (nombre_a, nombre_b, fila) sin ordenar ni recortar: quien lo llama decide.
+        """
+        if dimension_a not in DIMENSIONES or dimension_b not in DIMENSIONES or dimension_a == dimension_b:
+            raise ValueError(f"Cruce no soportado: {dimension_a} × {dimension_b}")
+        conteos = self._agrupar(por=dimension_a, por2=dimension_b, **filtros)
+        cat_a, cat_b = self._catalogo(dimension_a), self._catalogo(dimension_b)
+        return [
+            (cat_a[ka], cat_b[kb], _a_dto(c, f"{cat_a[ka]} × {cat_b[kb]}"))
+            for (ka, kb), c in conteos.items() if c.tot >= min_ordenes
+        ]
+
+    def tecnicos_por_mes(self) -> dict[int, dict[int, int]]:
+        """Cuántas órdenes tuvo cada técnico (índice del catálogo) en cada mes (índice de `meses`)."""
+        p = self.datos
+        salida: dict[int, dict[int, int]] = {}
+        for t, mes in zip(p.t, p.mes):
+            por_mes = salida.setdefault(t, {})
+            por_mes[mes] = por_mes.get(mes, 0) + 1
+        return salida
 
     async def causas(
         self,
@@ -1068,7 +1121,9 @@ class MetricsService:
         causa: str | None = None,
         tecnicos: Sequence[int] | None = None,
         por: str | None = None,
-    ) -> dict[int, Conteo]:
+        por2: str | None = None,
+        visitar: Callable[[int], None] | None = None,
+    ) -> dict:
         """Recorre las órdenes una vez, filtrando y acumulando.
 
         Sin `por`, todo cae en la clave 0. El criterio de no controlable es el
@@ -1127,13 +1182,17 @@ class MetricsService:
         # Índices ya resueltos por `indices_tecnico`: vacío significa «ninguno», no «todos».
         f_tecs = set(tecnicos) if tecnicos is not None else None
         ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
-        grupo = {
+        columnas = {
             "brigada": p.g, "tecnico": p.t, "barrio": p.b,
             "subaccion": p.s, "tarifa": p.f, "actividad": A,
-            "causa": C,
-        }.get(por)
+            "causa": C, "tipo_os": O,
+        }
+        grupo = columnas.get(por)
         # b_muni es per-barrio, no per-orden: se resuelve aparte en la clave.
         grupo_es_municipio = por == "municipio"
+        grupo_es_zona = por == "zona"
+        # Cruce con una segunda dimensión: la clave pasa a ser el par (primera, segunda).
+        grupo2 = columnas.get(por2)
 
         conteos: dict[int, Conteo] = {}
         for i in range(len(E)):
@@ -1160,8 +1219,17 @@ class MetricsService:
                 continue
             if f_tecs is not None and T[i] not in f_tecs:
                 continue
+            if visitar is not None:
+                visitar(i)  # quien necesita algo más que el conteo (el riesgo) lo lee de cada orden
 
-            clave = b_muni[bi] if grupo_es_municipio else (grupo[i] if grupo is not None else 0)
+            if grupo_es_municipio:
+                clave = b_muni[bi]
+            elif grupo_es_zona:
+                clave = b_zona[bi]
+            else:
+                clave = grupo[i] if grupo is not None else 0
+            if por2:
+                clave = (clave, b_muni[bi] if por2 == "municipio" else b_zona[bi] if por2 == "zona" else grupo2[i])
             conteo = conteos.get(clave)
             if conteo is None:
                 conteo = conteos[clave] = Conteo()
