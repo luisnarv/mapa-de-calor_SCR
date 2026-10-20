@@ -700,6 +700,9 @@ export default function LeafletMap({
         // se muestran todos como de costumbre.
         for (const [b, o] of A.barrio) {
           if (selSet && !selSet.has(b)) continue;
+          // Con gestores elegidos solo salen los barrios donde trabajaron. La burbuja conserva
+          // las cifras de TODO el barrio: el agregado por barrio no se parte por gestor.
+          if (selTec && ![...selTec].some((t) => o.tec.has(t))) continue;
 
           const c = geo.bc[b];
           if (!c) continue;

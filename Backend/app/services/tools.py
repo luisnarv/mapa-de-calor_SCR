@@ -388,6 +388,15 @@ TOOLS: list[dict[str, Any]] = [
                     "actividad": {"type": "string"},
                     "tipo_os": {"type": "string"},
                     "meses": {"type": "array", "items": {"type": "string"}},
+                    "capas": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["gps", "calor", "aproximadas"]},
+                        "description": (
+                            "Capas que se encienden en el mapa: «gps» (un punto por gestión), "
+                            "«calor» (mapa de calor) y «aproximadas» (ubicaciones aproximadas). "
+                            "Úsala cuando pidan ver los puntos, el calor o dónde estuvo alguien."
+                        ),
+                    },
                 },
             },
         },
@@ -1527,7 +1536,7 @@ class ToolRunner:
         datos = self.metrics.visitas_tecnico(
             indices or [], bkeys=bkeys, municipio=municipio, meses=meses, estado=estado, limite=limite)
         # Listar visitas pide verlas: se enciende la capa de puntos GPS.
-        filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres, "puntos_gps": True})
+        filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres, "capas": ["gps"]})
         nota = (
             f"Son {datos['total']} en total y se muestran {len(datos['filas'])}: di el total y que la "
             "lista es parcial si hay más. `por_estado` es de TODAS, no solo de las mostradas. "

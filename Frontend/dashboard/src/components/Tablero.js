@@ -1502,8 +1502,12 @@ export default function Tablero({ proceso }) {
         }
       }
 
-      // Al listar las visitas de un gestor el asistente pide ver sus puntos GPS.
-      if (accion.puntos_gps) next.layers = { ...prev.layers, gps: true };
+      // Capas que el asistente pide ver (puntos GPS al listar visitas, calor, aproximadas).
+      if (accion.capas?.length) {
+        const clave = { gps: "gps", calor: "heat", aproximadas: "approx" };
+        next.layers = { ...prev.layers };
+        for (const c of accion.capas) if (clave[c]) next.layers[clave[c]] = true;
+      }
 
       // El barrio llega como BKEY ("MUNICIPIO | BARRIO"), igual que en dim.barrios.
       const b = idxDe(dim.barrios, accion.barrio);

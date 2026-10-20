@@ -82,8 +82,9 @@ def _unificar_filtros(filtros: list[FiltroMapa]) -> dict[str, Any] | None:
     listas: dict[str, list[str]] = {}
     for f in utiles:
         for campo, valor in f.model_dump(exclude={"meses"}, exclude_none=True).items():
-            if campo == "puntos_gps":
-                campos[campo] = True  # una capa que se enciende: no hay nada que contradecir
+            if campo == "capas":
+                # Encender una capa no contradice a otra: se suman.
+                campos[campo] = sorted({*campos.get(campo, []), *valor})
             elif campo in ("barrios", "tecnicos"):
                 previa = listas.get(campo)
                 if previa is not None and {norm_dato(b) for b in previa} != {norm_dato(b) for b in valor}:
