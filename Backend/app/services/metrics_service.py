@@ -10,6 +10,7 @@ que no hace falta caché ni precalentado.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -773,7 +774,16 @@ class MetricsService:
 
     async def recomendar(self, *, nic: str) -> RecomendacionResponse:
         """Recomienda técnicos y brigadas para un NIC, replicando la lógica
-        Wilson del tab Recomendador del frontend."""
+        Wilson del tab Recomendador del frontend.
+
+        El cálculo recorre cientos de miles de filas (0,1 a 0,4 s por NIC) y es puro CPU: en el
+        hilo del servidor, una lista de cientos de NIC lo dejaba sin contestar el chequeo de
+        salud ni el chat, y el tablero marcaba «sin conexión». Va a otro hilo, y entre NIC y
+        NIC el servidor atiende lo que haya esperando.
+        """
+        return await asyncio.to_thread(self._recomendar, nic=nic)
+
+    def _recomendar(self, *, nic: str) -> RecomendacionResponse:
         p = self.datos
         indice = obtener_indice_nic(self.directorio)
         b_idx = indice.barrio_de.get(nic)

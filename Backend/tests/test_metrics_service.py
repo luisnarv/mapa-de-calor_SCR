@@ -136,3 +136,31 @@ async def test_las_causas_solo_cuentan_lo_no_efectivo(service):
 
     r = await service.efectividad()
     assert sum(c.n for c in causas) == r.tot - r.ef
+
+
+@pytest.mark.asyncio
+async def test_una_lista_larga_de_recomendaciones_no_bloquea_al_servidor(service, monkeypatch):
+    """Una tanda de NIC dejaba al servidor sin contestar el chequeo de salud: el chat del tablero
+    esperaba 5 s, se rendía y marcaba «sin conexión»."""
+    import asyncio
+    import time
+
+    monkeypatch.setattr(MetricsService, "_recomendar", lambda self, *, nic: time.sleep(0.15) or nic)
+    esperas: list[float] = []
+
+    async def latido():
+        """Lo que haría el chequeo de salud: pedir turno cada 20 ms y medir cuánto tarda en llegar."""
+        for _ in range(25):
+            t = time.perf_counter()
+            await asyncio.sleep(0.02)
+            esperas.append(time.perf_counter() - t - 0.02)
+
+    # El latido arranca ANTES: si empezara después, mediría el servidor ya desocupado.
+    tarea = asyncio.create_task(latido())
+    await asyncio.sleep(0.05)
+    resultados = await asyncio.gather(*(service.recomendar(nic=str(i)) for i in range(20)))
+    await tarea
+
+    assert resultados == [str(i) for i in range(20)]  # se procesaron todos, ninguno se rechazó
+    assert max(esperas) < 0.1, f"el servidor estuvo bloqueado {max(esperas):.2f} s"
+
