@@ -630,8 +630,9 @@ TOOL_RECAUDO: dict[str, Any] = {
             "Plata recaudada y deuda (saldo) por barrio, municipio, gestor, zona o plan. "
             "Úsala cuando pregunten por «recaudo», «cuánto se recaudó», «dónde se recauda "
             "más», «qué gestor recaudó más», «deuda» o «saldo»: esas son cifras en pesos, no "
-            "gestiones efectivas, y `ranking` no las tiene. Gestor, zona y plan no se cruzan "
-            "con barrio: si piden las dos cosas, dilo. Los meses en `provisional` todavía "
+            "gestiones efectivas, y `ranking` no las tiene. Por barrio o municipio se puede filtrar por "
+            "plan y zona («el barrio con más recaudo en el plan Multifamiliar de la zona norte»); el gestor "
+            "no se cruza con el barrio: si piden las dos cosas, dilo. Los meses en `provisional` todavía "
             "pueden cambiar; avísalo."
         ),
         "parameters": {
@@ -672,11 +673,11 @@ TOOL_RECAUDO: dict[str, Any] = {
                 },
                 "zona": {
                     "type": "string",
-                    "description": "Zona (p. ej. ATLANTICO NORTE). Solo con agrupar_por gestor, zona o plan.",
+                    "description": "Zona (p. ej. ATLANTICO NORTE). Sirve con cualquier agrupado; con gestor, zona o plan no se combina con `barrio`.",
                 },
                 "plan": {
                     "type": "string",
-                    "description": "Plan de gestión (Cobro Persuasivo, Multifamiliar, Visita Personalizada). Solo con agrupar_por gestor, zona o plan.",
+                    "description": "Plan de gestión (Cobro Persuasivo, Multifamiliar, Visita Personalizada). Sirve con cualquier agrupado; con gestor, zona o plan no se combina con `barrio`.",
                 },
                 "gestor": {
                     **_TECNICO,
@@ -1244,9 +1245,8 @@ class ToolRunner:
                 elif v.municipio and agrupar != "municipio":
                     nuevos["municipio"], puestos["municipio"] = v.municipio, v.municipio
                 if v.zona and "municipio" not in nuevos and "barrio" not in nuevos:
-                    puestos["zona"] = (v.zona + " (el recaudo por barrio no se puede filtrar por zona: "
-                                       "la cifra es de todo el Atlántico)")
-        if por_gestor and v.brigada and agrupar != "plan" and not pidio("plan"):
+                    nuevos["zona"], puestos["zona"] = v.zona, v.zona
+        if v.brigada and agrupar != "plan" and not pidio("plan"):
             nuevos["plan"], puestos["plan"] = v.brigada, v.brigada
         if v.tecnicos and agrupar != "gestor" and not pidio("gestor"):
             nuevos["gestor"], puestos["gestores"] = list(v.tecnicos), "; ".join(v.tecnicos)
@@ -1777,8 +1777,8 @@ class ToolRunner:
         if not self._es_cobros:
             return {"error": "recaudo_solo_cobros",
                     "sugerencia": "El recaudo por barrio solo existe en COBROS."}, None
-        # gestores.json llega hasta zona, municipio y plan: darle un barrio o un filtro que
-        # no tiene sería inventarlo, así que se avisa en vez de responder con otro recorte.
+        # gestores.json llega hasta zona, municipio y plan; recaudo_barrio.json, hasta barrio, plan y
+        # zona. Lo que no cruza (gestor con barrio) se avisa en vez de responder con otro recorte.
         # Un gestor nombrado se consulta en gestores.json, que es donde está su recaudo: el
         # agrupado por defecto («barrio») no lo tiene y respondía con otro recorte.
         por_gestor = agrupar_por in ("gestor", "zona", "plan") or bool(gestor) or ordenar_por == "recaudo_por_gestion"
@@ -1787,12 +1787,9 @@ class ToolRunner:
         nombres_gestor = self._tecnicos(gestor)[1] if gestor else None
         if por_gestor and barrio:
             return {"error": "recaudo_gestor_no_cruza_barrio", "sugerencia": (
-                "El recaudo por gestor, zona o plan no se cruza con el barrio. Dilo, y ofrece "
-                "el recaudo por barrio o el de gestores por separado.")}, None
-        if not por_gestor and (zona or plan):
-            return {"error": "recaudo_filtro_sin_agrupar", "sugerencia": (
-                "Los filtros zona y plan solo funcionan con agrupar_por gestor, zona o plan. "
-                "Repite con agrupar_por='gestor'.")}, None
+                "El recaudo por gestor no se cruza con el barrio, ni se agrupa por zona o plan dentro de un "
+                "barrio. Dilo, y ofrece el recaudo por barrio (que sí admite filtrar por plan y zona) o el de "
+                "gestores por separado.")}, None
         try:
             tabla = (recaudo_barrio.cargar_gestores if por_gestor else recaudo_barrio.cargar)(
                 self.metrics.directorio)
@@ -1828,7 +1825,7 @@ class ToolRunner:
                     ordenar_por=criterio, peores=peores, limite=tope)
             return recaudo_barrio.consultar(
                 tabla, agrupar_por=agrupar_por, meses=meses_de, municipio=municipio,
-                barrio=barrio, ordenar_por=criterio, peores=peores, limite=tope)
+                barrio=barrio, zona=zona, plan=plan, ordenar_por=criterio, peores=peores, limite=tope)
 
         if variacion:
             antes_meses = expandir_meses(comparar_con, tabla.meses)
@@ -1860,7 +1857,8 @@ class ToolRunner:
             "Cifras en pesos: `recaudo` es lo recaudado (se suma entre meses) y `saldo` la deuda de "
             "esas cuentas, que es la del último mes con datos (`saldo_al_cierre_de`), NO una suma "
             "de meses: dilo así. Si hay más filas que las mostradas (`grupos_en_total`) di «X de N». "
-            "`recaudo_sobre_saldo` es una razón (0,05 = 5 %): da el porcentaje y di que es recaudo ÷ saldo, "
+            "`recaudo_sobre_saldo_pct` ya viene en porcentaje (286,6 es 286,6 %, no 2,87 %; puede pasar de 100 porque el "
+            "recaudo es del periodo y el saldo, el del cierre): da ese número y di que es recaudo ÷ saldo, "
             "no una tasa oficial. Con `comparar_con`, cada fila trae el valor de los dos meses y su variación; "
             "si alguno es provisional, avísalo. Para «¿por qué bajó?» usa `mayores_caidas` y para «subió» "
             "`mayores_aumentos`: traen los dos extremos. "

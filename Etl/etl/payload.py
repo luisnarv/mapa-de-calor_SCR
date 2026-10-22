@@ -327,7 +327,8 @@ def escribir_recaudo_barrio(recaudo: pd.DataFrame, d: pd.DataFrame, settings: Se
     gestión más reciente del mes, el mismo que ve el tablero. Las que no tienen gestión
     con GPS en el mapa quedan en «SIN BARRIO» de su municipio: así el total sigue siendo
     el de `gestores.json`. Solo lo lee el chat. Cada fila es
-    ``[mes, municipio, barrio, cuentas, saldo, recaudo_en_pesos]``; los meses en
+    ``[mes, municipio, barrio, plan, zona, cuentas, saldo, recaudo_en_pesos]`` (una por mes,
+    barrio, plan y zona; sumando plan y zona sale el barrio de siempre); los meses en
     `provisionales` todavía pueden cambiar.
     """
     ultima = d[["NIC", "dt", "BKEY"]].assign(periodo_mes=d["dt"].dt.strftime("%Y-%m"))
@@ -339,11 +340,13 @@ def escribir_recaudo_barrio(recaudo: pd.DataFrame, d: pd.DataFrame, settings: Se
     r.loc[sin_gps, "BKEY"] = r.loc[sin_gps, "municipio"].fillna("SIN MUNICIPIO") + " | SIN BARRIO"
     r[["municipio", "barrio"]] = r["BKEY"].str.split(" | ", n=1, expand=True, regex=False)
 
-    grupos = (r.groupby(["periodo_mes", "municipio", "barrio"], as_index=False)
+    # La vista trae plan y zona completos, pero un hueco no debe tirar la fila ni el total.
+    r[["plan", "zona"]] = r[["plan", "zona"]].fillna("SIN DATO").astype(str)
+    grupos = (r.groupby(["periodo_mes", "municipio", "barrio", "plan", "zona"], as_index=False)
               .agg(cuentas=("cuenta", "size"), saldo=("saldo", "sum"), recaudo=("recaudo", "sum"),
                    provisional=("provisional", "any")))
     filas = [
-        [str(g.periodo_mes), str(g.municipio), str(g.barrio), int(g.cuentas),
+        [str(g.periodo_mes), str(g.municipio), str(g.barrio), str(g.plan), str(g.zona), int(g.cuentas),
          round(float(g.saldo), 2), round(float(g.recaudo), 2)]
         for g in grupos.itertuples(index=False)
     ]

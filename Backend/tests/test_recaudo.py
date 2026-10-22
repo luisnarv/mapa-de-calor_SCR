@@ -11,13 +11,15 @@ from app.services import recaudo_barrio
 from app.services.metrics_service import FiltroNoResuelto, MetricsService
 from app.services.tools import PeriodoVacio, ToolRunner, tools_para_proceso
 
-# [mes, municipio, barrio, cuentas, saldo, recaudo]
+# [mes, municipio, barrio, plan, zona, cuentas, saldo, recaudo]. CENTRO de Barranquilla en septiembre
+# se reparte en dos planes que suman lo de siempre (10 cuentas, 1000 de saldo, 300 de recaudo).
 FILAS = [
-    ["2026-08", "BARRANQUILLA", "CENTRO", 10, 1000.0, 100.0],
-    ["2026-09", "BARRANQUILLA", "CENTRO", 10, 1000.0, 300.0],
-    ["2026-09", "BARRANQUILLA", "EL TABOR", 5, 800.0, 500.0],
-    ["2026-09", "SOLEDAD", "CENTRO", 4, 400.0, 50.0],
-    ["2026-10", "PUERTO COLOMBIA", "SABANILLA", 7, 900.0, 900.0],
+    ["2026-08", "BARRANQUILLA", "CENTRO", "Multifamiliar", "ATLANTICO NORTE", 10, 1000.0, 100.0],
+    ["2026-09", "BARRANQUILLA", "CENTRO", "Multifamiliar", "ATLANTICO NORTE", 6, 600.0, 200.0],
+    ["2026-09", "BARRANQUILLA", "CENTRO", "Cobro Persuasivo", "ATLANTICO NORTE", 4, 400.0, 100.0],
+    ["2026-09", "BARRANQUILLA", "EL TABOR", "Multifamiliar", "ATLANTICO SUR", 5, 800.0, 500.0],
+    ["2026-09", "SOLEDAD", "CENTRO", "Cobro Persuasivo", "ATLANTICO NORTE", 4, 400.0, 50.0],
+    ["2026-10", "PUERTO COLOMBIA", "SABANILLA", "Multifamiliar", "ATLANTICO SUR", 7, 900.0, 900.0],
 ]
 
 
@@ -379,15 +381,59 @@ async def test_el_recaudo_por_gestor_sale_de_la_zona_de_la_pantalla(carpeta):
 
 
 @pytest.mark.asyncio
-async def test_el_recaudo_por_barrio_avisa_que_no_se_puede_filtrar_por_zona(carpeta):
+async def test_el_recaudo_por_barrio_sale_de_la_zona_y_el_plan_de_la_pantalla(carpeta):
     from app.schemas.chat import VistaTablero
 
     r = runner(carpeta)
-    r.vista = VistaTablero(zona="ATLANTICO SUR")
+    r.vista = VistaTablero(zona="ATLANTICO NORTE", brigada="Multifamiliar")
 
     salida, _ = await r.run("recaudo", {"mes": "2026-09"})
 
-    assert "no se puede filtrar por zona" in salida["filtros_de_pantalla"]["zona"]
+    assert salida["filtros_de_pantalla"] == {"zona": "ATLANTICO NORTE", "plan": "Multifamiliar"}
+    assert [(f["nombre"], f["recaudo"]) for f in salida["filas"]] == [("CENTRO", 200.0)]
     sin_filtros, _ = await r.run("recaudo", {"mes": "2026-09", "sin_filtros_de_pantalla": True})
-    assert "filtros_de_pantalla" not in sin_filtros
+    assert "filtros_de_pantalla" not in sin_filtros and len(sin_filtros["filas"]) == 3
+
+
+def test_el_barrio_con_mas_recaudo_en_un_plan_y_una_zona(tabla):
+    """«El barrio con más recaudo en el plan Multifamiliar de la zona norte»: antes no se podía
+    contestar, porque el recaudo por barrio no traía plan ni zona."""
+    r = recaudo_barrio.consultar(
+        tabla, meses=["2026-09"], plan="multifamiliar", zona="atlantico norte", ordenar_por="recaudo", limite=1)
+
+    assert (r["filas"][0]["nombre"], r["filas"][0]["recaudo"]) == ("CENTRO", 200.0)
+    # Sin filtros, el barrio es la suma de sus planes: lo de siempre.
+    todo = recaudo_barrio.consultar(tabla, meses=["2026-09"], barrio="Centro", municipio="Barranquilla")
+    assert todo["filas"][0]["recaudo"] == 300.0 and todo["filas"][0]["cuentas"] == 10
+    with pytest.raises(FiltroNoResuelto):
+        recaudo_barrio.consultar(tabla, plan="Inventado")
+
+
+def test_el_recaudo_sobre_saldo_de_un_plan_usa_solo_las_cuentas_de_ese_plan(tabla):
+    r = recaudo_barrio.consultar(
+        tabla, meses=["2026-09"], plan="Cobro Persuasivo", zona="ATLANTICO NORTE",
+        ordenar_por="recaudo_sobre_saldo", municipio="Barranquilla")
+
+    assert r["filas"][0]["nombre"] == "CENTRO"
+    assert r["filas"][0]["recaudo_sobre_saldo"] == round(100.0 / 400.0, 4)
+
+
+def test_el_archivo_anterior_sin_plan_ni_zona_se_sigue_leyendo(tmp_path):
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    (destino / recaudo_barrio.NOMBRE_ARCHIVO).write_text(json.dumps({
+        "provisionales": [], "filas": [["2026-09", "SOLEDAD", "CENTRO", 4, 400.0, 50.0]]}), encoding="utf-8")
+    tabla_vieja = recaudo_barrio.cargar(destino)
+
+    assert recaudo_barrio.consultar(tabla_vieja)["filas"][0]["recaudo"] == 50.0
+    with pytest.raises(recaudo_barrio.RecaudoNoDisponible, match="Corre el ETL"):
+        recaudo_barrio.consultar(tabla_vieja, plan="Multifamiliar")
+
+
+@pytest.mark.asyncio
+async def test_la_herramienta_contesta_el_barrio_de_un_plan_y_una_zona(carpeta):
+    salida, _ = await runner(carpeta).run(
+        "recaudo", {"mes": "2026-09", "plan": "Multifamiliar", "zona": "ATLANTICO SUR", "limite": 1})
+
+    assert "error" not in salida and salida["filas"][0]["nombre"] == "EL TABOR"
 
