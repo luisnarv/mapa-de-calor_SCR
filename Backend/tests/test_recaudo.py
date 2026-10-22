@@ -363,3 +363,31 @@ async def test_la_herramienta_pide_los_dos_meses_para_una_variacion(carpeta):
         "recaudo", {"agrupar_por": "gestor", "mes": "2026-09", "comparar_con": "2026-08", "ordenar_por": "variacion_saldo"})
     assert ok["filas"][0]["nombre"] == "LUIS RUIZ" and ok["comparado_con"] == ["2026-08"]
 
+
+@pytest.mark.asyncio
+async def test_el_recaudo_por_gestor_sale_de_la_zona_de_la_pantalla(carpeta):
+    from app.schemas.chat import VistaTablero
+
+    r = runner(carpeta)
+    r.vista = VistaTablero(zona="ATLANTICO SUR")
+
+    salida, _ = await r.run("recaudo", {"agrupar_por": "gestor", "mes": "2026-09"})
+
+    # Septiembre, zona sur: solo LUIS RUIZ (500). ANA PEREZ trabaja en la zona norte.
+    assert [f["nombre"] for f in salida["filas"]] == ["LUIS RUIZ"]
+    assert salida["filtros_de_pantalla"] == {"zona": "ATLANTICO SUR"}
+
+
+@pytest.mark.asyncio
+async def test_el_recaudo_por_barrio_avisa_que_no_se_puede_filtrar_por_zona(carpeta):
+    from app.schemas.chat import VistaTablero
+
+    r = runner(carpeta)
+    r.vista = VistaTablero(zona="ATLANTICO SUR")
+
+    salida, _ = await r.run("recaudo", {"mes": "2026-09"})
+
+    assert "no se puede filtrar por zona" in salida["filtros_de_pantalla"]["zona"]
+    sin_filtros, _ = await r.run("recaudo", {"mes": "2026-09", "sin_filtros_de_pantalla": True})
+    assert "filtros_de_pantalla" not in sin_filtros
+

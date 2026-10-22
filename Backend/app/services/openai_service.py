@@ -467,8 +467,10 @@ class OpenAIService:
             )
         return (
             f"FILTROS ACTIVOS EN SU PANTALLA — {resumen}\n"
-            "Úsalos por defecto en cada herramienta, salvo que pida otra cosa "
-            "explícitamente. Si él dice «este barrio» o «aquí», se refiere a estos.\n"
+            "El servidor ya los aplica a cada consulta cuando tú no pasas otro lugar, plan o "
+            "periodo: no hace falta repetirlos, y el resultado trae `filtros_de_pantalla` con lo que aplicó. "
+            "Si pide expresamente otro lugar, pásalo; si pide todo el Atlántico o ignorar sus filtros, "
+            "usa `sin_filtros_de_pantalla: true`. Si él dice «este barrio» o «aquí», se refiere a estos.\n"
             "Al dar una cifra, di siempre sobre qué recorte la calculaste; si por "
             "algún motivo respondes sobre un recorte distinto al de su pantalla, "
             "adviértelo en la misma frase."

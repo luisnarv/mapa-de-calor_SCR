@@ -9,6 +9,7 @@ redacte la respuesta. Además de datos, una herramienta puede devolver una
 from __future__ import annotations
 
 import calendar
+import inspect
 import logging
 import re
 from typing import Any, Sequence
@@ -857,6 +858,28 @@ for _t in TOOLS:
     if _t["function"]["name"] in ("efectividad", "ranking", "causas_no_efectivas", "filtrar_mapa"):
         _t["function"]["parameters"]["properties"]["tecnico"] = _TECNICO
 
+# Herramientas que parten de lo que el usuario tiene filtrado en pantalla (zona, municipio, plan...).
+# `filtrar_mapa` no: esa es la que MUEVE los filtros.
+_FILTRAN_CON_PANTALLA = frozenset({
+    "efectividad", "ranking", "causas_no_efectivas", "buscar_en_observaciones", "recaudo",
+    "ordenes_de_tecnico", "comparar_periodos", "serie_mensual", "concentracion", "cruzar",
+    "barrios_criticos",
+})
+for _t in TOOLS:
+    if _t["function"]["name"] in _FILTRAN_CON_PANTALLA:
+        _t["function"]["parameters"]["properties"]["sin_filtros_de_pantalla"] = {
+            "type": "boolean",
+            "description": (
+                "Pon true SOLO si el usuario pide expresamente todo el Atlántico o ignorar los filtros que "
+                "tiene puestos. Por defecto la consulta ya sale del recorte de su pantalla."
+            ),
+        }
+_t = TOOL_RECAUDO["function"]["parameters"]["properties"]
+_t["sin_filtros_de_pantalla"] = {
+    "type": "boolean",
+    "description": "true SOLO si pide expresamente todo el Atlántico o ignorar los filtros de su pantalla.",
+}
+
 NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in [*TOOLS, TOOL_RECAUDO])
 
 
@@ -1138,6 +1161,97 @@ class ToolRunner:
                 return candidatos
             raise  # Municipios distintos: aquí sí hay que preguntar.
 
+    def _con_filtros_de_pantalla(self, nombre: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+        """Completa la consulta con los filtros que el usuario tiene puestos y el modelo no pidió.
+
+        Antes solo el periodo se heredaba solo; zona, municipio, plan... dependían de que el modelo
+        se acordara de pasarlos, y una pregunta general con la zona Norte puesta se contestaba sobre
+        todo el Atlántico. Reglas:
+
+        * Lo que el modelo pasa explícitamente manda: si pide «Soledad», la zona de la pantalla se
+          ignora (el sitio pedido es otro).
+        * Entre los sitios gana el más específico: barrio, luego municipio, luego zona.
+        * Si la consulta es por una dimensión (ranking por zona), el filtro de esa misma dimensión
+          no se aplica: preguntan por todas, no por la que tienen elegida.
+        """
+        v = self.vista
+        if v is None or nombre not in _FILTRAN_CON_PANTALLA:
+            return args, {}
+        if nombre == "recaudo":
+            return self._recaudo_con_pantalla(args)
+        params = inspect.signature(getattr(self, f"_{nombre}")).parameters
+        vacio = (None, "", [])
+        pidio = lambda k: args.get(k) not in vacio  # noqa: E731
+        por = {args.get(k) for k in ("dimension", "dimension_a", "dimension_b") if args.get(k)}
+        nuevos, puestos = dict(args), {}
+
+        def poner(param: str, valor: Any, etiqueta: str, dimension: str | None = None) -> None:
+            if valor in vacio or param not in params or pidio(param) or dimension in por:
+                return
+            nuevos[param] = valor
+            puestos[etiqueta] = "; ".join(valor) if isinstance(valor, list) else str(valor)
+
+        if not any(pidio(k) for k in ("barrio", "municipio", "zona") if k in params):
+            barrios = list(v.barrios) or ([v.barrio] if v.barrio else [])
+            if barrios and "barrio" in params and "barrio" not in por:
+                if len(barrios) == 1:
+                    municipio, _, nombre_barrio = barrios[0].partition(" | ")
+                    poner("barrio", nombre_barrio or barrios[0], "barrio")
+                    poner("municipio", municipio if nombre_barrio else None, "municipio")
+                else:
+                    poner("barrio", [f"{b.partition(' | ')[2]} de {b.partition(' | ')[0]}" for b in barrios],
+                          "barrios")
+            elif v.municipio:
+                poner("municipio", v.municipio, "municipio", "municipio")
+            elif v.zona:
+                poner("zona", v.zona, "zona", "zona")
+        # Estos son independientes del sitio.
+        poner("brigada", v.brigada, "plan" if self._es_cobros else "brigada", "brigada")
+        poner("tipo_os", v.tipo_os, "gestión" if self._es_cobros else "tipo de orden", "tipo_os")
+        poner("actividad", v.actividad, "actividad", "actividad")
+        if nombre != "ordenes_de_tecnico":
+            poner("tecnico", list(v.tecnicos), "gestores" if self._es_cobros else "técnicos", "tecnico")
+        return nuevos, puestos
+
+    def _recaudo_con_pantalla(self, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+        """Lo mismo para `recaudo`, que tiene otras reglas: por barrio o municipio no hay zona ni plan, y
+        por gestor, zona o plan no hay barrio (gestores.json y recaudo_barrio.json no se cruzan)."""
+        v = self.vista
+        vacio = (None, "", [])
+        pidio = lambda k: args.get(k) not in vacio  # noqa: E731
+        # Solo cuenta lo que el modelo eligió: el agrupado por defecto no es una pregunta.
+        agrupar = args.get("agrupar_por")
+        por_gestor = (agrupar in ("gestor", "zona", "plan") or pidio("gestor")
+                      or args.get("ordenar_por") == "recaudo_por_gestion")
+        nuevos, puestos = dict(args), {}
+        if not any(pidio(k) for k in ("barrio", "municipio", "zona")):
+            barrios = list(v.barrios) or ([v.barrio] if v.barrio else [])
+            if por_gestor:
+                if v.municipio and agrupar != "municipio":
+                    nuevos["municipio"], puestos["municipio"] = v.municipio, v.municipio
+                elif v.zona and agrupar != "zona":
+                    nuevos["zona"], puestos["zona"] = v.zona, v.zona
+                if barrios:
+                    puestos["barrio"] = "; ".join(barrios) + " (el recaudo por gestor no se cruza con el barrio)"
+            else:
+                if barrios and agrupar != "barrio":
+                    if len(barrios) == 1:
+                        municipio, _, nombre_barrio = barrios[0].partition(" | ")
+                        nuevos["barrio"], nuevos["municipio"] = nombre_barrio or barrios[0], municipio or None
+                    else:
+                        nuevos["barrio"] = [f"{b.partition(' | ')[2]} de {b.partition(' | ')[0]}" for b in barrios]
+                    puestos["barrio"] = "; ".join(barrios)
+                elif v.municipio and agrupar != "municipio":
+                    nuevos["municipio"], puestos["municipio"] = v.municipio, v.municipio
+                if v.zona and "municipio" not in nuevos and "barrio" not in nuevos:
+                    puestos["zona"] = (v.zona + " (el recaudo por barrio no se puede filtrar por zona: "
+                                       "la cifra es de todo el Atlántico)")
+        if por_gestor and v.brigada and agrupar != "plan" and not pidio("plan"):
+            nuevos["plan"], puestos["plan"] = v.brigada, v.brigada
+        if v.tecnicos and agrupar != "gestor" and not pidio("gestor"):
+            nuevos["gestor"], puestos["gestores"] = list(v.tecnicos), "; ".join(v.tecnicos)
+        return {k: x for k, x in nuevos.items() if x is not None}, puestos
+
     async def run(self, nombre: str, args: dict[str, Any]) -> tuple[dict[str, Any], FiltroMapa | None]:
         """Devuelve (resultado para el modelo, filtro para el mapa o None).
 
@@ -1148,8 +1262,23 @@ class ToolRunner:
         # nombre inventado por el modelo alcanzaría cualquier método privado.
         if nombre not in NOMBRES_DE_HERRAMIENTAS:
             return {"error": f"Herramienta desconocida: {nombre}"}, None
+        args = dict(args)
+        sin_pantalla = bool(args.pop("sin_filtros_de_pantalla", False))
         try:
+            aplicados: dict[str, str] = {}
+            if not sin_pantalla:
+                args, aplicados = self._con_filtros_de_pantalla(nombre, args)
             resultado, filtro = await getattr(self, f"_{nombre}")(**args)
+            if aplicados and isinstance(resultado, dict) and "error" not in resultado:
+                # El modelo tiene que decirlo: la cifra es de ese recorte, no de todo el Atlántico.
+                resultado["filtros_de_pantalla"] = aplicados
+                if isinstance(resultado.get("nota"), str):
+                    resultado["nota"] += (
+                        " Se aplicó lo que el usuario tiene filtrado en su pantalla ("
+                        + ", ".join(f"{k}: {v}" for k, v in aplicados.items())
+                        + "): di que la cifra es de ese recorte. Si pide todo el Atlántico, repite la "
+                        "consulta con `sin_filtros_de_pantalla: true`."
+                    )
             if (filtro is None and nombre in _SEÑALAN_EN_EL_MAPA and isinstance(resultado, dict)
                     and isinstance(resultado.get("nota"), str) and "no se movió" not in resultado["nota"]):
                 # Sin esto el modelo decía «ya te marqué el estrato 6» cuando el mapa no se movió.
