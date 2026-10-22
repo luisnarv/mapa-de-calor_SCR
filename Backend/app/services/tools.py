@@ -1857,6 +1857,8 @@ class ToolRunner:
             "Cifras en pesos: `recaudo` es lo recaudado (se suma entre meses) y `saldo` la deuda de "
             "esas cuentas, que es la del último mes con datos (`saldo_al_cierre_de`), NO una suma "
             "de meses: dilo así. Si hay más filas que las mostradas (`grupos_en_total`) di «X de N». "
+            "«SIN BARRIO» no es un barrio (son cuentas que el mapa no pudo ubicar): nunca lo recomiendes ni lo "
+            "nombres como barrio; su plata va en `sin_barrio` y ya está dentro del total. "
             "`recaudo_sobre_saldo_pct` ya viene en porcentaje (286,6 es 286,6 %, no 2,87 %; puede pasar de 100 porque el "
             "recaudo es del periodo y el saldo, el del cierre): da ese número y di que es recaudo ÷ saldo, "
             "no una tasa oficial. Con `comparar_con`, cada fila trae el valor de los dos meses y su variación; "

@@ -437,3 +437,25 @@ async def test_la_herramienta_contesta_el_barrio_de_un_plan_y_una_zona(carpeta):
 
     assert "error" not in salida and salida["filas"][0]["nombre"] == "EL TABOR"
 
+
+def test_sin_barrio_no_se_recomienda_como_barrio_pero_su_plata_sigue_en_el_total(tmp_path):
+    """Caso real: «recomiéndame un barrio con mayor porcentaje de pagos» devolvió «SIN BARRIO» de
+    Suan con 7.331 %, porque sus pocas cuentas sin GPS debían muy poco y habían pagado más."""
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    (destino / recaudo_barrio.NOMBRE_ARCHIVO).write_text(json.dumps({"provisionales": [], "filas": [
+        ["2026-09", "SUAN", "SIN BARRIO", "Multifamiliar", "ATLANTICO SUR", 2, 10.0, 733.0],
+        ["2026-09", "SUAN", "CENTRO", "Multifamiliar", "ATLANTICO SUR", 50, 1000.0, 300.0],
+        ["2026-09", "MALAMBO", "EL CARMEN", "Multifamiliar", "ATLANTICO SUR", 40, 800.0, 400.0],
+    ]}), encoding="utf-8")
+    tabla = recaudo_barrio.cargar(destino)
+
+    r = recaudo_barrio.consultar(tabla, ordenar_por="recaudo_sobre_saldo", limite=5)
+
+    assert [f["nombre"] for f in r["filas"]] == ["EL CARMEN", "CENTRO"]
+    assert r["sin_barrio"] == {"saldo": 10.0, "recaudo": 733.0} and r["grupos_en_total"] == 2
+    assert r["total_del_recorte"]["recaudo"] == 1433.0  # la plata de «SIN BARRIO» no se pierde
+    # Por municipio sí cuenta, y si lo piden por su nombre tampoco se esconde.
+    assert recaudo_barrio.consultar(tabla, agrupar_por="municipio")["filas"][0]["recaudo"] == 1033.0
+    assert recaudo_barrio.consultar(tabla, barrio="SIN BARRIO")["filas"][0]["nombre"] == "SIN BARRIO"
+

@@ -25,6 +25,9 @@ from app.core.taxonomy import norm_dato
 from app.services.metrics_service import FiltroNoResuelto
 
 NOMBRE_ARCHIVO = "recaudo_barrio.json"
+# Las cuentas sin gestión con GPS en el mapa quedan en «SIN BARRIO» de su municipio (el ETL las
+# conserva para que el total cuadre con gestores.json). No es un barrio y no se recomienda ni se rankea.
+SIN_BARRIO = "SIN BARRIO"
 NOMBRE_GESTORES = "gestores.json"
 Criterio = Literal["recaudo", "saldo", "cuentas", "recaudo_sobre_saldo", "recaudo_por_gestion"]
 
@@ -243,6 +246,13 @@ def consultar(
 
     if ordenar_por == "recaudo_por_gestion":
         raise ValueError("recaudo_por_gestion solo existe por gestor, zona o plan: no hay gestiones por barrio.")
+    # «SIN BARRIO» tiene poca deuda y mucho recaudo, así que encabezaba cualquier ranking por razón
+    # (7.331 %) y se recomendaba como barrio. Sale de la lista, pero su plata sigue en el total y va
+    # aparte en `sin_barrio`. Si piden un barrio por su nombre, no se toca.
+    aparte = {}
+    if agrupar_por == "barrio" and not barrio:
+        aparte = {k: v for k, v in grupos.items() if k[-1] == SIN_BARRIO}
+        grupos = {k: v for k, v in grupos.items() if k not in aparte}
     candidatos = [kv for kv in grupos.items() if _tiene_base(kv[1], ordenar_por)]
     ordenados = sorted(candidatos, key=lambda kv: _valor(kv[1], ordenar_por), reverse=not peores)
     resultado = [
@@ -262,12 +272,14 @@ def consultar(
         # Sin `cuentas` a propósito: con ese número a la vista el modelo lo pegaba al
         # recaudo de un barrio («sobre un total de 13.875 cuentas en todo el Atlántico»).
         "total_del_recorte": {
-            "saldo": round(sum(v[1] for v in grupos.values()), 2),
-            "recaudo": round(sum(v[2] for v in grupos.values()), 2),
+            "saldo": round(sum(v[1] for v in (*grupos.values(), *aparte.values())), 2),
+            "recaudo": round(sum(v[2] for v in (*grupos.values(), *aparte.values())), 2),
         },
         "saldo_al_cierre_de": ultimo,
         "grupos_en_total": len(grupos),
         "grupos_sin_recaudo": sum(1 for v in grupos.values() if v[2] <= 0),
+        **({"sin_barrio": {"saldo": round(sum(v[1] for v in aparte.values()), 2),
+                           "recaudo": round(sum(v[2] for v in aparte.values()), 2)}} if aparte else {}),
         "filas": resultado,
     }
 
