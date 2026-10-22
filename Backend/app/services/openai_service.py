@@ -412,12 +412,12 @@ class OpenAIService:
         archivo, que es el peor error posible aquí porque las dos cifras son
         igual de plausibles y nadie notaría el cambiazo.
         """
+        if self._proceso == "cobros":
+            return ""  # en COBROS no se cargan archivos
         guardado = runner.cargue_actual() if runner is not None else None
         if guardado is None:
             return ""
-        es_cobros = self._proceso == "cobros"
-        orden_pl = "gestiones" if es_cobros else "órdenes"
-        agente = "gestor" if es_cobros else "técnico"
+        orden_pl, agente = "órdenes", "técnico"
         return (
             f"ARCHIVO CARGADO — «{guardado.archivo}»: "
             f"{len(guardado.cargue.ordenes)} {orden_pl} POR EJECUTAR, ya asignadas a un {agente}.\n"

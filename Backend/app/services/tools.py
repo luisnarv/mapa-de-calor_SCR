@@ -884,6 +884,12 @@ _t["sin_filtros_de_pantalla"] = {
 NOMBRES_DE_HERRAMIENTAS = frozenset(t["function"]["name"] for t in [*TOOLS, TOOL_RECAUDO])
 
 
+# Trabajan sobre el archivo de órdenes por ejecutar, que solo existe en SCR.
+_HERRAMIENTAS_DE_CARGUE = frozenset({
+    "resumen_cargue", "ordenes_cargadas", "agrupar_cargue", "buscar_orden", "recomendar_tecnicos",
+})
+
+
 def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
     """Devuelve TOOLS con descripciones adaptadas al proceso."""
     if proceso == "scr":
@@ -938,7 +944,8 @@ def tools_para_proceso(proceso: str) -> list[dict[str, Any]]:
         texto = re.sub(r"\borden\b(?!a)", "gestión", texto)
         return texto
 
-    tools_cobros = copy.deepcopy(TOOLS)
+    # En COBROS no se cargan archivos: sin estas herramientas el modelo deja de preguntar si hay uno.
+    tools_cobros = [t for t in copy.deepcopy(TOOLS) if t["function"]["name"] not in _HERRAMIENTAS_DE_CARGUE]
     for tool in tools_cobros:
         fn = tool["function"]
         fn["description"] = _aplicar(fn.get("description", ""))
@@ -1262,6 +1269,10 @@ class ToolRunner:
         # nombre inventado por el modelo alcanzaría cualquier método privado.
         if nombre not in NOMBRES_DE_HERRAMIENTAS:
             return {"error": f"Herramienta desconocida: {nombre}"}, None
+        if self._es_cobros and nombre in _HERRAMIENTAS_DE_CARGUE:
+            return {"error": "sin_archivos_en_cobros", "sugerencia": (
+                "En COBROS no se cargan archivos. No pidas uno ni preguntes si hay uno: responde con el "
+                "histórico (`ranking`, `recaudo`, `barrios_criticos`) y di qué criterio usaste.")}, None
         args = dict(args)
         sin_pantalla = bool(args.pop("sin_filtros_de_pantalla", False))
         try:

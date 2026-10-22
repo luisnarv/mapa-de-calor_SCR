@@ -1186,3 +1186,35 @@ async def test_un_barrio_elegido_gana_a_su_municipio_y_su_zona(metrics):
     assert salida["filtros_de_pantalla"]["barrio"] == bkey.partition(" | ")[2]
     assert "zona" not in salida["filtros_de_pantalla"]
 
+
+# --- COBROS no carga archivos -------------------------------------------------------------
+
+
+def test_el_bot_de_cobros_no_tiene_herramientas_de_archivo_y_el_de_scr_si():
+    """Preguntas reales en COBROS terminaban en «¿tienes un archivo cargado?»: el modelo veía las
+    herramientas del cargue (que solo existe en SCR) y las ofrecía."""
+    from app.services.tools import _HERRAMIENTAS_DE_CARGUE, tools_para_proceso
+
+    cobros = {t["function"]["name"] for t in tools_para_proceso("cobros")}
+    scr = {t["function"]["name"] for t in tools_para_proceso("scr")}
+
+    assert not cobros & _HERRAMIENTAS_DE_CARGUE
+    assert _HERRAMIENTAS_DE_CARGUE <= scr
+    assert {"ranking", "recaudo", "barrios_criticos", "propension_pago"} <= cobros
+
+
+@pytest.mark.asyncio
+async def test_pedir_una_herramienta_de_archivo_en_cobros_dice_que_no_hay_archivos(metrics, tmp_path):
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    for archivo in DATOS.iterdir():
+        if archivo.is_file():
+            (destino / archivo.name).write_bytes(archivo.read_bytes())
+    runner_cobros = ToolRunner(MetricsService(destino))
+
+    salida, filtro = await runner_cobros.run("resumen_cargue", {})
+
+    assert salida["error"] == "sin_archivos_en_cobros" and filtro is None
+    scr, _ = await ToolRunner(metrics).run("resumen_cargue", {})
+    assert scr.get("error") != "sin_archivos_en_cobros"
+
