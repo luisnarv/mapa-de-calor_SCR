@@ -107,6 +107,7 @@ QUERY_COBROS: str = """
       CASE WHEN estado_final = 'VF' THEN 'VF' ELSE resultado_reportado END AS "ESTADO_GESTION",
       resultado_gestion AS "RESULTADO_GESTION",
       resultado_cobranza AS "RESULTADO_COBRANZA",
+      acuerdo_m AS "ACUERDO_M",
       COALESCE(deuda_total, 0) AS "DEUDA_TOTAL",
       COALESCE(p_cobro_hoy, 0) AS "COBRO_HOY",
       COALESCE(recaudo_energia_balanza, 0) AS "RECAUDO"

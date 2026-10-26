@@ -153,6 +153,9 @@ def enrich(
             lambda v: "".join(c for c in unicodedata.normalize("NFKD", v.strip()) if not unicodedata.combining(c)).upper()
             if isinstance(v, str) else None)
         df["RESULTADO_COBRANZA"] = cobranza.map(RESULTADOS_COBRANZA).fillna(COBRANZA_SIN_DATO)
+        # `acuerdo_m` es booleano y puede venir nulo: 0 = no, 1 = sí, 2 = sin dato. El nulo no se
+        # confunde con «no»: son 240.616 de 955.849 gestiones en el histórico.
+        df["ACUERDO_M"] = df["ACUERDO_M"].map(lambda v: 2 if v is None or pd.isna(v) else int(bool(v))).astype(int)
         df["Estado"] = np.where(
             codigo.isna(), None,
             np.where(codigo == ESTADO_GESTION_PERDIDA, "Perdida", "Efectiva"),
@@ -195,7 +198,7 @@ def enrich(
         log.info("Duplicados: %s órdenes repetidas, se conserva la más reciente.", f"{duplicados:,}")
 
     extra = (
-        (["ESTADO_GESTION", "RESULTADO_GESTION", "RESULTADO_COBRANZA", "ANOMALIA_CAUSA", "SUBCAUSA"] + [c for c in ["DEUDA_TOTAL", "COBRO_HOY", "RECAUDO", "SALDO"] if c in df])
+        (["ESTADO_GESTION", "RESULTADO_GESTION", "RESULTADO_COBRANZA", "ACUERDO_M", "ANOMALIA_CAUSA", "SUBCAUSA"] + [c for c in ["DEUDA_TOTAL", "COBRO_HOY", "RECAUDO", "SALDO"] if c in df])
         if proceso == "cobros" else []
     )
     return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS) + extra]
