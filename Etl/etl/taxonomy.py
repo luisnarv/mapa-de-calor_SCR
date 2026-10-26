@@ -158,6 +158,18 @@ RESULTADOS_REPORTADOS: dict[str, str] = {
     "VF": "Contacto no efectivo",
 }
 
+# 3. Resultado de cobranza (`resultado_cobranza`): ¿se cobró lo facturado? Compara el
+#    recaudo contra el potencial de cobro del mes. Hoy solo septiembre y octubre de 2026
+#    lo traen; el resto llega nulo y se muestra como «Sin dato», no como «Sin cobro».
+#    «Sin facturación» no es un fallo del gestor: no había nada que cobrar.
+RESULTADOS_COBRANZA: dict[str, str] = {
+    "COBRO TOTAL": "Cobro total",
+    "COBRO PARCIAL": "Cobro parcial",
+    "SIN COBRO": "Sin cobro",
+    "SIN FACTURACION": "Sin facturación",
+}
+COBRANZA_SIN_DATO: str = "Sin dato"
+
 # 2. Recaudo de la gestión (`resultado_gestion`): el submenú de «Efectivas» en Capas
 #    y las columnas «con pago» de las tablas. «Efectiva sin validar» es un acuerdo de
 #    pago que aún no se valida contra los acuerdos materializados. «No efectiva» incluye

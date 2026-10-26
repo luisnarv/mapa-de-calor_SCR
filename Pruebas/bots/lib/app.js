@@ -88,7 +88,7 @@ export function compararPaneles(f, esp, gest, p) {
   igual("Ranking · planes · gestiones", p.rankingPlanes.tot, esp.tot);
   igual("Ranking · planes · con pago", p.rankingPlanes.conPago, esp.conPago);
   // Tabla por gestor: «Gestión» (tipo) y «Resultado gestión» no aplican a la vista; si está puesto se omite la comparación.
-  if (!f.tipo && !f.res) {
+  if (!f.tipo && !f.res && !f.cob) {
     igual("Ranking · gestores (filas)", p.rankingGestores.filas, gest.gestores);
     igual("Ranking · cuentas efectivas", p.rankingGestores.efectivas, gest.efectivas);
     igual("Ranking · cuentas con pago", p.rankingGestores.conPago, gest.conPago);

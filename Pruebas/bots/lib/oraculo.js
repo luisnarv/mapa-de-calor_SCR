@@ -11,8 +11,8 @@ const DIR = process.env.DATOS_DIR || path.join(RAIZ, "Frontend", "dashboard", "p
 const leer = (f) => JSON.parse(fs.readFileSync(path.join(DIR, f), "utf-8"));
 const sinTildes = (t) => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
 
-export const FILTROS = ["zona", "muni", "plan", "tipo", "res"];
-export const PILDORA = { zona: "Zona", muni: "Municipio", plan: "Plan", tipo: "Gestión", res: "Resultado gestión" };
+export const FILTROS = ["zona", "muni", "plan", "tipo", "res", "cob"];
+export const PILDORA = { zona: "Zona", muni: "Municipio", plan: "Plan", tipo: "Gestión", res: "Resultado gestión", cob: "Resultado cobranza" };
 
 export function cargarOraculo() {
   const base = leer("data.json");
@@ -32,6 +32,7 @@ export function cargarOraculo() {
     plan: (p, i) => dim.brigs[p.g[i]],
     tipo: (p, i) => dim.tipos[p.o[i]],
     res: (p, i) => dim.gests[p.x[i]],
+    cob: (p, i) => dim.cobranza[p.cb[i]],
   };
 
   // Un punto pasa si coincide con los filtros (salvo `excepto`) y con las casillas de Capas.
@@ -116,7 +117,7 @@ export function cargarOraculo() {
     const idCon = G.resultados.indexOf("Efectiva con pago"), idSin = G.resultados.indexOf("Efectiva sin recaudo");
     const ocultas = new Set((f.ocultas || []).map((n) => G.resultados.indexOf(n)));
     const por = new Map();
-    for (const [g, m, z, mu, pl, e, r, cuentas, saldo, recaudo] of G.filas) {
+    for (const [g, m, z, mu, pl, e, r, cuentas, , recaudo, cobroHoy] of G.filas) {
       if (!sel.has(m)) continue;
       if (iz >= 0 && z !== iz) continue;
       if (im >= 0 && mu !== im) continue;
@@ -125,7 +126,7 @@ export function cargarOraculo() {
       if (e === iPerdida ? f.perdidas === false : f.efectivas === false) continue;
       if (e !== iPerdida && ocultas.has(r)) continue;
       const x = por.get(g) || { ef: 0, pago: 0, deuda: 0, rec: 0 };
-      if (r === idCon || r === idSin) { x.ef += cuentas; x.deuda += saldo; x.rec += recaudo; }
+      if (r === idCon || r === idSin) { x.ef += cuentas; x.deuda += cobroHoy; x.rec += recaudo; }
       if (r === idCon) x.pago += cuentas;
       por.set(g, x);
     }

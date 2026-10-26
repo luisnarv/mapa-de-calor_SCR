@@ -66,6 +66,7 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
         **({"x": df["x"].tolist()} if "x" in df else {}),
         **({"ca": df["ca"].tolist(), "sc": df["sc"].tolist()} if "ca" in df else {}),
         **({"rg": df["rg"].tolist()} if "rg" in df else {}),
+        **({"cb": df["cb"].tolist()} if "cb" in df else {}),
         "n": pd.to_numeric(df["ORDEN"], errors="coerce").fillna(0).astype("int64").tolist(),
         "nic": df["NIC"].astype(str).tolist(),
     }
@@ -186,6 +187,10 @@ def build_and_write(
         d["RESULTADO_GESTION"] = d["RESULTADO_GESTION"].fillna("SIN DATO")
         resultados, ri = _idx(d["RESULTADO_GESTION"])
         d["rg"] = d["RESULTADO_GESTION"].map(ri).astype(int)
+    cobranza: list[str] = []
+    if "RESULTADO_COBRANZA" in d:
+        cobranza, ci2 = _idx(d["RESULTADO_COBRANZA"])
+        d["cb"] = d["RESULTADO_COBRANZA"].map(ci2).astype(int)
     d["e"] = d["Estado"].map(EST)
 
     # Minutos desde la fecha mínima (resolución que usa el front).
@@ -251,6 +256,7 @@ def build_and_write(
             "acts": acts,
             **({"gests": gests} if gests else {}),
             **({"resultados": resultados} if resultados else {}),
+            **({"cobranza": cobranza} if cobranza else {}),
             **({"anoms": anoms, "subcausas": subcausas} if anoms else {}),
             "munis": munis, "zonas": zonas,
             "estados": ["Efectiva", "Fallida", "Perdida"],  # índice 1 sin uso en cobros
@@ -288,7 +294,7 @@ def escribir_gestores(df: pd.DataFrame, settings: Settings) -> None:
     resultado de la gestión y recaudo. El tablero la filtra y la suma en el navegador, así
     que las cifras salen de la vista y no de los puntos del mapa. Formato compacto: cada
     fila es ``[gestor, mes, zona, municipio, plan, resultado, recaudo, cuentas, saldo,
-    recaudo_en_pesos]`` con índices a las listas del mismo nombre; los resultados llevan
+    recaudo_en_pesos, p_cobro_hoy, p_cobro_ant, recaudo_hoy_con_potencial, recaudo_ant_con_potencial]`` con índices a las listas del mismo nombre; los resultados llevan
     las mismas etiquetas que `dim.gests` y `dim.resultados` del mapa.
     """
     df = df.copy()
@@ -303,7 +309,9 @@ def escribir_gestores(df: pd.DataFrame, settings: Settings) -> None:
     filas = [
         [idx["gestor"][str(r.gestor)], idx["periodo_mes"][str(r.periodo_mes)], idx["zona"][str(r.zona)],
          idx["municipio"][str(r.municipio)], idx["plan"][str(r.plan)], idx["estado_final"][str(r.estado_final)],
-         idx["resultado_gestion"][str(r.resultado_gestion)], int(r.cuentas), round(float(r.saldo), 2), round(float(r.recaudo), 2)]
+         idx["resultado_gestion"][str(r.resultado_gestion)], int(r.cuentas), round(float(r.saldo), 2), round(float(r.recaudo), 2),
+         round(float(r.cobro_hoy), 2), round(float(r.cobro_ant), 2),
+         round(float(r.rec_pot_hoy), 2), round(float(r.rec_pot_ant), 2)]
         for r in df.itertuples(index=False)
         if str(r.estado_final) in idx["estado_final"] and str(r.resultado_gestion) in idx["resultado_gestion"]
     ]

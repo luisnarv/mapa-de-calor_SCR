@@ -105,7 +105,8 @@ QUERY_COBROS: str = """
       observaciones AS "OBS_COMBINADA",
       REPLACE(punto_gps, '.-', ',-') AS "GPS",
       CASE WHEN estado_final = 'VF' THEN 'VF' ELSE resultado_reportado END AS "ESTADO_GESTION",
-      resultado_gestion AS "RESULTADO_GESTION"
+      resultado_gestion AS "RESULTADO_GESTION",
+      resultado_cobranza AS "RESULTADO_COBRANZA"
     FROM dbanalitica.historico_aire_cobros
 """
 
@@ -116,23 +117,52 @@ QUERY_COBROS: str = """
 # el resultado cuadre con la vista. `calculo_provisional` es verdadero en el mes en curso.
 QUERY_GESTORES: str = """
     SELECT
-      periodo_mes,
-      gestor,
-      zona,
-      municipio,
-      plan,
-      estado_final,
-      resultado_gestion,
+      n.periodo_mes,
+      n.gestor,
+      n.zona,
+      n.municipio,
+      n.plan,
+      n.estado_final,
+      n.resultado_gestion,
       COUNT(*) AS cuentas,
-      COALESCE(SUM(saldo), 0) AS saldo,
-      COALESCE(SUM(recaudo_sin_irr), 0) AS recaudo,
-      BOOL_OR(calculo_provisional) AS provisional
-    FROM dbanalitica.v_aire_cobros_nic_mes
-    WHERE anio = (SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes)
-      AND gestor IS NOT NULL
-      AND resultado_gestion IS NOT NULL
-    GROUP BY periodo_mes, gestor, zona, municipio, plan, estado_final, resultado_gestion
-    ORDER BY periodo_mes, gestor
+      COALESCE(SUM(n.saldo), 0) AS saldo,
+      COALESCE(SUM(n.recaudo_sin_irr), 0) AS recaudo,
+      COALESCE(SUM(c.p_cobro_hoy), 0) AS cobro_hoy,
+      COALESCE(SUM(c.p_cobro_ant), 0) AS cobro_ant,
+      -- Recaudo de las cuentas que sí traen potencial, para que el % compare lo mismo arriba y
+      -- abajo (octubre solo trae potencial en una parte de sus cuentas). Es la suma total: el
+      -- recaudo de unas cuentas puede cubrir lo que faltó en otras, y el % puede pasar de 100.
+      COALESCE(SUM(n.recaudo_sin_irr) FILTER (WHERE c.p_cobro_hoy > 0), 0) AS rec_pot_hoy,
+      -- Mes anterior de las MISMAS cuentas que el gestor tiene en este mes: su recaudo de
+      -- balanza del mes previo, contra el p_cobro_ant que traen. Balanza y no la vista, porque
+      -- solo la mitad de las cuentas de octubre se gestionó también en septiembre; el recaudo
+      -- de balanza coincide con el de la vista en las 63.401 cuentas de septiembre.
+      COALESCE(SUM(bp.rec) FILTER (WHERE c.p_cobro_ant > 0), 0) AS rec_pot_ant,
+      BOOL_OR(n.calculo_provisional) AS provisional
+    FROM dbanalitica.v_aire_cobros_nic_mes n
+    -- La vista por cuenta y mes no trae el potencial de cobro: se toma de la de gestiones,
+    -- donde vale lo mismo para todas las gestiones de una cuenta en el mes (verificado
+    -- en septiembre y octubre de 2026). MAX y no SUM para no multiplicarlo por gestión.
+    -- Hay cuentas con potencial negativo (hasta -$129 M en una sola): GREATEST las deja en 0,
+    -- porque restadas del resto dejaban a un gestor con deuda negativa y su % sin sentido.
+    LEFT JOIN (
+      SELECT cuenta, periodo_mes, GREATEST(MAX(p_cobro_hoy), 0) AS p_cobro_hoy, GREATEST(MAX(p_cobro_ant), 0) AS p_cobro_ant
+      FROM dbanalitica.v_aire_cobros_gestion
+      GROUP BY cuenta, periodo_mes
+    ) c ON c.cuenta = n.cuenta AND c.periodo_mes = n.periodo_mes
+    LEFT JOIN (
+      SELECT cuenta::text AS cuenta, periodo, SUM(recaudo_sin_irr) AS rec
+      FROM dbanalitica.historico_balanza
+      WHERE periodo >= ((SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes) - 1) * 100 + 12
+      GROUP BY cuenta::text, periodo
+    ) bp ON bp.cuenta = n.cuenta::text
+        AND bp.periodo = (EXTRACT(YEAR FROM to_date(n.periodo_mes, 'YYYY-MM') - INTERVAL '1 month') * 100
+                          + EXTRACT(MONTH FROM to_date(n.periodo_mes, 'YYYY-MM') - INTERVAL '1 month'))::int
+    WHERE n.anio = (SELECT MAX(anio) FROM dbanalitica.v_aire_cobros_nic_mes)
+      AND n.gestor IS NOT NULL
+      AND n.resultado_gestion IS NOT NULL
+    GROUP BY n.periodo_mes, n.gestor, n.zona, n.municipio, n.plan, n.estado_final, n.resultado_gestion
+    ORDER BY n.periodo_mes, n.gestor
 """
 
 # Recaudo y saldo por cuenta y mes (solo COBROS), de la vista ya sin duplicados. No se

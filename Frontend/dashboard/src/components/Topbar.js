@@ -143,7 +143,7 @@ export default function Topbar({
 
   const hayFiltros =
     st.zona !== "" || st.muni !== "" || st.brig !== "" || st.tipo !== "" ||
-    st.act !== "" || st.gest !== "" || mesesPuestos || barrioSel ||
+    st.act !== "" || st.gest !== "" || st.cob !== "" || mesesPuestos || barrioSel ||
     st.causaSel != null || !st.est.every(Boolean) || st.efOcultas.length > 0 || st.hotspot !== 60 ||
     st.minOrders !== (esCobros ? 1 : 10);
 
@@ -218,6 +218,15 @@ export default function Topbar({
               opciones={opcionesDe(dim.gests, avail.gest)}
               onElegir={(v) => onFilterChange("gest", v)}
               vacio={`Todos los resultados (${avail.gest.size})`}
+            />
+          )}
+          {dim.cobranza && dim.cobranza.length > 0 && (
+            <FiltroPildora
+              etiqueta="Resultado cobranza"
+              valor={st.cob}
+              opciones={opcionesDe(dim.cobranza, avail.cob)}
+              onElegir={(v) => onFilterChange("cob", v)}
+              vacio={`Todos los cobros (${avail.cob.size})`}
             />
           )}
           {!esCobros && dim.acts && dim.acts.length > 0 && (

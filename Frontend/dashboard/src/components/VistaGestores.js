@@ -59,8 +59,10 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
         gestionadas: o.gestionadas,
         sinRecaudo: o.ef - o.pago,
         // % de recaudo = recaudo / deuda de las cuentas con gestión efectiva de ese mes.
-        pctAct: o.aDeuda > 0 ? (o.aRec / o.aDeuda) * 100 : null,
-        pctAnt: o.pDeuda > 0 ? (o.pRec / o.pDeuda) * 100 : null,
+        // Tope de 100: si un gestor cobró más de lo facturado (deuda vieja), el % muestra 100 y el
+        // «Recaudo» en pesos sigue mostrando el total real.
+        pctAct: o.aDeuda > 0 ? Math.min((o.aRec / o.aDeuda) * 100, 100) : null,
+        pctAnt: o.pDeuda > 0 ? Math.min((o.pRec / o.pDeuda) * 100, 100) : null,
         pctPago: o.gestionadas ? (o.pago / o.gestionadas) * 100 : null,
       }));
     const suma = (k) => filas.reduce((a, o) => a + o[k], 0);
@@ -90,6 +92,8 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
 
   const num = (v) => Math.round(v).toLocaleString("es-CO");
   const dinero = (v) => "$" + Math.round(v).toLocaleString("es-CO");
+  // Sin potencial de cobro (meses que aún no lo traen o cuentas con 0) no se muestra «$0».
+  const deuda = (v) => (v > 0 ? dinero(v) : "—");
   const pct = (v) => (v == null ? "—" : v.toFixed(1).replace(".", ",") + "%");
 
   // En el ranking un % sobre pocas cuentas no vale: los de muestra corta van al fondo.
@@ -120,7 +124,7 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
   const valorDe = (o) => (metrica === "pctRecaudo" ? o.pctAct ?? 0 : o[metrica] ?? 0);
   const top = [...vista.filas].sort((a, b) => valorDe(b) - valorDe(a)).slice(0, 12);
   const maximo = Math.max(...top.map(valorDe), 1);
-  const formato = metrica === "recaudo" || metrica === "deuda" ? dinero : metrica === "cuentas" ? num : pct;
+  const formato = metrica === "recaudo" ? dinero : metrica === "deuda" ? deuda : metrica === "cuentas" ? num : pct;
 
   return (
     <div className="gv">
@@ -152,7 +156,7 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
                 {ranking && <td className="num">{i + 1}</td>}
                 <td>{o.nombre}</td>
                 <td className="num">{num(o.cuentas)}</td>
-                <td className="num">{dinero(o.deuda)}</td>
+                <td className="num">{deuda(o.deuda)}</td>
                 <td className="num">{dinero(o.recaudo)}</td>
                 <td className="num">{pct(o.pctAnt)}</td>
                 <td className="num">{pct(o.pctAct)}</td>
@@ -173,7 +177,7 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
               {ranking && <td></td>}
               <td>Total ({filas.length} gestores)</td>
               <td className="num">{num(vista.total.cuentas)}</td>
-              <td className="num">{dinero(vista.total.deuda)}</td>
+              <td className="num">{deuda(vista.total.deuda)}</td>
               <td className="num">{dinero(vista.total.recaudo)}</td>
               <td className="num">{pct(vista.total.pctAnt)}</td>
               <td className="num">{pct(vista.total.pctAct)}</td>
@@ -190,11 +194,14 @@ export default function VistaGestores({ tabla, palette: P, ranking = false, late
         </table>
         <p className="gv-nota">
           Cuentas con gestión efectiva = «Efectiva con pago» + «Efectiva sin recaudo». Deuda y recaudo son de esas
-          cuentas; % Recaudo = recaudo / deuda del mes (el total es el promedio de los gestores). Cifras de
-          la vista v_aire_cobros_nic_mes.
+          cuentas; la deuda es el potencial de cobro del mes (p_cobro_hoy). El % Recaudo del mes elegido es la suma del recaudo de sus cuentas
+          / la suma de p_cobro_hoy (solo cuentas con potencial); el del mes anterior usa esas mismas cuentas:
+          su recaudo del mes previo / p_cobro_ant. Se calcula con los totales, no cuenta por cuenta, y se muestra
+          con tope de 100 % (el total es el promedio de los gestores). Solo septiembre y octubre de 2026 traen potencial de cobro: en los demás meses
+          la deuda y el % salen vacíos. Recaudo de la vista v_aire_cobros_nic_mes.
           {vista.provisionalActual && " (prov.) = el mes en curso aún no cierra: puede subir."}
           {vista.ignoraGestion && " El filtro «Gestión» no aplica a esta tabla (la vista no trae el tipo de gestión)."}
-          {vista.ignoraResultado && " El filtro «Resultado gestión» tampoco aplica a esta tabla (la vista no trae el resultado reportado)."}
+          {vista.ignoraResultado && " El filtro «Resultado gestión» y «Resultado cobranza» tampoco aplican a esta tabla (la vista no trae esas columnas)."}
           {ranking && (
             <>
               {" "}

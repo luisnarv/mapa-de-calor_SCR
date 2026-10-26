@@ -20,6 +20,8 @@ from .config import BBOX, COLS_TEXTO
 from .logging_conf import get_logger
 from .taxonomy import (
     ESTADO_GESTION_PERDIDA,
+    COBRANZA_SIN_DATO,
+    RESULTADOS_COBRANZA,
     RESULTADOS_REPORTADOS,
     RESULTADOS_GESTION,
     SUBCAUSA_SIN_DETALLE,
@@ -147,6 +149,10 @@ def enrich(
         recaudo = df["RESULTADO_GESTION"].astype(object).map(
             lambda v: v.strip().upper() if isinstance(v, str) else None)
         df["RESULTADO_GESTION"] = recaudo.where(recaudo.isin(RESULTADOS_GESTION)).map(RESULTADOS_GESTION)
+        cobranza = df["RESULTADO_COBRANZA"].astype(object).map(
+            lambda v: "".join(c for c in unicodedata.normalize("NFKD", v.strip()) if not unicodedata.combining(c)).upper()
+            if isinstance(v, str) else None)
+        df["RESULTADO_COBRANZA"] = cobranza.map(RESULTADOS_COBRANZA).fillna(COBRANZA_SIN_DATO)
         df["Estado"] = np.where(
             codigo.isna(), None,
             np.where(codigo == ESTADO_GESTION_PERDIDA, "Perdida", "Efectiva"),
@@ -189,7 +195,7 @@ def enrich(
         log.info("Duplicados: %s órdenes repetidas, se conserva la más reciente.", f"{duplicados:,}")
 
     extra = (
-        ["ESTADO_GESTION", "RESULTADO_GESTION", "ANOMALIA_CAUSA", "SUBCAUSA"]
+        ["ESTADO_GESTION", "RESULTADO_GESTION", "RESULTADO_COBRANZA", "ANOMALIA_CAUSA", "SUBCAUSA"]
         if proceso == "cobros" else []
     )
     return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS) + extra]
