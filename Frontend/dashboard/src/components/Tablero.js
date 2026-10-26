@@ -152,7 +152,6 @@ export default function Tablero({ proceso }) {
     tipo: "",
     act: "",
     gest: "",
-    cob: "",
     causaSel: null,
     efOcultas: [],
     d0: 0,
@@ -228,7 +227,6 @@ export default function Tablero({ proceso }) {
       tipo: "",
       act: "",
       gest: "",
-      cob: "",
       causaSel: null,
       efOcultas: [],
       d0: 0,
@@ -460,7 +458,7 @@ export default function Tablero({ proceso }) {
   // 1. FILTERING ENGINE
   const IDX = useMemo(() => {
     if (!data || !rawArrays) return [];
-    const { DAY, B, G, O, ACT, GEST, E, RG, COB } = rawArrays;
+    const { DAY, B, G, O, ACT, GEST, E, RG } = rawArrays;
     const N = DAY.length;
     // Las casillas de «gestiones a mostrar» (perdidas / efectivas y sus tipos de recaudo) son
     // filtros reales: lo desmarcado no entra en ninguna lista, tabla ni total.
@@ -471,7 +469,6 @@ export default function Tablero({ proceso }) {
     const oi = st.tipo === "" ? -1 : +st.tipo;
     const ai = st.act === "" ? -1 : +st.act;
     const xi = st.gest === "" ? -1 : +st.gest;
-    const cbi = st.cob === "" ? -1 : +st.cob;
     const activeMi =
       st.months && st.months.length > 0
         ? new Set(
@@ -492,11 +489,10 @@ export default function Tablero({ proceso }) {
       if (oi >= 0 && O[i] !== oi) continue;
       if (ai >= 0 && ACT && ACT[i] !== ai) continue;
       if (xi >= 0 && GEST && GEST[i] !== xi) continue;
-      if (cbi >= 0 && COB && COB[i] !== cbi) continue;
       out[k++] = i;
     }
     return out.subarray(0, k);
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.cob, st.months, st.est, st.efOcultas]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // Tabla por gestor (Tendencias > Por gestor y Ranking). Sale de `gestores.json`, la
   // agregación de `v_aire_cobros_nic_mes` (una fila por cuenta y mes, ya sin duplicados),
@@ -603,9 +599,9 @@ export default function Tablero({ proceso }) {
       hayAnterior: iAnt >= 0,
       provisionalActual: G.provisionales.includes(actual),
       ignoraGestion: st.tipo !== "",
-      ignoraResultado: st.gest !== "" || st.cob !== "",
+      ignoraResultado: st.gest !== "",
     };
-  }, [V, data, gestoresDet, availableMonths, st.activeTab, st.months, st.zona, st.muni, st.brig, st.tipo, st.gest, st.cob, st.est, st.efOcultas]);
+  }, [V, data, gestoresDet, availableMonths, st.activeTab, st.months, st.zona, st.muni, st.brig, st.tipo, st.gest, st.est, st.efOcultas]);
 
   // Recalculates available filters in cascade
   const avail = useMemo(() => {
@@ -616,14 +612,13 @@ export default function Tablero({ proceso }) {
       tipo: new Set(),
       act: new Set(),
       gest: new Set(),
-      cob: new Set(),
       // Lo que existe con los filtros de las píldoras, sin mirar las casillas de Capas:
       // sirve para apagar una casilla cuando no hay nada de ese tipo.
       tipos: [0, 0, 0],
       efRec: new Map()
     };
     if (!data || !rawArrays) return res;
-    const { B, G, O, ACT, GEST, DAY, E, RG, COB } = rawArrays;
+    const { B, G, O, ACT, GEST, DAY, E, RG } = rawArrays;
     const ocultas = new Set(st.efOcultas);
     const N = DAY.length;
 
@@ -634,7 +629,6 @@ export default function Tablero({ proceso }) {
     const oi = st.tipo === "" ? -1 : +st.tipo;
     const ai = st.act === "" ? -1 : +st.act;
     const xi = st.gest === "" ? -1 : +st.gest;
-    const cbi = st.cob === "" ? -1 : +st.cob;
     const activeMi =
       st.months && st.months.length > 0
         ? new Set(
@@ -644,11 +638,7 @@ export default function Tablero({ proceso }) {
 
     for (let i = 0; i < N; i++) {
       if (activeMi && !activeMi.has(monthMap.idx[i])) continue;
-      // «x» y «c» son el resultado de gestión y el de cobranza: cada uno cuenta como filtro
-      // para todas las demás listas, pero no para la suya.
-      const gOk = xi < 0 || !GEST || GEST[i] === xi;
-      const cOk = cbi < 0 || !COB || COB[i] === cbi;
-      const xOk = gOk && cOk;
+      const xOk = xi < 0 || !GEST || GEST[i] === xi;
       const b = B[i];
       const zVal = data.dim.b_zona[b];
       const mVal = data.dim.b_muni[b];
@@ -688,11 +678,10 @@ export default function Tablero({ proceso }) {
         res.act.add(aVal);
       }
       // El estado de gestión también se cascadea: solo ofrece los que dejan datos.
-      if (GEST && cOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.gest.add(GEST[i]);
-      if (COB && gOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.cob.add(COB[i]);
+      if (GEST && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.gest.add(GEST[i]);
     }
     return res;
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.cob, st.months, st.est, st.efOcultas]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // 2. AGGREGATION ENGINE
   // Es una función de los índices para poder agregar también solo los barrios elegidos
@@ -1516,7 +1505,6 @@ export default function Tablero({ proceso }) {
       tipo: "",
       act: "",
       gest: "",
-      cob: "",
       causaSel: null,
       efOcultas: [],
       d0: 0,
