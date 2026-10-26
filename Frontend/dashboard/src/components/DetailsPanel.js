@@ -1021,37 +1021,91 @@ export default function DetailsPanel({
       );
     }
 
-    const { E_raw, C_raw, S_raw, T_raw, DAY_raw, M_raw, ORD_raw, B_raw, NIC_raw, GEST_RAW } = st;
+    const {
+      E_raw, C_raw, S_raw, T_raw, DAY_raw, M_raw, ORD_raw, B_raw, NIC_raw,
+      GEST_RAW, RG_RAW, COB_RAW, G_raw, SD_raw, CH_raw, RC_raw, months, availableMonths
+    } = st;
     const history = [];
 
     if (NIC_raw) {
       const N = NIC_raw.length;
+      const targetNic = String(nicVal).trim();
       for (let i = 0; i < N; i++) {
-        if (NIC_raw[i] === nicVal) {
+        if (String(NIC_raw[i]).trim() === targetNic) {
           history.push({
             idx: i,
             ord: ORD_raw[i],
             est: E_raw[i],
             gest: dim.gests && GEST_RAW ? dim.gests[GEST_RAW[i]] : null,
-            causa: dim.causas[C_raw[i]],
-            sub: dim.subs[S_raw[i]],
+            resultado: dim.resultados && RG_RAW ? dim.resultados[RG_RAW[i]] : null,
+            cobranza: dim.cobranza && COB_RAW ? dim.cobranza[COB_RAW[i]] : null,
+            plan: dim.brigs && G_raw ? dim.brigs[G_raw[i]] : null,
+            causa: dim.causas ? dim.causas[C_raw[i]] : null,
+            sub: dim.subs ? dim.subs[S_raw[i]] : null,
             tec: gestor(dim.tecs[T_raw[i]]),
             m: M_raw[i],
             day: DAY_raw[i],
             barrio: barrioName(B_raw[i]),
-            muni: barrioMuni(B_raw[i])
+            muni: barrioMuni(B_raw[i]),
+            saldo: SD_raw ? SD_raw[i] : null,
+            cobroHoy: CH_raw ? CH_raw[i] : null,
+            recaudo: RC_raw ? RC_raw[i] : null
           });
         }
       }
     }
 
     history.sort((a, b) => b.m - a.m);
-    const clientInfo = history[0] || {};
+    const latest = history[0] || {};
+    const conSaldo = history.find((h) => h.saldo > 0);
+    const conCobro = history.find((h) => h.cobroHoy > 0);
+    const conRec = history.find((h) => h.recaudo > 0);
+
+    const clientInfo = {
+      ...latest,
+      saldo: (latest.saldo > 0 ? latest.saldo : (conSaldo ? conSaldo.saldo : latest.saldo)),
+      cobroHoy: (latest.cobroHoy > 0 ? latest.cobroHoy : (conCobro ? conCobro.cobroHoy : latest.cobroHoy)),
+      recaudo: (latest.recaudo > 0 ? latest.recaudo : (conRec ? conRec.recaudo : latest.recaudo))
+    };
+
+    const mesSeleccionado = (months && months.length > 0)
+      ? months.join(", ")
+      : (availableMonths && availableMonths.length > 0)
+        ? availableMonths[availableMonths.length - 1].label
+        : "mes seleccionado";
+
+    const dineroFmt = (v) => {
+      if (v == null || isNaN(v)) return "—";
+      return "$" + Math.round(v).toLocaleString("es-CO");
+    };
+
+    const esCobros = V.conFallidas === false;
 
     const tableRows = history.map((h) => {
       const hh = String(Math.floor((h.m % 1440) / 60)).padStart(2, "0");
       const mm = String(h.m % 60).padStart(2, "0");
       const estClass = h.est === 0 ? "ok" : h.est === 1 ? "warn" : "bad";
+
+      if (esCobros) {
+        return [
+          <span className="mono" style={{ fontSize: "10.5px" }}>{h.ord || "—"}</span>,
+          <span style={{ display: "block", fontSize: "10.5px", lineHeight: "1.2" }}>
+            <b style={{ color: "var(--tx)" }}>{h.plan || "—"}</b>
+            {h.sub && h.sub !== h.plan && <span style={{ display: "block", fontSize: "9.5px", color: "var(--dim)", marginTop: "1px" }}>{h.sub}</span>}
+          </span>,
+          <span className={estClass} style={{ fontWeight: "600", fontSize: "10.5px", lineHeight: "1.2" }}>
+            {h.resultado || h.gest || (dim.estados && dim.estados[h.est]) || "—"}
+            {h.cobranza && h.cobranza !== "Sin dato" && (
+              <span style={{ display: "block", fontSize: "9.5px", fontWeight: 400, color: "var(--dim)", marginTop: "1px" }}>
+                {h.cobranza}
+              </span>
+            )}
+          </span>,
+          `${dayLabel(h.day)} ${hh}:${mm}`,
+          h.tec
+        ];
+      }
+
       return [
         <span className="mono" style={{ fontSize: "10.5px" }}>{h.ord || "—"}</span>,
         <span className={estClass} style={{ fontWeight: "600" }}>
@@ -1066,6 +1120,10 @@ export default function DetailsPanel({
         h.tec
       ];
     });
+
+    const tableHeads = esCobros
+      ? [V.orden || "Orden", "Plan de acción", "Resultado gestión", "Fecha/Hora", V.tecnico || "Gestor"]
+      : [V.orden || "Orden", "Estado", "Fecha/Hora", "Clasificación", V.tecnico || "Técnico"];
 
     return (
       <>
@@ -1092,6 +1150,55 @@ export default function DetailsPanel({
           </div>
         </div>
 
+        {/* 1. Métricas Financieras del NIC: Deuda del cliente, Deuda actual del mes, Recaudo */}
+        <div className="mini-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: "8px" }}>
+          <div className="mini">
+            <span>Deuda del cliente</span>
+            <b style={{ color: "var(--bad)", fontSize: "13px" }}>{dineroFmt(clientInfo.saldo)}</b>
+          </div>
+          <div className="mini">
+            <span>Deuda actual</span>
+            <b style={{ color: "var(--warn)", fontSize: "13px" }}>{dineroFmt(clientInfo.cobroHoy)}</b>
+            <span style={{ fontSize: "8px", marginTop: "2px", textTransform: "none", color: "var(--mut)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {mesSeleccionado}
+            </span>
+          </div>
+          <div className="mini">
+            <span>Recaudo</span>
+            <b style={{ color: "var(--ok)", fontSize: "13px" }}>{dineroFmt(clientInfo.recaudo)}</b>
+          </div>
+        </div>
+
+        {/* 2. Métricas Operativas del NIC: Plan de acción, Resultado de la gestión */}
+        <div className="mini-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginBottom: "14px" }}>
+          <div className="mini">
+            <span>Plan de acción</span>
+            <b style={{ fontSize: "12px", whiteSpace: "normal", wordBreak: "break-word" }}>
+              {clientInfo.plan || clientInfo.sub || "—"}
+            </b>
+            {clientInfo.sub && clientInfo.plan && clientInfo.sub !== clientInfo.plan && (
+              <span style={{ fontSize: "9px", marginTop: "2px", textTransform: "none", color: "var(--dim)" }}>
+                {clientInfo.sub}
+              </span>
+            )}
+          </div>
+          <div className="mini">
+            <span>Resultado gestión</span>
+            <b
+              style={{ fontSize: "12px", whiteSpace: "normal", wordBreak: "break-word" }}
+              className={clientInfo.est === 0 ? "ok" : clientInfo.est === 1 ? "warn" : "bad"}
+            >
+              {clientInfo.resultado || clientInfo.gest || (dim.estados && dim.estados[clientInfo.est]) || "—"}
+            </b>
+            {clientInfo.cobranza && clientInfo.cobranza !== "Sin dato" && (
+              <span style={{ fontSize: "9px", marginTop: "2px", textTransform: "none", color: "var(--dim)" }}>
+                {clientInfo.cobranza}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Conteo de Visitas */}
         <div className={`mini-grid${V.conFallidas === false ? " tres" : ""}`} style={{ marginBottom: "14px" }}>
           <div className="mini">
             <span>Visitas</span>
@@ -1101,11 +1208,11 @@ export default function DetailsPanel({
             <span>Efectivas</span>
             <b className="ok">{history.filter(h => h.est === 0).length}</b>
           </div>
-{V.conFallidas !== false && (
-          <div className="mini">
-            <span>Fallidas</span>
-            <b className="warn">{history.filter(h => h.est === 1).length}</b>
-          </div>
+          {V.conFallidas !== false && (
+            <div className="mini">
+              <span>Fallidas</span>
+              <b className="warn">{history.filter(h => h.est === 1).length}</b>
+            </div>
           )}
           <div className="mini">
             <span>Perdidas</span>
@@ -1115,7 +1222,7 @@ export default function DetailsPanel({
 
         <h3>Historial de {V.ordenes || "Órdenes"}</h3>
         <div className="tbl-wrap" style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--pan2)", maxHeight: "400px" }}>
-          {miniTable(tableRows, [V.orden || "Orden", "Estado", "Fecha/Hora", "Clasificación", V.tecnico || "Técnico"])}
+          {miniTable(tableRows, tableHeads)}
         </div>
       </>
     );

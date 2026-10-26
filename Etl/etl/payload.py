@@ -67,6 +67,9 @@ def _pts_dict(df: pd.DataFrame) -> dict[str, list]:
         **({"ca": df["ca"].tolist(), "sc": df["sc"].tolist()} if "ca" in df else {}),
         **({"rg": df["rg"].tolist()} if "rg" in df else {}),
         **({"cb": df["cb"].tolist()} if "cb" in df else {}),
+        **({"sd": pd.to_numeric(df["DEUDA_TOTAL"] if "DEUDA_TOTAL" in df else df["SALDO"], errors="coerce").fillna(0).round(2).tolist()} if ("DEUDA_TOTAL" in df or "SALDO" in df) else {}),
+        **({"ch": pd.to_numeric(df["COBRO_HOY"], errors="coerce").fillna(0).round(2).tolist()} if "COBRO_HOY" in df else {}),
+        **({"rc": pd.to_numeric(df["RECAUDO"], errors="coerce").fillna(0).round(2).tolist()} if "RECAUDO" in df else {}),
         "n": pd.to_numeric(df["ORDEN"], errors="coerce").fillna(0).astype("int64").tolist(),
         "nic": df["NIC"].astype(str).tolist(),
     }

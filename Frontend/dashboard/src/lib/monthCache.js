@@ -5,7 +5,7 @@
 // Cada entrada guarda { ts, value }. TTL = 1 hora: pasado ese tiempo se ignora
 // (se vuelve a pedir a la red). El botón "Actualizar información" limpia todo.
 
-const DB_NAME = "dashboard-cache";
+const DB_NAME = "dashboard-cache-v4";
 const STORE = "months";
 const TTL_MS = 60 * 60 * 1000; // 1 hora
 
@@ -60,18 +60,17 @@ export async function cachePut(key, value) {
   }
 }
 
-// Borra toda la caché (lo usa el botón de actualizar).
+// Borra la base de datos completa de la caché (la invoca "Actualizar información").
 export async function cacheClear() {
   try {
-    const db = await openDB();
+    if (typeof indexedDB === "undefined") return;
     await new Promise((resolve) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
     });
   } catch {
-    /* nada que limpiar */
+    /* silencioso */
   }
 }

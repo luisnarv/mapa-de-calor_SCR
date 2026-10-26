@@ -195,7 +195,7 @@ def enrich(
         log.info("Duplicados: %s órdenes repetidas, se conserva la más reciente.", f"{duplicados:,}")
 
     extra = (
-        ["ESTADO_GESTION", "RESULTADO_GESTION", "RESULTADO_COBRANZA", "ANOMALIA_CAUSA", "SUBCAUSA"]
+        (["ESTADO_GESTION", "RESULTADO_GESTION", "RESULTADO_COBRANZA", "ANOMALIA_CAUSA", "SUBCAUSA"] + [c for c in ["DEUDA_TOTAL", "COBRO_HOY", "RECAUDO", "SALDO"] if c in df])
         if proceso == "cobros" else []
     )
     return df[list(COLS_OBJETIVO) + list(COLS_DERIVADAS) + extra]

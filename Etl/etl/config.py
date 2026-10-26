@@ -106,7 +106,10 @@ QUERY_COBROS: str = """
       REPLACE(punto_gps, '.-', ',-') AS "GPS",
       CASE WHEN estado_final = 'VF' THEN 'VF' ELSE resultado_reportado END AS "ESTADO_GESTION",
       resultado_gestion AS "RESULTADO_GESTION",
-      resultado_cobranza AS "RESULTADO_COBRANZA"
+      resultado_cobranza AS "RESULTADO_COBRANZA",
+      COALESCE(deuda_total, 0) AS "DEUDA_TOTAL",
+      COALESCE(p_cobro_hoy, 0) AS "COBRO_HOY",
+      COALESCE(recaudo_energia_balanza, 0) AS "RECAUDO"
     FROM dbanalitica.historico_aire_cobros
 """
 

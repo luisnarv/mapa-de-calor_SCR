@@ -252,8 +252,8 @@ export default function Tablero({ proceso }) {
     (async () => {
       const cacheKey = `${proceso}/data.json`;
       let resData = await cacheGet(cacheKey);
-      if (!resData) {
-        resData = await fetch(`/${proceso}/data.json`).then((r) => r.json());
+      if (!resData || (proceso === "cobros" && resData.pts && !resData.pts.sd)) {
+        resData = await fetch(`/${proceso}/data.json?t=` + Date.now()).then((r) => r.json());
         cachePut(cacheKey, resData);
       }
       if (cancelled) return;
@@ -293,8 +293,8 @@ export default function Tablero({ proceso }) {
       need.map(async (m) => {
         const cacheKey = `${proceso}/${m.file}`;
         let pts = await cacheGet(cacheKey);
-        if (!pts) {
-          const j = await fetch(`/${proceso}/${m.file}`).then((r) => r.json());
+        if (!pts || (proceso === "cobros" && !pts.sd)) {
+          const j = await fetch(`/${proceso}/${m.file}?t=` + Date.now()).then((r) => r.json());
           pts = j.pts;
           cachePut(cacheKey, pts);
         }
@@ -305,9 +305,14 @@ export default function Tablero({ proceso }) {
         setData((prev) => {
           if (!prev) return prev;
           const mergedPts = {};
-          for (const key of Object.keys(prev.pts)) {
-            let arr = prev.pts[key];
-            for (const { pts } of results) arr = arr.concat(pts[key]);
+          const allKeys = new Set(Object.keys(prev.pts));
+          results.forEach(({ pts }) => Object.keys(pts || {}).forEach((k) => allKeys.add(k)));
+          for (const key of allKeys) {
+            let arr = prev.pts[key] || new Array(prev.pts.nic ? prev.pts.nic.length : 0).fill(0);
+            for (const { pts } of results) {
+              const part = (pts && pts[key]) || new Array(pts && pts.nic ? pts.nic.length : 0).fill(0);
+              arr = arr.concat(part);
+            }
             mergedPts[key] = arr;
           }
           return { ...prev, pts: mergedPts };
@@ -349,6 +354,9 @@ export default function Tablero({ proceso }) {
       COB: P.cb ? Uint8Array.from(P.cb) : null,
       CA: P.ca ? Uint8Array.from(P.ca) : null,
       SC: P.sc ? Uint8Array.from(P.sc) : null,
+      SD: P.sd ? Float64Array.from(P.sd) : (P.saldo ? Float64Array.from(P.saldo) : null),
+      CH: P.ch ? Float64Array.from(P.ch) : (P.cobro_hoy ? Float64Array.from(P.cobro_hoy) : null),
+      RC: P.rc ? Float64Array.from(P.rc) : (P.recaudo ? Float64Array.from(P.recaudo) : null),
       M: Int32Array.from(P.m),
       ORD: P.n,
       NIC: P.nic,
@@ -1603,6 +1611,12 @@ export default function Tablero({ proceso }) {
     NIC_raw: rawArrays.NIC,
     GEST_RAW: rawArrays.GEST,
     RG_RAW: rawArrays.RG,
+    COB_RAW: rawArrays.COB,
+    SD_raw: rawArrays.SD,
+    CH_raw: rawArrays.CH,
+    RC_raw: rawArrays.RC,
+    availableMonths,
+    proceso,
     tablaGestores,
     // Lo que muestra la barra superior (barrios, gestores, fechas) ya filtrado.
     contexto: (() => {
