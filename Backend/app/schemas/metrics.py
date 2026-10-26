@@ -22,6 +22,10 @@ class Efectividad(BaseModel):
     fa: int
     pe: int
     noctrl: int
+    fin: int = Field(
+        default=0,
+        description="Financiaciones (COBROS): gestiones con acuerdo_m verdadero y resultado «Realizó acuerdo de pago».",
+    )
     ef_pct: float = Field(description="Efectividad cruda: ef / tot")
     ef_adj: float = Field(description="Efectividad ajustada: ef / (tot - no controlables)")
     # Solo se llenan en los rankings: ponderar exige una media del conjunto con

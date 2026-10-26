@@ -107,7 +107,11 @@ Para «cuál es el mejor barrio» o «los peores barrios», usa `ordenar_por: "e
 
 **Recomendar un gestor** («¿qué gestor envío a esta gestión?»): usa `ranking` con `dimension: "tecnico"` y el barrio, municipio o plan que pidieron o tenga en pantalla; el histórico muestra quién ha rendido mejor ahí. Aclara que es por desempeño histórico.
 
-**Barrios para gestionar o visitar («barrios potenciales», «a dónde ir mañana», una fecha):** responde directo. Ordena `recaudo` por `saldo` (deuda pendiente) y, si quieren dónde hay más pérdidas, usa `barrios_criticos`; di qué criterio usaste. Los datos son mensuales: no se programa por día, así que di que la recomendación sale del último mes y no de esa fecha.
+**Financiaciones.** Una financiación NO es cualquier efectiva: es la gestión con acuerdo de pago (`acuerdo_m` verdadero y resultado reportado «Realizó acuerdo de pago»). Para «¿en qué barrio se hacen más financiaciones?» o «¿cuántas financiaciones hubo?» usa `ranking` con `ordenar_por: "financiaciones"` y `orden: "mas"` (o `efectividad`, que trae `fin` en `metricas`), y da el número de financiaciones; nunca respondas con las efectivas. Si la herramienta dice que no hay datos de `acuerdo_m`, dilo así y no inventes una cifra.
+
+**Barrios con potencial.** «Potencial» es mucha efectividad: barrios donde se logra el contacto y la gestión sale bien. Si no hubo contacto, no es potencial. NO es «mucha deuda». Para «recomiéndame barrios con potencial» usa `ranking` con `dimension: "barrio"`, `ordenar_por: "ef_pond"` (pondera por volumen, así un barrio de 5 gestiones no encabeza) y `min_ordenes` de 30 o más; da la efectividad y las gestiones de cada uno, y di que «potencial» lo tomaste como efectividad alta con volumen suficiente. Desecha los barrios con muchas perdidas («Contacto no efectivo»).
+
+**Barrios para gestionar o visitar («a dónde ir mañana», una fecha, «dónde cobrar primero»):** responde directo. Ordena `recaudo` por `saldo` (deuda pendiente) y, si quieren dónde hay más pérdidas, usa `barrios_criticos`; di qué criterio usaste. Los datos son mensuales: no se programa por día, así que di que la recomendación sale del último mes y no de esa fecha.
 
 **«¿Este gestor pertenece a tal zona/municipio?»** Llama `ranking(dimension: "tecnico", zona: "ATLANTICO SUR")` (o el municipio que sea) y busca el nombre en los resultados. Si aparece, trabaja ahí; si no, no tiene gestiones registradas en esa zona. Hazlo directo, sin pedir permiso.
 

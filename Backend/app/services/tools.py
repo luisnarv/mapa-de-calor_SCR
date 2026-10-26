@@ -206,7 +206,7 @@ TOOLS: list[dict[str, Any]] = [
                         "enum": [
                             "ef_adj", "ef_pct", "ef_adj_pond", "ef_pond",
                             "perdidas", "pct_perdidas",
-                            "fallidas", "pct_fallidas", "volumen", "efectivas",
+                            "fallidas", "pct_fallidas", "volumen", "efectivas", "financiaciones",
                         ],
                         "description": (
                             "Criterio de orden. Por defecto ef_adj.\n"
@@ -216,8 +216,12 @@ TOOLS: list[dict[str, Any]] = [
                             "con 90%. Ordenar por 'ef_pct' o 'ef_adj' a secas llena "
                             "el top de barrios diminutos empatados en 100%, que no "
                             "responden la pregunta.\n"
-                            "Usa 'efectivas' cuando pregunten dónde hay más acuerdos, "
-                            "más financiaciones o más efectivas en número absoluto.\n"
+                            "Usa 'efectivas' cuando pregunten dónde hay más efectivas en número "
+                            "absoluto. NO la uses para «financiaciones»: una financiación es solo "
+                            "la efectiva con acuerdo de pago (COBROS), y para eso es 'financiaciones'.\n"
+                            "Usa 'financiaciones' (solo COBROS) para «¿dónde se hacen más financiaciones?»: "
+                            "cuenta las gestiones con acuerdo_m verdadero y resultado «Realizó acuerdo "
+                            "de pago»; son un subconjunto de las efectivas.\n"
                             "Usa 'perdidas' cuando pregunten dónde se pierde más: son "
                             "las órdenes que NO se cobran. 'fallidas' son las que no "
                             "se ejecutaron pero sí se pagan, que es otra cosa."
@@ -730,7 +734,8 @@ _ORDEN_DELTA = {
     "type": "string", "enum": ["mas", "menos"],
     "description": "«mas»: primero los que más subieron (o más tienen); «menos»: primero los que más bajaron.",
 }
-_CRITERIOS_CRUCE = ["ef_adj", "ef_pct", "perdidas", "pct_perdidas", "fallidas", "pct_fallidas", "volumen", "efectivas"]
+_CRITERIOS_CRUCE = ["ef_adj", "ef_pct", "perdidas", "pct_perdidas", "fallidas", "pct_fallidas", "volumen", "efectivas",
+                    "financiaciones"]
 _FILTROS_AMBITO = {
     "municipio": _MUNICIPIO, "barrio": _BARRIO, "zona": {"type": "string"}, "brigada": _BRIGADA,
     "tecnico": _TECNICO,
@@ -780,7 +785,7 @@ TOOLS.extend([
         ),
         "parameters": {"type": "object", "properties": {
             "dimension": {"type": "string", "enum": list(DIMENSIONES), "description": "Qué se agrupa. Por defecto barrio."},
-            "ordenar_por": {"type": "string", "enum": ["perdidas", "fallidas", "volumen", "efectivas"],
+            "ordenar_por": {"type": "string", "enum": ["perdidas", "fallidas", "volumen", "efectivas", "financiaciones"],
                             "description": "Qué se reparte. Por defecto perdidas."},
             "porcentaje": {"type": "integer", "description": "Qué parte del total (50 por defecto)."},
             "mes": _MES, "municipio": _MUNICIPIO, "zona": {"type": "string"}, "brigada": _BRIGADA,
@@ -1049,6 +1054,15 @@ _SEÑALAN_EN_EL_MAPA = frozenset({
 _CAMPOS_AJUSTADA = frozenset({"ef_adj", "ef_adj_pond", "efectividad_ajustada", "noctrl", "fa"})
 
 
+def _sin_campo(valor: Any, campo: str) -> Any:
+    """Quita `campo` de un resultado, a cualquier profundidad."""
+    if isinstance(valor, dict):
+        return {k: _sin_campo(v, campo) for k, v in valor.items() if k != campo}
+    if isinstance(valor, list):
+        return [_sin_campo(v, campo) for v in valor]
+    return valor
+
+
 def _sin_ajustada(valor: Any) -> Any:
     if isinstance(valor, dict):
         return {k: _sin_ajustada(v) for k, v in valor.items() if k not in _CAMPOS_AJUSTADA}
@@ -1113,6 +1127,18 @@ class ToolRunner:
     def _rotulo_tecnicos(self, nombres: list[str]) -> str:
         quien = ("gestor", "gestores") if self._es_cobros else ("técnico", "técnicos")
         return f"{quien[len(nombres) > 1]} {', '.join(_CEDULA.sub('', n) for n in nombres)}"
+
+    def _sin_financiaciones(self, ordenar_por: str) -> dict[str, Any] | None:
+        """Error si piden financiaciones y no se pueden contar; `None` si todo está bien."""
+        if ordenar_por != "financiaciones":
+            return None
+        if not self._es_cobros:
+            return {"error": "financiaciones_solo_cobros", "sugerencia": "Las financiaciones solo existen en COBROS."}
+        if getattr(self.metrics.datos, "fin", None) is None:
+            return {"error": "financiaciones_no_disponibles", "sugerencia": (
+                "Los datos todavía no traen `acuerdo_m` (hay que correr el ETL de cobros). Dilo tal cual: "
+                "no es que haya 0 financiaciones. Para efectivas puedes usar `efectivas`, aclarando que NO son financiaciones.")}
+        return None
 
     def cargue_actual(self) -> CargueGuardado | None:
         """El archivo cargado en esta conversación, o None si no hay ninguno.
@@ -1294,6 +1320,8 @@ class ToolRunner:
                     and isinstance(resultado.get("nota"), str) and "no se movió" not in resultado["nota"]):
                 # Sin esto el modelo decía «ya te marqué el estrato 6» cuando el mapa no se movió.
                 resultado["nota"] += " El mapa no se movió con esta consulta: no digas que lo marcaste."
+            if not (self._es_cobros and getattr(self.metrics.datos, "fin", None) is not None):
+                resultado = _sin_campo(resultado, "fin")  # sin `acuerdo_m` (o en SCR) no hay financiaciones que mostrar
             return (_sin_ajustada(resultado) if self._es_cobros else resultado), filtro
         except BarrioNoEncontrado as exc:
             return {
@@ -1542,6 +1570,8 @@ class ToolRunner:
         if nombres_tec:
             filtro = (filtro or FiltroMapa()).model_copy(update={"tecnicos": nombres_tec})
 
+        if (error := self._sin_financiaciones(ordenar_por)) is not None:
+            return error, None
         # `orden` manda: «mas» es el que más tiene, sin importar el criterio. Sin él, con
         # efectividad `peores` pide los de menor valor; y con pérdidas o fallidas el peor es
         # el que más tiene, así que omitir `peores` deja primero a los que MÁS pierden
@@ -1588,6 +1618,11 @@ class ToolRunner:
             "aunque la pregunta sea sobre perdidas, fallidas o volumen. "
             "Una respuesta sin las dos efectividades está incompleta."
         )
+        if ordenar_por == "financiaciones":
+            nota += (" Una financiación es una gestión con acuerdo_m verdadero y resultado «Realizó acuerdo de pago»: "
+                     "NO son todas las efectivas. Da el número de financiaciones (`fin`) de cada fila y, si ayuda, de "
+                     "cuántas gestiones (`tot`). El TOTAL de financiaciones del recorte es `total_financiaciones`, no "
+                     "la primera fila ni la suma de las que ves.")
         if dimension == "tecnico":
             nota += (
                 " Si estás recomendando un técnico/gestor, aclara que es por "
@@ -1599,6 +1634,7 @@ class ToolRunner:
             "dimension": dimension,
             "orden": "de menos a más" if ascendente else "de más a menos",
             "total_en_recorte": filas.total,
+            **({"total_financiaciones": filas.fin_total} if ordenar_por == "financiaciones" else {}),
             "criterio": ordenar_por.replace("ef_adj", "ef_pct") if self._es_cobros else ordenar_por,
             "min_ordenes": min_ordenes,
             "filas": [f.model_dump() for f in filas],
@@ -2087,7 +2123,9 @@ class ToolRunner:
         filas = await self.metrics.ranking(
             dimension=dimension, municipio=municipio, zona=None if municipio else zona, meses=meses,
             brigada=brigada, min_ordenes=0, limite=10**6, ordenar_por="volumen")
-        atributo = {"perdidas": "pe", "fallidas": "fa", "volumen": "tot", "efectivas": "ef"}[ordenar_por]
+        if (error := self._sin_financiaciones(ordenar_por)) is not None:
+            return error, None
+        atributo = {"perdidas": "pe", "fallidas": "fa", "volumen": "tot", "efectivas": "ef", "financiaciones": "fin"}[ordenar_por]
         valores = sorted(((getattr(f, atributo), f.nombre) for f in filas), reverse=True)
         total = sum(v for v, _ in valores)
         if not total:
@@ -2159,6 +2197,8 @@ class ToolRunner:
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         if ordenar_por not in _CRITERIOS_CRUCE:
             ordenar_por = "ef_pct" if ordenar_por == "ef_adj" else "volumen"
+        if (error := self._sin_financiaciones(ordenar_por)) is not None:
+            return error, None
         bkeys, municipio, meses, base, _ = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
         tecnicos, _ = self._tecnicos(tecnico)
         pares = await self.metrics.cruce(
@@ -2166,7 +2206,7 @@ class ToolRunner:
             municipio=None if bkeys else municipio, zona=None if bkeys or municipio else zona, meses=meses,
             brigada=brigada, tecnicos=tecnicos)
         pares.sort(key=lambda x: CRITERIOS[ordenar_por](x[2]), reverse=orden == "mas")
-        campos = ("tot", "ef", "fa", "pe", "ef_pct", "ef_adj")
+        campos = ("tot", "ef", "fa", "pe", "fin", "ef_pct", "ef_adj")
         return {
             "base": base, "criterio": ordenar_por, "orden": "de más a menos" if orden == "mas" else "de menos a más",
             "total_combinaciones": len(pares),

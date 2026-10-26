@@ -1218,3 +1218,90 @@ async def test_pedir_una_herramienta_de_archivo_en_cobros_dice_que_no_hay_archiv
     scr, _ = await ToolRunner(metrics).run("resumen_cargue", {})
     assert scr.get("error") != "sin_archivos_en_cobros"
 
+
+# --- Financiaciones: acuerdo_m verdadero Y resultado «Realizó acuerdo de pago» ------------------
+
+
+def _datos_de_cobros_con_acuerdo(tmp_path):
+    """Copia de los datos congelados como COBROS, con `am` y `x` inventados: acuerdo_m = sí cuando el
+    índice es múltiplo de 5 y resultado «Realizó acuerdo de pago» cuando lo es de 3. Solo es financiación
+    el que cumple las DOS cosas (múltiplo de 15)."""
+    import json
+
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    esperadas = 0
+    for archivo in DATOS.iterdir():
+        if not archivo.is_file():
+            continue
+        if archivo.suffix != ".json" or not archivo.name.startswith("data"):
+            (destino / archivo.name).write_bytes(archivo.read_bytes())
+            continue
+        d = json.loads(archivo.read_text(encoding="utf-8"))
+        pts = d["pts"]
+        n = len(pts["e"])
+        pts["am"] = [1 if i % 5 == 0 else 0 for i in range(n)]
+        pts["x"] = [1 if i % 3 == 0 else 0 for i in range(n)]
+        if "dim" in d:
+            d["dim"]["gests"] = ["Pago no aplicado", "Realizó acuerdo de pago"]
+        (destino / archivo.name).write_text(json.dumps(d), encoding="utf-8")
+    return destino
+
+
+def test_una_financiacion_exige_acuerdo_m_y_el_resultado_de_acuerdo_de_pago(tmp_path):
+    """«¿En qué barrio hay más financiaciones?» se contestaba con las efectivas: una financiación es
+    solo la efectiva con acuerdo de pago, que es acuerdo_m = sí y resultado = «Realizó acuerdo de pago»."""
+    datos = MetricsService(_datos_de_cobros_con_acuerdo(tmp_path)).datos
+
+    assert datos.fin is not None and len(datos.fin) == len(datos)
+    assert 0 < sum(datos.fin) < len(datos) // 10  # un múltiplo de 15 por archivo, no los múltiplos de 5 ni de 3
+
+
+@pytest.mark.asyncio
+async def test_el_ranking_por_financiaciones_cuenta_solo_las_financiaciones(tmp_path):
+    metrics = MetricsService(_datos_de_cobros_con_acuerdo(tmp_path))
+    r = ToolRunner(metrics)
+    p = metrics.datos
+
+    salida, _ = await r.run(
+        "ranking", {"dimension": "barrio", "ordenar_por": "financiaciones", "orden": "mas", "min_ordenes": 1,
+                    "mes": "todo", "limite": 3})
+
+    esperado: dict[str, int] = {}
+    for i in range(len(p)):
+        if p.fin[i]:
+            esperado[p.barrios[p.b[i]]] = esperado.get(p.barrios[p.b[i]], 0) + 1
+    filas = salida["filas"]
+    assert [f["fin"] for f in filas] == sorted(esperado.values(), reverse=True)[:3]
+    assert all(f["fin"] <= f["ef"] <= f["tot"] for f in filas)  # una financiación es una efectiva, no al revés
+    assert "NO son todas las efectivas" in salida["nota"]
+    # El total del recorte no es la primera fila: con `limite` 3 se leía como si lo fuera.
+    assert salida["total_financiaciones"] == sum(p.fin) > sum(f["fin"] for f in filas)
+    total, _ = await r.run("efectividad", {"mes": "todo"})
+    assert total["metricas"]["fin"] == sum(p.fin)
+
+
+@pytest.mark.asyncio
+async def test_sin_acuerdo_m_en_los_datos_no_se_contesta_cero_financiaciones(tmp_path):
+    """Los archivos de antes del ETL nuevo no traen acuerdo_m: «0 financiaciones» sería una mentira."""
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    for archivo in DATOS.iterdir():
+        if archivo.is_file():
+            (destino / archivo.name).write_bytes(archivo.read_bytes())
+    r = ToolRunner(MetricsService(destino))
+
+    salida, _ = await r.run("ranking", {"dimension": "barrio", "ordenar_por": "financiaciones"})
+    total, _ = await r.run("efectividad", {})
+
+    assert salida["error"] == "financiaciones_no_disponibles"
+    assert "fin" not in total["metricas"]
+
+
+@pytest.mark.asyncio
+async def test_las_financiaciones_solo_existen_en_cobros(runner):
+    salida, _ = await runner.run("ranking", {"dimension": "barrio", "ordenar_por": "financiaciones"})
+    total, _ = await runner.run("efectividad", {})
+
+    assert salida["error"] == "financiaciones_solo_cobros" and "fin" not in total["metricas"]
+

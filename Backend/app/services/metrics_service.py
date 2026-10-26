@@ -71,6 +71,9 @@ class Ranking(list):
     """
 
     total: int = 0
+    # Suma de financiaciones de TODAS las filas, no solo de las que quedan tras el límite: sin ella, un
+    # ranking de 1 fila por plan se leía como el total («1.150 financiaciones», cuando eran 1.516).
+    fin_total: int = 0
 
 
 class NicNoEncontrado(Exception):
@@ -119,10 +122,13 @@ class Conteo:
     fa: int = 0
     pe: int = 0
     noctrl: int = 0
+    fin: int = 0  # financiaciones (solo COBROS con `acuerdo_m` en los datos)
     causas: dict[int, int] = field(default_factory=dict)
 
-    def sumar(self, estado: int, causa: int, no_controlable: bool) -> None:
+    def sumar(self, estado: int, causa: int, no_controlable: bool, financiacion: bool = False) -> None:
         self.tot += 1
+        if financiacion:
+            self.fin += 1
         if estado == 0:
             self.ef += 1
         elif estado == 1:
@@ -165,6 +171,7 @@ CRITERIOS = {
     "pct_fallidas": lambda f: f.fa / f.tot if f.tot else 0.0,
     "volumen": lambda f: f.tot,
     "efectivas": lambda f: f.ef,
+    "financiaciones": lambda f: f.fin,
 }
 
 
@@ -207,6 +214,7 @@ def _a_dto(conteo: Conteo, nombre: str, municipio: str | None = None) -> Efectiv
         fa=conteo.fa,
         pe=conteo.pe,
         noctrl=conteo.noctrl,
+        fin=conteo.fin,
         ef_pct=_pct(conteo.ef, conteo.tot),
         ef_adj=_pct(conteo.ef, den) if den > 0 else 0.0,
     )
@@ -529,6 +537,7 @@ class MetricsService:
         filas.sort(key=CRITERIOS[ordenar_por], reverse=not ascendente)
         recortadas = Ranking(filas[:limite])
         recortadas.total = len(filas)
+        recortadas.fin_total = sum(f.fin for f in filas)
         return recortadas
 
     def _catalogo(self, dimension: str) -> list[str]:
@@ -1192,6 +1201,7 @@ class MetricsService:
         # Índices ya resueltos por `indices_tecnico`: vacío significa «ninguno», no «todos».
         f_tecs = set(tecnicos) if tecnicos is not None else None
         ctrl, b_muni, b_zona = p.causa_ctrl, p.b_muni, p.b_zona
+        FIN = p.fin
         columnas = {
             "brigada": p.g, "tecnico": p.t, "barrio": p.b,
             "subaccion": p.s, "tarifa": p.f, "actividad": A,
@@ -1245,6 +1255,6 @@ class MetricsService:
                 conteo = conteos[clave] = Conteo()
 
             estado, causa = E[i], C[i]
-            conteo.sumar(estado, causa, estado != 0 and ctrl[causa] == 0)
+            conteo.sumar(estado, causa, estado != 0 and ctrl[causa] == 0, FIN is not None and FIN[i] == 1)
 
         return conteos

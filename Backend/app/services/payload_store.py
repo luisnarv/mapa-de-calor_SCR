@@ -74,6 +74,12 @@ class Payload:
 
     generado: str
 
+    # 1 si la gestión es una financiación: `acuerdo_m` verdadero Y resultado reportado «Realizó
+    # acuerdo de pago». Es un subconjunto de las efectivas, no todas. `None` si los archivos de datos
+    # son de antes de que el ETL trajera `acuerdo_m`: así no se contesta «0 financiaciones» por falta
+    # de dato.
+    fin: array | None = None
+
     def __len__(self) -> int:
         return len(self.e)
 
@@ -274,6 +280,10 @@ def _cargar_ubicaciones(directorio: Path) -> Ubicaciones:
     return Ubicaciones(nic=nic, barrio=barrio, **niveles)
 
 
+# El resultado reportado que, junto con `acuerdo_m`, define una financiación (así lo definió negocio).
+RESULTADO_FINANCIACION = "Realizó acuerdo de pago"
+
+
 def _cargar(directorio: Path) -> Payload:
     """Lee `data.json` y los archivos por mes, y los concatena en columnas."""
     raiz = _leer_raiz(directorio)
@@ -294,6 +304,11 @@ def _cargar(directorio: Path) -> Payload:
         "m": array("i"),  # minutos desde fecha_min (signed 32-bit)
     }
 
+    gests = [norm_dato(g) for g in dim.get("gests", [])]
+    i_acuerdo = gests.index(norm_dato(RESULTADO_FINANCIACION)) if norm_dato(RESULTADO_FINANCIACION) in gests else -1
+    fin = array("b")
+    hay_fin = i_acuerdo >= 0
+
     inicio_mes: list[int] = []
     for i, (mes, pts) in enumerate(_iter_meses(directorio, raiz)):
         meses.append(mes["key"])
@@ -307,6 +322,11 @@ def _cargar(directorio: Path) -> Payload:
             columnas[clave].extend(pts[clave])
         columnas["a"].extend(pts.get("a", [0] * n))
         columnas["mes"].extend([i] * n)
+        if hay_fin and "am" in pts and "x" in pts:
+            # `am`: 0 no, 1 sí, 2 sin dato. Solo el 1 cuenta; el nulo no es una financiación.
+            fin.extend(1 if a == 1 and x == i_acuerdo else 0 for a, x in zip(pts["am"], pts["x"]))
+        else:
+            hay_fin = False
 
     payload = Payload(
         barrios=dim["barrios"],
@@ -330,6 +350,7 @@ def _cargar(directorio: Path) -> Payload:
         fecha_min=meta.get("fecha_min", ""),
         fecha_max=meta.get("fecha_max", ""),
         generado=meta.get("generated", ""),
+        fin=fin if hay_fin else None,
         **columnas,
     )
 
