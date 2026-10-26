@@ -33,6 +33,7 @@ class VistaTablero(BaseModel):
     zona: str | None = None
     brigada: str | None = None
     tipo_os: str | None = None
+    actividad: str | None = None
     meses: list[str] = Field(default_factory=list, description="Claves YYYY-MM")
 
     def resumen(self) -> str:
@@ -47,6 +48,7 @@ class VistaTablero(BaseModel):
                 ("zona", self.zona),
                 ("brigada", self.brigada),
                 ("tipo de orden", self.tipo_os),
+                ("actividad", self.actividad),
                 ("meses", ", ".join(self.meses) if self.meses else None),
             )
             if valor

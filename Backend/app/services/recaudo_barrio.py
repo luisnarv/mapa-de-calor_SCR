@@ -3,9 +3,11 @@
 Dos archivos del ETL, los dos desde `v_aire_cobros_nic_mes` y con el mismo universo de
 cuentas, así que los totales coinciden:
 
-* `recaudo_barrio.json`: una fila `[mes, municipio, barrio, cuentas, saldo, recaudo]`.
+* `recaudo_barrio.json`: una fila `[mes, municipio, barrio, plan, zona, cuentas, saldo, recaudo]`
+  (una por barrio, plan y zona; el formato anterior, sin plan ni zona, se sigue leyendo).
 * `gestores.json`: la tabla por gestor del tablero, agrupada por mes, gestor, zona,
-  municipio, plan y resultado de la gestión. No trae barrio: gestor y barrio no se cruzan.
+  municipio, plan y resultado de la gestión. No trae barrio: gestor y barrio no se cruzan
+  (el plan y la zona sí cruzan con el barrio, por el otro archivo).
 
 Van aparte del payload del mapa porque las gestiones no traen montos: contar gestiones
 efectivas no responde «dónde se recaudó más», que es plata.
@@ -23,6 +25,9 @@ from app.core.taxonomy import norm_dato
 from app.services.metrics_service import FiltroNoResuelto
 
 NOMBRE_ARCHIVO = "recaudo_barrio.json"
+# Las cuentas sin gestión con GPS en el mapa quedan en «SIN BARRIO» de su municipio (el ETL las
+# conserva para que el total cuadre con gestores.json). No es un barrio y no se recomienda ni se rankea.
+SIN_BARRIO = "SIN BARRIO"
 NOMBRE_GESTORES = "gestores.json"
 Criterio = Literal["recaudo", "saldo", "cuentas", "recaudo_sobre_saldo", "recaudo_por_gestion"]
 
@@ -77,12 +82,27 @@ class FilaRecaudo:
     cuentas: int
     saldo: float
     recaudo: float
+    plan: str | None = None
+    zona: str | None = None
+
+
+def _fila(f: list) -> FilaRecaudo:
+    """Una fila del archivo, en el formato nuevo (8 columnas) o en el anterior (6)."""
+    if len(f) == 8:
+        mes, municipio, barrio, plan, zona, cuentas, saldo, recaudo = f
+        return FilaRecaudo(mes, municipio, barrio, cuentas, saldo, recaudo, plan, zona)
+    return FilaRecaudo(*f)
 
 
 @dataclass(frozen=True)
 class Tabla:
     filas: tuple[FilaRecaudo, ...]
     provisionales: frozenset[str]
+
+    @property
+    def tiene_plan_y_zona(self) -> bool:
+        """Los archivos generados antes del cambio del ETL no traen plan ni zona por barrio."""
+        return any(f.plan is not None for f in self.filas[:1])
 
     @property
     def meses(self) -> list[str]:
@@ -120,7 +140,7 @@ def _leer(ruta: Path, construir):
 
 def cargar(directorio: Path) -> Tabla:
     return _leer(directorio / NOMBRE_ARCHIVO, lambda c: Tabla(
-        tuple(FilaRecaudo(*f) for f in c["filas"]), frozenset(c["provisionales"])))
+        tuple(_fila(f) for f in c["filas"]), frozenset(c["provisionales"])))
 
 
 def cargar_gestores(directorio: Path) -> TablaGestores:
@@ -168,6 +188,8 @@ def consultar(
     meses: list[str] | None = None,
     municipio: str | None = None,
     barrio: str | list[str] | None = None,
+    zona: str | None = None,
+    plan: str | None = None,
     ordenar_por: Criterio = "recaudo",
     peores: bool = False,
     limite: int = 10,
@@ -175,10 +197,23 @@ def consultar(
     """Suma recaudo y saldo por barrio o por municipio, en los meses pedidos.
 
     Raises:
-        FiltroNoResuelto: si el municipio o el barrio no existen en el archivo.
+        FiltroNoResuelto: si el municipio, el barrio, la zona o el plan no existen en el archivo.
             No se devuelve el total sin filtrar: la cifra sería de otro recorte.
+        RecaudoNoDisponible: si piden zona o plan y el archivo es del formato anterior.
     """
     filas = [f for f in tabla.filas if meses is None or f.mes in meses]
+    for campo, pedido in (("zona", zona), ("plan", plan)):
+        if not pedido:
+            continue
+        if not tabla.tiene_plan_y_zona:
+            raise RecaudoNoDisponible(
+                "recaudo_barrio.json no trae plan ni zona por barrio: es de antes del cambio del ETL. "
+                "Corre el ETL de cobros para regenerarlo.")
+        valores = sorted({getattr(f, campo) for f in tabla.filas})
+        coinciden = [v for v in valores if norm_dato(v) == norm_dato(pedido)]
+        if len(coinciden) != 1:
+            raise FiltroNoResuelto(campo, pedido, valores)
+        filas = [f for f in filas if getattr(f, campo) == coinciden[0]]
     if municipio:
         municipio = _resolver_municipio(tabla, municipio)
         filas = [f for f in filas if f.municipio == municipio]
@@ -211,6 +246,13 @@ def consultar(
 
     if ordenar_por == "recaudo_por_gestion":
         raise ValueError("recaudo_por_gestion solo existe por gestor, zona o plan: no hay gestiones por barrio.")
+    # «SIN BARRIO» tiene poca deuda y mucho recaudo, así que encabezaba cualquier ranking por razón
+    # (7.331 %) y se recomendaba como barrio. Sale de la lista, pero su plata sigue en el total y va
+    # aparte en `sin_barrio`. Si piden un barrio por su nombre, no se toca.
+    aparte = {}
+    if agrupar_por == "barrio" and not barrio:
+        aparte = {k: v for k, v in grupos.items() if k[-1] == SIN_BARRIO}
+        grupos = {k: v for k, v in grupos.items() if k not in aparte}
     candidatos = [kv for kv in grupos.items() if _tiene_base(kv[1], ordenar_por)]
     ordenados = sorted(candidatos, key=lambda kv: _valor(kv[1], ordenar_por), reverse=not peores)
     resultado = [
@@ -218,6 +260,7 @@ def consultar(
             "nombre": clave[-1], "municipio": clave[0],
             "cuentas": int(v[0]), "saldo": round(v[1], 2), "recaudo": round(v[2], 2),
             "recaudo_sobre_saldo": round(v[2] / v[1], 4) if v[1] > 0 else None,
+            "recaudo_sobre_saldo_pct": round(100 * v[2] / v[1], 1) if v[1] > 0 else None,
         }
         for clave, v in ordenados[:limite]
     ]
@@ -229,12 +272,14 @@ def consultar(
         # Sin `cuentas` a propósito: con ese número a la vista el modelo lo pegaba al
         # recaudo de un barrio («sobre un total de 13.875 cuentas en todo el Atlántico»).
         "total_del_recorte": {
-            "saldo": round(sum(v[1] for v in grupos.values()), 2),
-            "recaudo": round(sum(v[2] for v in grupos.values()), 2),
+            "saldo": round(sum(v[1] for v in (*grupos.values(), *aparte.values())), 2),
+            "recaudo": round(sum(v[2] for v in (*grupos.values(), *aparte.values())), 2),
         },
         "saldo_al_cierre_de": ultimo,
         "grupos_en_total": len(grupos),
         "grupos_sin_recaudo": sum(1 for v in grupos.values() if v[2] <= 0),
+        **({"sin_barrio": {"saldo": round(sum(v[1] for v in aparte.values()), 2),
+                           "recaudo": round(sum(v[2] for v in aparte.values()), 2)}} if aparte else {}),
         "filas": resultado,
     }
 
@@ -328,6 +373,7 @@ def consultar_gestores(
             {"nombre": _CEDULA.sub("", catalogo[i]), "cuentas": int(v[0]),
              "saldo": round(v[1], 2), "recaudo": round(v[2], 2),
              "recaudo_sobre_saldo": round(v[2] / v[1], 4) if v[1] > 0 else None,
+             "recaudo_sobre_saldo_pct": round(100 * v[2] / v[1], 1) if v[1] > 0 else None,
              **({"gestiones": n_gestiones(i),
                  "recaudo_por_gestion": round(v[2] / n_gestiones(i), 2) if n_gestiones(i) else None}
                 if gestiones else {})}

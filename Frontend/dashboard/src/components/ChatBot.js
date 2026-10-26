@@ -1173,25 +1173,30 @@ export default function ChatBot({ onAccion, vista, onCargue, proceso = "scr", on
                     disabled={busy}
                   />
 
-                  <input
-                    ref={archivoRef}
-                    type="file"
-                    className="cb-file"
-                    accept={ARCHIVO_ACCEPT}
-                    onChange={onArchivo}
-                    tabIndex={-1}
-                    aria-hidden="true"
-                  />
-                  <button
-                    type="button"
-                    className="cb-clip"
-                    onClick={() => archivoRef.current?.click()}
-                    disabled={busy || subiendo}
-                    aria-label="Adjuntar un archivo Excel o CSV"
-                    title="Adjuntar Excel o CSV"
-                  >
-                    <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
-                  </button>
+                  {/* El archivo de órdenes por ejecutar solo existe en SCR: en COBROS no se carga. */}
+                  {proceso !== "cobros" && (
+                    <>
+                      <input
+                        ref={archivoRef}
+                        type="file"
+                        className="cb-file"
+                        accept={ARCHIVO_ACCEPT}
+                        onChange={onArchivo}
+                        tabIndex={-1}
+                        aria-hidden="true"
+                      />
+                      <button
+                        type="button"
+                        className="cb-clip"
+                        onClick={() => archivoRef.current?.click()}
+                        disabled={busy || subiendo}
+                        aria-label="Adjuntar un archivo Excel o CSV"
+                        title="Adjuntar Excel o CSV"
+                      >
+                        <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
+                      </button>
+                    </>
+                  )}
 
                   {soportaVoz && (
                     <button

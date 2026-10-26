@@ -170,11 +170,15 @@ QUERY_GESTORES: str = """
 # por GPS a la gestión de la cuenta, porque el `barrio` de la tabla de origen no
 # coincide con el del mapa (el chat nombraba barrios que el mapa mostraba vacíos). Mismo
 # universo que `QUERY_GESTORES` para que los totales de los dos archivos coincidan.
+# Trae también el plan y la zona de la cuenta (la vista da uno solo por cuenta y mes): sin
+# ellos el chat no podía contestar «el barrio con más recaudo en el plan X de la zona Y».
 QUERY_RECAUDO_BARRIO: str = """
     SELECT
       periodo_mes,
       cuenta::text AS cuenta,
       municipio,
+      zona,
+      plan,
       COALESCE(saldo, 0) AS saldo,
       COALESCE(recaudo_sin_irr, 0) AS recaudo,
       calculo_provisional AS provisional

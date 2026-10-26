@@ -1114,3 +1114,107 @@ def test_el_indice_de_riesgo_de_cobros_corta_en_1_2_y_3_veces_el_promedio():
     assert [_nivel_cobros(m) for m in (0, 0.5, 0.99, 1, 1.5, 2, 3, 6, 9)] == [0, 15, 30, 31, 46, 61, 81, 100, 100]
     assert _cuantil([1.0, 2.0, 3.0, 4.0, 5.0], 0.9) == 4.6 and _cuantil([], 0.9) == 0.0
 
+
+# --- Los filtros de la pantalla se aplican solos ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_una_pregunta_general_sale_de_la_zona_que_el_usuario_tiene_puesta(metrics):
+    """Con la zona Norte filtrada, «¿cuál es la efectividad?» se contestaba sobre todo el Atlántico:
+    el modelo tenía que acordarse de pasar la zona, y a veces no lo hacía."""
+    zona = metrics.datos.zonas[0]
+    r = ToolRunner(metrics, vista=VistaTablero(zona=zona))
+    explicita = ToolRunner(metrics)
+
+    general, _ = await r.run("efectividad", {})
+    esperada, _ = await explicita.run("efectividad", {"zona": zona})
+    todo, _ = await explicita.run("efectividad", {})
+
+    assert general["metricas"]["tot"] == esperada["metricas"]["tot"] != todo["metricas"]["tot"]
+    assert general["filtros_de_pantalla"] == {"zona": zona} and "filtrado en su pantalla" in general["nota"]
+
+
+@pytest.mark.asyncio
+async def test_lo_que_el_usuario_pide_expresamente_manda_sobre_la_pantalla(metrics):
+    zona = metrics.datos.zonas[0]
+    municipio = metrics.datos.munis[0]
+    r = ToolRunner(metrics, vista=VistaTablero(zona=zona))
+
+    pedido, _ = await r.run("efectividad", {"municipio": municipio})
+    todo, _ = await r.run("efectividad", {"sin_filtros_de_pantalla": True})
+    sin_vista, _ = await ToolRunner(metrics).run("efectividad", {})
+
+    assert "filtros_de_pantalla" not in pedido and municipio in pedido["base"]
+    assert "filtros_de_pantalla" not in todo and todo["metricas"]["tot"] == sin_vista["metricas"]["tot"]
+
+
+@pytest.mark.asyncio
+async def test_un_ranking_por_zona_no_se_limita_a_la_zona_elegida(metrics):
+    """Preguntan «¿qué zona rinde peor?»: comparar la zona elegida consigo misma no responde nada."""
+    r = ToolRunner(metrics, vista=VistaTablero(zona=metrics.datos.zonas[0]))
+
+    salida, _ = await r.run("ranking", {"dimension": "zona", "min_ordenes": 1})
+
+    assert len(salida["filas"]) > 1 and "filtros_de_pantalla" not in salida
+
+
+@pytest.mark.asyncio
+async def test_todos_los_filtros_de_la_pantalla_entran_juntos(metrics):
+    p = metrics.datos
+    vista = VistaTablero(
+        municipio=p.munis[0], brigada=p.brigs[0], tipo_os=p.tipos[0],
+        barrio=None, tecnicos=[p.tecs[p.t[0]]])
+    r = ToolRunner(metrics, vista=vista)
+
+    salida, _ = await r.run("efectividad", {})
+
+    assert set(salida["filtros_de_pantalla"]) == {"municipio", "brigada", "tipo de orden", "técnicos"}
+    explicita, _ = await ToolRunner(metrics).run(
+        "efectividad", {"municipio": p.munis[0], "brigada": p.brigs[0], "tipo_os": p.tipos[0], "tecnico": p.tecs[p.t[0]]})
+    assert salida["metricas"]["tot"] == explicita["metricas"]["tot"]
+
+
+@pytest.mark.asyncio
+async def test_un_barrio_elegido_gana_a_su_municipio_y_su_zona(metrics):
+    p = metrics.datos
+    bkey = p.barrios[p.b[0]]
+    municipio = bkey.partition(" | ")[0]
+    r = ToolRunner(metrics, vista=VistaTablero(barrio=bkey, municipio=municipio, zona=p.zonas[0]))
+
+    salida, _ = await r.run("efectividad", {})
+
+    assert salida["filtros_de_pantalla"]["barrio"] == bkey.partition(" | ")[2]
+    assert "zona" not in salida["filtros_de_pantalla"]
+
+
+# --- COBROS no carga archivos -------------------------------------------------------------
+
+
+def test_el_bot_de_cobros_no_tiene_herramientas_de_archivo_y_el_de_scr_si():
+    """Preguntas reales en COBROS terminaban en «¿tienes un archivo cargado?»: el modelo veía las
+    herramientas del cargue (que solo existe en SCR) y las ofrecía."""
+    from app.services.tools import _HERRAMIENTAS_DE_CARGUE, tools_para_proceso
+
+    cobros = {t["function"]["name"] for t in tools_para_proceso("cobros")}
+    scr = {t["function"]["name"] for t in tools_para_proceso("scr")}
+
+    assert not cobros & _HERRAMIENTAS_DE_CARGUE
+    assert _HERRAMIENTAS_DE_CARGUE <= scr
+    assert {"ranking", "recaudo", "barrios_criticos", "propension_pago"} <= cobros
+
+
+@pytest.mark.asyncio
+async def test_pedir_una_herramienta_de_archivo_en_cobros_dice_que_no_hay_archivos(metrics, tmp_path):
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    for archivo in DATOS.iterdir():
+        if archivo.is_file():
+            (destino / archivo.name).write_bytes(archivo.read_bytes())
+    runner_cobros = ToolRunner(MetricsService(destino))
+
+    salida, filtro = await runner_cobros.run("resumen_cargue", {})
+
+    assert salida["error"] == "sin_archivos_en_cobros" and filtro is None
+    scr, _ = await ToolRunner(metrics).run("resumen_cargue", {})
+    assert scr.get("error") != "sin_archivos_en_cobros"
+
