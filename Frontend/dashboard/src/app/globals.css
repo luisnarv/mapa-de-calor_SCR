@@ -219,14 +219,15 @@ select.hd-proceso{width:auto;min-width:60px;flex:0 0 auto;padding:0 4px;
 /* Filtro Ubicación: Zona › Municipio › Corregimiento › Barrio. Reutiliza la píldora
    (.hd-pill) y las casillas de barrio (.sm-item); solo añade el panel de columnas. */
 .ub-pill{max-width:420px}
-.ub-pop{width:980px;max-width:calc(100vw - 24px);max-height:none;min-width:0;padding:0;
+.ub-pop{position:fixed;left:50%;right:auto;transform:translateX(-50%);width:980px;
+  max-width:calc(100vw - 24px);max-height:calc(100vh - 70px);min-width:0;padding:0;
   overflow:hidden;display:block}
 .ub-buscar{display:flex;align-items:center;gap:8px;padding:8px 10px;
   border-bottom:1px solid var(--line);color:var(--dim)}
 .ub-buscar input{flex:1 1 auto;min-width:0;border:0;background:transparent;color:var(--tx);
   font:400 12px var(--ff)}
 .ub-buscar input:focus{outline:none}
-.ub-cols{display:grid;height:290px}
+.ub-cols{display:grid;height:min(290px,calc(100vh - 190px))}
 .ub-col{display:flex;flex-direction:column;min-width:0;border-left:1px solid var(--line)}
 .ub-col:first-child{border-left:0}
 .ub-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;

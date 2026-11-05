@@ -35,6 +35,10 @@ export default function FiltroUbicacion({ st, dim, avail, onFilterChange, onBarr
   const cajaRef = React.useRef(null);
   const panelRef = React.useRef(null);
   const buscaRef = React.useRef(null);
+  // Distancia del panel al borde superior: se mide bajo la barra al abrir. El panel es
+  // `fixed` y centrado porque anclado a la píldora (que está a la izquierda) se salía
+  // por la derecha en pantallas de ~1000 px y dejaba parte sin verse.
+  const [arriba, setArriba] = React.useState(48);
 
   const barrios = React.useMemo(() => st.barrios || [], [st.barrios]);
   const puestoZona = st.zona !== "";
@@ -63,8 +67,21 @@ export default function FiltroUbicacion({ st, dim, avail, onFilterChange, onBarr
     return () => document.removeEventListener("mousedown", fuera, true);
   }, [abierto, cerrar]);
 
+  React.useLayoutEffect(() => {
+    if (!abierto) return;
+    const medir = () => {
+      const caja = cajaRef.current?.getBoundingClientRect();
+      if (caja) setArriba(Math.round(caja.bottom) + 6);
+    };
+    medir();
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  }, [abierto]);
+
+  // `preventScroll`: sin él, enfocar el buscador desplaza la página si el panel aún no
+  // está donde va, y se ve como un salto al abrir.
   React.useEffect(() => {
-    if (abierto) buscaRef.current?.focus();
+    if (abierto) buscaRef.current?.focus({ preventScroll: true });
   }, [abierto]);
 
   const q = sinTildes(busca.trim());
@@ -210,7 +227,14 @@ export default function FiltroUbicacion({ st, dim, avail, onFilterChange, onBarr
       )}
 
       {abierto && (
-        <div className="hd-pop ub-pop" role="dialog" aria-label="Ubicación" ref={panelRef} onKeyDown={teclas}>
+        <div
+          className="hd-pop ub-pop"
+          role="dialog"
+          aria-label="Ubicación"
+          ref={panelRef}
+          onKeyDown={teclas}
+          style={{ top: arriba }}
+        >
           <div className="ub-buscar">
             <Search size={13} strokeWidth={2.2} aria-hidden="true" />
             <input
