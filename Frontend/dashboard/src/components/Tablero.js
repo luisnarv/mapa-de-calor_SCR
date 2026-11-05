@@ -148,6 +148,8 @@ export default function Tablero({ proceso }) {
   const [st, setSt] = useState({
     zona: "",
     muni: "",
+    // Corregimiento (índice en dim.corrs o ""): cuelga del municipio y de él cuelgan los barrios.
+    corr: "",
     brig: "",
     tipo: "",
     act: "",
@@ -223,6 +225,7 @@ export default function Tablero({ proceso }) {
       ...prev,
       zona: "",
       muni: "",
+      corr: "",
       brig: "",
       tipo: "",
       act: "",
@@ -465,6 +468,8 @@ export default function Tablero({ proceso }) {
     const ocultas = new Set(st.efOcultas);
     const zi = st.zona === "" ? -1 : +st.zona;
     const mi = st.muni === "" ? -1 : +st.muni;
+    const ci = st.corr === "" ? -1 : +st.corr;
+    const bCorr = data.dim.b_corr;
     const gi = st.brig === "" ? -1 : +st.brig;
     const oi = st.tipo === "" ? -1 : +st.tipo;
     const ai = st.act === "" ? -1 : +st.act;
@@ -485,6 +490,7 @@ export default function Tablero({ proceso }) {
       const b = B[i];
       if (zi >= 0 && data.dim.b_zona[b] !== zi) continue;
       if (mi >= 0 && data.dim.b_muni[b] !== mi) continue;
+      if (ci >= 0 && bCorr && bCorr[b] !== ci) continue;
       if (gi >= 0 && G[i] !== gi) continue;
       if (oi >= 0 && O[i] !== oi) continue;
       if (ai >= 0 && ACT && ACT[i] !== ai) continue;
@@ -492,7 +498,7 @@ export default function Tablero({ proceso }) {
       out[k++] = i;
     }
     return out.subarray(0, k);
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.corr, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // Tabla por gestor (Tendencias > Por gestor y Ranking). Sale de `gestores.json`, la
   // agregación de `v_aire_cobros_nic_mes` (una fila por cuenta y mes, ya sin duplicados),
@@ -605,9 +611,15 @@ export default function Tablero({ proceso }) {
 
   // Recalculates available filters in cascade
   const avail = useMemo(() => {
+    // zona, muni y corr son Map valor -> órdenes: el filtro Ubicación muestra el conteo, y
+    // `.has` / `.size` siguen sirviendo a las píldoras. `barrio` solo se llena con municipio.
     const res = {
-      zona: new Set(),
-      muni: new Set(),
+      zona: new Map(),
+      muni: new Map(),
+      corr: new Map(),
+      barrio: new Map(),
+      // Barrios con órdenes bajo la selección completa de Ubicación (pie del panel).
+      barriosSel: new Set(),
       brig: new Set(),
       tipo: new Set(),
       act: new Set(),
@@ -625,6 +637,8 @@ export default function Tablero({ proceso }) {
     // Filter values (independent of the selector itself to avoid lockups)
     const zi = st.zona === "" ? -1 : +st.zona;
     const mi = st.muni === "" ? -1 : +st.muni;
+    const ci = st.corr === "" ? -1 : +st.corr;
+    const bCorr = data.dim.b_corr;
     const gi = st.brig === "" ? -1 : +st.brig;
     const oi = st.tipo === "" ? -1 : +st.tipo;
     const ai = st.act === "" ? -1 : +st.act;
@@ -642,12 +656,13 @@ export default function Tablero({ proceso }) {
       const b = B[i];
       const zVal = data.dim.b_zona[b];
       const mVal = data.dim.b_muni[b];
+      const cVal = bCorr ? bCorr[b] : -1;
       const gVal = G[i];
       const oVal = O[i];
       const aVal = ACT ? ACT[i] : -1;
 
       if (
-        xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) &&
+        xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) &&
         (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)
       ) {
         res.tipos[E[i]]++;
@@ -658,30 +673,41 @@ export default function Tablero({ proceso }) {
       if (ocultas.size && E[i] === 0 && RG && ocultas.has(RG[i])) continue;
 
       // Zona depends on Muni, Brig, Tipo, Act
-      if (xOk && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
-        res.zona.add(zVal);
+      if (xOk && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+        res.zona.set(zVal, (res.zona.get(zVal) || 0) + 1);
       }
       // Muni depends on Zona, Brig, Tipo, Act
-      if (xOk && (zi < 0 || zVal === zi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
-        res.muni.add(mVal);
+      if (xOk && (zi < 0 || zVal === zi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+        res.muni.set(mVal, (res.muni.get(mVal) || 0) + 1);
+      }
+      // Corregimiento depends on Zona, Muni, Brig, Tipo, Act
+      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+        res.corr.set(cVal, (res.corr.get(cVal) || 0) + 1);
+      }
+      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+        res.barriosSel.add(b);
+      }
+      // Barrio depends on Zona, Muni, Corr, Brig, Tipo, Act
+      if (mi >= 0 && xOk && (zi < 0 || zVal === zi) && mVal === mi && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+        res.barrio.set(b, (res.barrio.get(b) || 0) + 1);
       }
       // Brig depends on Zona, Muni, Tipo, Act
-      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
+      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) {
         res.brig.add(gVal);
       }
       // Tipo depends on Zona, Muni, Brig, Act
-      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (ai < 0 || aVal === ai)) {
+      if (xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (ai < 0 || aVal === ai)) {
         res.tipo.add(oVal);
       }
       // Act depends on Zona, Muni, Brig, Tipo
-      if (ACT && xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi)) {
+      if (ACT && xOk && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi)) {
         res.act.add(aVal);
       }
       // El estado de gestión también se cascadea: solo ofrece los que dejan datos.
-      if (GEST && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.gest.add(GEST[i]);
+      if (GEST && (zi < 0 || zVal === zi) && (mi < 0 || mVal === mi) && (ci < 0 || cVal === ci) && (gi < 0 || gVal === gi) && (oi < 0 || oVal === oi) && (ai < 0 || aVal === ai)) res.gest.add(GEST[i]);
     }
     return res;
-  }, [data, rawArrays, monthMap, st.zona, st.muni, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
+  }, [data, rawArrays, monthMap, st.zona, st.muni, st.corr, st.brig, st.tipo, st.act, st.gest, st.months, st.est, st.efOcultas]);
 
   // 2. AGGREGATION ENGINE
   // Es una función de los índices para poder agregar también solo los barrios elegidos
@@ -1295,12 +1321,18 @@ export default function Tablero({ proceso }) {
       // Cascade resets
       if (key === "zona") {
         next.muni = "";
+        next.corr = "";
         next.brig = "";
         next.barrios = [];
         next.selBarrio = null;
       }
       if (key === "muni") {
+        next.corr = "";
         next.brig = "";
+        next.barrios = [];
+        next.selBarrio = null;
+      }
+      if (key === "corr") {
         next.barrios = [];
         next.selBarrio = null;
       }
@@ -1335,6 +1367,9 @@ export default function Tablero({ proceso }) {
   };
 
   // La casilla de cada barrio en la cola de triaje: suma o quita ese barrio de la selección.
+  // Ubicación elige varios barrios de una vez; es la misma selección que la cola de triaje.
+  const handleSetBarrios = (lista) => setSt((prev) => conBarrios(prev, lista));
+
   const handleToggleBarrio = (b) => {
     setSt((prev) =>
       conBarrios(prev, prev.barrios.includes(b) ? prev.barrios.filter((x) => x !== b) : [...prev.barrios, b])
@@ -1501,6 +1536,7 @@ export default function Tablero({ proceso }) {
       ...prev,
       zona: "",
       muni: "",
+      corr: "",
       brig: "",
       tipo: "",
       act: "",
@@ -1738,6 +1774,7 @@ export default function Tablero({ proceso }) {
           avail={avail}
           onFilterChange={handleFilterChange}
           onReset={handleReset}
+          onBarrios={handleSetBarrios}
           availableMonths={availableMonths}
           loadingMonths={loadingMonths}
           onRefresh={handleRefresh}
@@ -2123,6 +2160,7 @@ export default function Tablero({ proceso }) {
         avail={avail}
         onFilterChange={handleFilterChange}
         onReset={handleReset}
+        onBarrios={handleSetBarrios}
         availableMonths={availableMonths}
         loadingMonths={loadingMonths}
         onRefresh={handleRefresh}

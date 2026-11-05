@@ -47,6 +47,26 @@ def _moda(serie: pd.Series) -> Any:
     return m.iloc[0] if len(m) else serie.iloc[0]
 
 
+CABECERA = "Cabecera municipal"
+
+
+def corregimientos_por_barrio(d: pd.DataFrame, n_barrios: int) -> tuple[list[str], list[int]]:
+    """Catálogo de corregimientos y el de cada barrio (por moda, como zona y municipio).
+
+    Nulo, vacío o ausente cuenta como «Cabecera municipal»: SCR no trae la columna
+    (llega en NULL) y ahí todo cae en esa única opción en vez de romper el filtro.
+    """
+    if "CORREGIMIENTO" in d:
+        corr = d["CORREGIMIENTO"].astype("string").str.strip()
+        corr = corr.mask(corr.isna() | (corr == ""), CABECERA).astype(str)
+    else:
+        corr = pd.Series(CABECERA, index=d.index)
+    corrs = sorted(corr.unique().tolist())
+    idx = {n: i for i, n in enumerate(corrs)}
+    moda = corr.groupby(d["b"]).agg(_moda).to_dict()
+    return corrs, [idx[moda[i]] for i in range(n_barrios)]
+
+
 def _mes_label(ym: str) -> str:
     """'2026-07' -> 'Julio de 2026'."""
     y, mo = ym.split("-")
@@ -209,6 +229,7 @@ def build_and_write(
     b_zona_nombre = d.groupby("b")["ZONA"].agg(_moda).to_dict()
     b_muni = [muni_idx[b_muni_nombre[i]] for i in range(len(barrios))]
     b_zona = [zona_idx[b_zona_nombre[i]] for i in range(len(barrios))]
+    corrs, b_corr = corregimientos_por_barrio(d, len(barrios))
 
     bc: list[list[float]] = []
     for _b, grp in d.groupby("b"):
@@ -263,11 +284,11 @@ def build_and_write(
             **({"resultados": resultados} if resultados else {}),
             **({"cobranza": cobranza} if cobranza else {}),
             **({"anoms": anoms, "subcausas": subcausas} if anoms else {}),
-            "munis": munis, "zonas": zonas,
+            "munis": munis, "zonas": zonas, "corrs": corrs,
             "estados": ["Efectiva", "Fallida", "Perdida"],  # índice 1 sin uso en cobros
             "causa_ctrl": [int(ctrl_por_causa.get(c, 1)) for c in causas],
             "causa_fam": [fam_por_causa.get(c, "otros") for c in causas],
-            "b_muni": b_muni, "b_zona": b_zona,
+            "b_muni": b_muni, "b_zona": b_zona, "b_corr": b_corr,
         },
         "geo": {"bc": bc, "bp": bpoly, "mp": mpoly, "zp": zpoly},
         "pts": _pts_dict(d_recent),
