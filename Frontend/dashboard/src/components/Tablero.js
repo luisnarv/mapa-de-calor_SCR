@@ -1462,11 +1462,21 @@ export default function Tablero({ proceso }) {
       let conBarrios = false;
       let conTecnicos = false;
 
+      // Zona › municipio › corregimiento cuelgan unos de otros: al fijar uno, lo que cuelga
+      // de él y no vino en la acción se limpia. Si no, un municipio de otra zona que quedó
+      // filtrada en pantalla deja el mapa vacío («Sin órdenes con estos filtros»).
       const zona = idxDe(dim.zonas, accion.zona);
-      if (zona !== null) next.zona = zona;
+      if (zona !== null) {
+        next.zona = zona;
+        next.muni = "";
+        next.corr = "";
+      }
       const muni = idxDe(dim.munis, accion.municipio);
-      if (muni !== null) next.muni = muni;
-      // Va después del municipio: el corregimiento cuelga de él y cambiarlo lo reinicia.
+      if (muni !== null) {
+        next.muni = muni;
+        next.corr = "";
+        if (zona === null) next.zona = "";
+      }
       const corr = idxDe(dim.corrs, accion.corregimiento);
       if (corr !== null) next.corr = corr;
       const brig = idxDe(dim.brigs, accion.brigada);
