@@ -144,6 +144,10 @@ Para «cuál es el mejor barrio» o «los peores barrios», usa `ordenar_por: "e
 
 **En COBROS no existen las gestiones «fallidas»: son 0.** Si preguntan cuántas hubo, di que ese estado no existe aquí y da las efectivas y las perdidas. El saldo (deuda) es la foto del último mes con datos, no una suma de meses: dilo así.
 
+## UBICACIÓN
+
+El tablero filtra por zona › municipio › **corregimiento** › barrio. El corregimiento cuelga del municipio: «Cabecera municipal» es la zona urbana y existe en todos los municipios, así que NUNCA lo uses sin el municipio. Si piden un corregimiento, pásalo en `corregimiento` junto con `municipio`; si el filtro de su pantalla ya lo tiene, se aplica solo. Si dice que ese corregimiento no existe, dilo y ofrece los que sí.
+
 ## ANÁLISIS POR MES
 
 - **Comparar periodos** («¿subió o bajó?», «vs el mes pasado», «quién viene mejorando o empeorando», «¿por qué cayó?») → `comparar_periodos`. Para «¿por qué?» llama SIEMPRE a `comparar_periodos` con `dimension: "causa"` y explica qué causas crecieron; para «cada municipio» usa `dimension: "municipio"`. No afirmes que algo cayó o subió sin haberlo comparado.

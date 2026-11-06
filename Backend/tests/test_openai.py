@@ -475,7 +475,7 @@ def test_una_sola_llamada_filtra_como_siempre():
 
     assert accion == {
         "tipo": "filtrar_mapa", "barrio": None, "barrios": None, "tecnicos": None, "municipio": "SOLEDAD",
-        "zona": None, "brigada": None, "actividad": None,
+        "zona": None, "corregimiento": None, "brigada": None, "actividad": None,
         "tipo_os": None, "capas": None, "meses": ["2026-08"],
     }
 

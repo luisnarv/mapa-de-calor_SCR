@@ -79,6 +79,10 @@ class Payload:
     # son de antes de que el ETL trajera `acuerdo_m`: así no se contesta «0 financiaciones» por falta
     # de dato.
     fin: array | None = None
+    # Corregimientos (`dim.corrs`) y el de cada barrio (`dim.b_corr`). Vacíos si los datos son de antes
+    # del filtro Ubicación: pedir un corregimiento se contesta que no hay, no con todo el municipio.
+    corrs: list[str] = field(default_factory=list)
+    b_corr: list[int] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.e)
@@ -351,6 +355,8 @@ def _cargar(directorio: Path) -> Payload:
         fecha_max=meta.get("fecha_max", ""),
         generado=meta.get("generated", ""),
         fin=fin if hay_fin else None,
+        corrs=dim.get("corrs", []),
+        b_corr=dim.get("b_corr", []),
         **columnas,
     )
 

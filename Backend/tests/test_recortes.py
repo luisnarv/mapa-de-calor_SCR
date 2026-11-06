@@ -1305,3 +1305,70 @@ async def test_las_financiaciones_solo_existen_en_cobros(runner):
 
     assert salida["error"] == "financiaciones_solo_cobros" and "fin" not in total["metricas"]
 
+
+# --- Corregimiento (filtro Ubicación) ----------------------------------------------------------
+
+
+def _datos_con_corregimientos(tmp_path):
+    """Copia de los datos congelados con un catálogo de corregimientos inventado: los barrios de índice
+    par son de «Cabecera municipal» y los impares de «Vereda Norte»."""
+    import json
+
+    destino = tmp_path / "cobros"
+    destino.mkdir()
+    for archivo in DATOS.iterdir():
+        if not archivo.is_file():
+            continue
+        if archivo.name == "data.json":
+            d = json.loads(archivo.read_text(encoding="utf-8"))
+            d["dim"]["corrs"] = ["Cabecera municipal", "Vereda Norte"]
+            d["dim"]["b_corr"] = [i % 2 for i in range(len(d["dim"]["barrios"]))]
+            (destino / archivo.name).write_text(json.dumps(d), encoding="utf-8")
+        else:
+            (destino / archivo.name).write_bytes(archivo.read_bytes())
+    return destino
+
+
+@pytest.mark.asyncio
+async def test_un_corregimiento_filtra_como_los_barrios_que_le_tocan(tmp_path):
+    """El corregimiento cuelga del municipio: «Cabecera municipal» existe en todos, así que se
+    traduce a los barrios del municipio que le corresponden."""
+    metrics = MetricsService(_datos_con_corregimientos(tmp_path))
+    r = ToolRunner(metrics)
+    p = metrics.datos
+    municipio = p.munis[0]
+
+    salida, filtro = await r.run("efectividad", {"municipio": municipio, "corregimiento": "Vereda Norte", "mes": "todo"})
+
+    esperados = {b for b in range(len(p.barrios)) if p.b_corr[b] == 1 and p.b_muni[b] == 0}
+    assert salida["metricas"]["tot"] == sum(1 for i in range(len(p)) if p.b[i] in esperados)
+    assert "corregimiento Vereda Norte de" in salida["base"]
+    assert filtro.corregimiento == "Vereda Norte" and filtro.municipio == municipio
+    # Sin municipio sería casi todo el Atlántico; con él, solo ese corregimiento de ese municipio.
+    todo, _ = await r.run("efectividad", {"municipio": municipio, "mes": "todo"})
+    assert salida["metricas"]["tot"] < todo["metricas"]["tot"]
+
+
+@pytest.mark.asyncio
+async def test_un_corregimiento_inexistente_o_sin_datos_no_devuelve_el_total(tmp_path, metrics):
+    r = ToolRunner(MetricsService(_datos_con_corregimientos(tmp_path)))
+    inventado, _ = await r.run("efectividad", {"municipio": "Soledad", "corregimiento": "Inventado"})
+    sin_datos, _ = await ToolRunner(metrics).run("efectividad", {"corregimiento": "Vereda Norte"})
+
+    assert inventado["error"] == "filtro_no_reconocido" and inventado["campo"] == "corregimiento"
+    assert sin_datos["error"] == "filtro_no_reconocido"  # datos de antes del filtro Ubicación
+
+
+@pytest.mark.asyncio
+async def test_el_corregimiento_de_la_pantalla_se_aplica_con_su_municipio(tmp_path):
+    metrics = MetricsService(_datos_con_corregimientos(tmp_path))
+    p = metrics.datos
+    vista = VistaTablero(municipio=p.munis[0], corregimiento="Vereda Norte", zona=p.zonas[0])
+    r = ToolRunner(metrics, vista=vista)
+
+    salida, _ = await r.run("efectividad", {"mes": "todo"})
+
+    assert salida["filtros_de_pantalla"]["corregimiento"] == "Vereda Norte"
+    assert salida["filtros_de_pantalla"]["municipio"] == p.munis[0]
+    assert "zona" not in salida["filtros_de_pantalla"]  # el municipio ya la acota
+

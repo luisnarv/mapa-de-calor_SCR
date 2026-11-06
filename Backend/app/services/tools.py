@@ -736,9 +736,14 @@ _ORDEN_DELTA = {
 }
 _CRITERIOS_CRUCE = ["ef_adj", "ef_pct", "perdidas", "pct_perdidas", "fallidas", "pct_fallidas", "volumen", "efectivas",
                     "financiaciones"]
+_CORREGIMIENTO = {
+    "type": "string",
+    "description": ("Corregimiento (filtro Ubicación). Cuelga del municipio: pásalo junto con `municipio`; "
+                    "«Cabecera municipal» es la zona urbana y existe en todos."),
+}
 _FILTROS_AMBITO = {
-    "municipio": _MUNICIPIO, "barrio": _BARRIO, "zona": {"type": "string"}, "brigada": _BRIGADA,
-    "tecnico": _TECNICO,
+    "municipio": _MUNICIPIO, "corregimiento": _CORREGIMIENTO, "barrio": _BARRIO, "zona": {"type": "string"},
+    "brigada": _BRIGADA, "tecnico": _TECNICO,
 }
 
 TOOLS.extend([
@@ -1043,6 +1048,13 @@ def etiqueta_periodo(meses: list[str] | None) -> str:
 
 # En cobros el mapa no muestra la efectividad ajustada; si el modelo la ve en el
 # resultado la termina diciendo. `noctrl` es solo su denominador.
+# El corregimiento se suma a las herramientas que ya filtran por sitio (las de `_FILTROS_AMBITO` ya lo traen).
+for _t in TOOLS:
+    _p = _t["function"]["parameters"]["properties"]
+    if _t["function"]["name"] in {"efectividad", "ranking", "causas_no_efectivas", "buscar_en_observaciones",
+                                  "ordenes_de_tecnico", "concentracion", "barrios_criticos", "filtrar_mapa"}:
+        _p.setdefault("corregimiento", _CORREGIMIENTO)
+
 # Herramientas que pueden dejar algo marcado en el mapa; si no lo hicieron, hay que decirlo.
 _SEÑALAN_EN_EL_MAPA = frozenset({
     "efectividad", "ranking", "causas_no_efectivas", "recaudo", "comparar_periodos", "serie_mensual",
@@ -1225,7 +1237,7 @@ class ToolRunner:
             nuevos[param] = valor
             puestos[etiqueta] = "; ".join(valor) if isinstance(valor, list) else str(valor)
 
-        if not any(pidio(k) for k in ("barrio", "municipio", "zona") if k in params):
+        if not any(pidio(k) for k in ("barrio", "municipio", "zona", "corregimiento") if k in params):
             barrios = list(v.barrios) or ([v.barrio] if v.barrio else [])
             if barrios and "barrio" in params and "barrio" not in por:
                 if len(barrios) == 1:
@@ -1235,6 +1247,11 @@ class ToolRunner:
                 else:
                     poner("barrio", [f"{b.partition(' | ')[2]} de {b.partition(' | ')[0]}" for b in barrios],
                           "barrios")
+            elif v.corregimiento and "corregimiento" in params:
+                # Sin su municipio, «Cabecera municipal» sería casi todo el Atlántico.
+                poner("corregimiento", v.corregimiento, "corregimiento")
+                poner("municipio", v.municipio, "municipio", "municipio")
+                poner("zona", None if v.municipio else v.zona, "zona", "zona")
             elif v.municipio:
                 poner("municipio", v.municipio, "municipio", "municipio")
             elif v.zona:
@@ -1382,6 +1399,26 @@ class ToolRunner:
 
     # --- Herramientas ---------------------------------------------------------
 
+    def _barrios_del_corregimiento(
+        self, corregimiento: str, municipio: str | None, zona: str | None,
+    ) -> list[str]:
+        """Los barrios (BKEY) de un corregimiento, dentro del municipio y la zona pedidos."""
+        p = self.metrics.datos
+        if not p.b_corr:
+            raise FiltroNoResuelto("corregimiento", corregimiento, [])
+        ci = self.metrics._indice(p.corrs, corregimiento)
+        if ci is None:
+            raise FiltroNoResuelto("corregimiento", corregimiento, p.corrs[:30])
+        mi = self.metrics._indice(p.munis, municipio) if municipio else None
+        zi = self.metrics._indice(p.zonas, zona) if zona else None
+        claves = [
+            p.barrios[b] for b in range(len(p.barrios))
+            if p.b_corr[b] == ci and (mi is None or p.b_muni[b] == mi) and (zi is None or p.b_zona[b] == zi)
+        ]
+        if not claves:
+            raise FiltroNoResuelto("corregimiento", f"{corregimiento} en {municipio or zona}", p.corrs[:30])
+        return claves
+
     async def _recorte(
         self,
         barrio: str | list[str] | None,
@@ -1389,6 +1426,7 @@ class ToolRunner:
         mes: str | None,
         brigada: str | None = None,
         zona: str | None = None,
+        corregimiento: str | None = None,
     ) -> tuple[list[str] | None, str | None, list[str] | None, str, FiltroMapa]:
         """Traduce los argumentos a un recorte concreto y a su descripción.
 
@@ -1417,8 +1455,15 @@ class ToolRunner:
             bkeys = list(dict.fromkeys(claves))
             if len(nombres) == 1:
                 municipio = municipio or grupo[0].municipio
+        elif corregimiento:
+            # El corregimiento cuelga del municipio: «Cabecera municipal» existe en todos, así que sin
+            # municipio sería casi todo el Atlántico. Se traduce a los barrios que le tocan y el resto del
+            # cálculo (que ya sabe de barrios) no cambia.
+            bkeys = self._barrios_del_corregimiento(corregimiento, municipio, zona)
 
-        if bkeys and len(bkeys) == 1:
+        if corregimiento and not nombres:
+            donde = f"corregimiento {corregimiento}" + (f" de {municipio}" if municipio else "")
+        elif bkeys and len(bkeys) == 1:
             donde = bkeys[0]
         elif bkeys and len(nombres) > 1:
             donde = f"{len(bkeys)} barrios ({', '.join(nombres)})"
@@ -1434,10 +1479,11 @@ class ToolRunner:
         filtro = FiltroMapa(
             # Un barrio se marca como barrio; varios, como lista: el tablero filtra por
             # varios a la vez. Con barrios puestos el municipio sobra.
-            barrio=bkeys[0] if bkeys and len(bkeys) == 1 else None,
-            barrios=bkeys if bkeys and len(bkeys) > 1 else None,
-            municipio=None if bkeys else municipio,
+            barrio=bkeys[0] if bkeys and len(bkeys) == 1 and not corregimiento else None,
+            barrios=bkeys if bkeys and len(bkeys) > 1 and not corregimiento else None,
+            municipio=None if bkeys and not corregimiento else municipio,
             zona=None if bkeys or municipio else zona,
+            corregimiento=corregimiento if not nombres else None,
             brigada=brigada,
             meses=meses,
         )
@@ -1454,6 +1500,7 @@ class ToolRunner:
         self,
         barrio: str | None = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
         tipo_os: str | None = None,
@@ -1464,7 +1511,7 @@ class ToolRunner:
         causa: str | None = None,
         tecnico: str | list[str] | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         tecnicos, nombres_tec = self._tecnicos(tecnico)
         if nombres_tec:
             base += f" · {self._rotulo_tecnicos(nombres_tec)}"
@@ -1544,6 +1591,7 @@ class ToolRunner:
         dimension: str,
         barrio: str | None = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
         peores: bool | None = None,
@@ -1558,7 +1606,7 @@ class ToolRunner:
         tecnico: str | list[str] | None = None,
         limite: int | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         tecnicos, nombres_tec = self._tecnicos(tecnico)
         if nombres_tec:
             base += f" · {self._rotulo_tecnicos(nombres_tec)}"
@@ -1675,6 +1723,7 @@ class ToolRunner:
         self,
         barrio: str | None = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
         zona: str | None = None,
@@ -1684,7 +1733,7 @@ class ToolRunner:
         causa: str | None = None,
         tecnico: str | list[str] | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         tecnicos, nombres_tec = self._tecnicos(tecnico)
         if nombres_tec:
             base += f" · {self._rotulo_tecnicos(nombres_tec)}"
@@ -1713,13 +1762,14 @@ class ToolRunner:
         texto: str,
         barrio: str | None = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         mes: str | None = None,
         brigada: str | None = None,
         zona: str | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
         bkeys, municipio, meses, base, filtro = await self._recorte(
             barrio, municipio, mes, brigada, zona=zona
-        )
+        , corregimiento=corregimiento)
         datos = await self.metrics.buscar_en_observaciones(
             texto=texto,
             bkeys=bkeys,
@@ -1963,6 +2013,7 @@ class ToolRunner:
         mes: Any = None,
         barrio: str | list[str] | None = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         estado: str | None = None,
         limite: int = 30,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
@@ -1970,7 +2021,7 @@ class ToolRunner:
             return {"error": "falta_tecnico", "sugerencia": (
                 "No dijeron de cuál. Pregunta el nombre; no elijas uno ni listes varios.")}, None
         indices, nombres = self._tecnicos(tecnico)
-        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, None)
+        bkeys, municipio, meses, base, filtro = await self._recorte(barrio, municipio, mes, None, corregimiento=corregimiento)
         base = f"{self._rotulo_tecnicos(nombres)} · {base}"
         limite = max(1, min(int(limite), 100))
         datos = self.metrics.visitas_tecnico(
@@ -1999,6 +2050,7 @@ class ToolRunner:
         mes_a: Any = None,
         mes_b: Any = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         barrio: str | list[str] | None = None,
         zona: str | None = None,
         brigada: str | None = None,
@@ -2013,7 +2065,7 @@ class ToolRunner:
         meses_a = expandir_meses(mes_a or (disponibles[1] if len(disponibles) > 1 else None), disponibles)
         if not meses_a or not meses_b:
             return {"error": "faltan_periodos", "sugerencia": "Pide los dos periodos a comparar."}, None
-        bkeys, municipio, _, _, _ = await self._recorte(barrio, municipio, "todo", brigada, zona=zona)
+        bkeys, municipio, _, _, _ = await self._recorte(barrio, municipio, "todo", brigada, zona=zona, corregimiento=corregimiento)
         tecnicos, nombres_tec = self._tecnicos(tecnico)
         ambito = dict(
             bkeys=bkeys, municipio=None if bkeys else municipio, zona=None if bkeys or municipio else zona,
@@ -2070,6 +2122,7 @@ class ToolRunner:
         self,
         mes: Any = "todo",
         municipio: str | None = None,
+        corregimiento: str | None = None,
         barrio: str | list[str] | None = None,
         zona: str | None = None,
         brigada: str | None = None,
@@ -2081,7 +2134,7 @@ class ToolRunner:
         filas, filtro, base = [], None, ""
         for m in meses:
             resultado, filtro = await self._efectividad(
-                barrio=barrio, municipio=municipio, mes=m, brigada=brigada, zona=zona, tecnico=tecnico)
+                barrio=barrio, municipio=municipio, corregimiento=corregimiento, mes=m, brigada=brigada, zona=zona, tecnico=tecnico)
             base = resultado["base"].rsplit(" · ", 1)[0] if " · " in resultado["base"] else resultado["base"]
             d = resultado["metricas"]
             if d["tot"]:
@@ -2115,11 +2168,12 @@ class ToolRunner:
         porcentaje: int = 50,
         mes: Any = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         zona: str | None = None,
         brigada: str | None = None,
         limite: int = 10,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona)
+        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         filas = await self.metrics.ranking(
             dimension=dimension, municipio=municipio, zona=None if municipio else zona, meses=meses,
             brigada=brigada, min_ordenes=0, limite=10**6, ordenar_por="volumen")
@@ -2189,6 +2243,7 @@ class ToolRunner:
         min_ordenes: int = 10,
         mes: Any = None,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         barrio: str | list[str] | None = None,
         zona: str | None = None,
         brigada: str | None = None,
@@ -2199,7 +2254,7 @@ class ToolRunner:
             ordenar_por = "ef_pct" if ordenar_por == "ef_adj" else "volumen"
         if (error := self._sin_financiaciones(ordenar_por)) is not None:
             return error, None
-        bkeys, municipio, meses, base, _ = await self._recorte(barrio, municipio, mes, brigada, zona=zona)
+        bkeys, municipio, meses, base, _ = await self._recorte(barrio, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         tecnicos, _ = self._tecnicos(tecnico)
         pares = await self.metrics.cruce(
             dimension_a=dimension_a, dimension_b=dimension_b, min_ordenes=min_ordenes, bkeys=bkeys,
@@ -2220,6 +2275,7 @@ class ToolRunner:
     async def _barrios_criticos(
         self,
         municipio: str | None = None,
+        corregimiento: str | None = None,
         zona: str | None = None,
         brigada: str | None = None,
         mes: Any = None,
@@ -2227,7 +2283,7 @@ class ToolRunner:
         solo_altos: bool = False,
         limite: int | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona)
+        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         filas = riesgo.calcular(
             self.metrics, cobros=self._es_cobros, min_ordenes=min_ordenes, meses=meses,
             municipio=municipio, zona=None if municipio else zona, brigada=brigada)

@@ -150,6 +150,7 @@ class FiltroMapa(BaseModel):
     )
     municipio: str | None = None
     zona: str | None = None
+    corregimiento: str | None = None
     brigada: str | None = None
     actividad: str | None = None
     tipo_os: str | None = None
