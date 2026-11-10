@@ -11,6 +11,8 @@ openai>=1.59,<2
 
 # Lectura del archivo de órdenes que sube el usuario (.xlsx)
 openpyxl==3.1.5
+# export_excel.py, que corre el botón de descarga del tablero.
+pandas>=2.2,<4
 # Necesario para recibir el archivo por multipart/form-data.
 python-multipart==0.0.20
 

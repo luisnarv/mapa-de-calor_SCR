@@ -1,11 +1,20 @@
+import argparse
 import json
 import pandas as pd
 import datetime
 import os
 import glob
 
+parser = argparse.ArgumentParser(description="Genera el reporte operativo en Excel.")
+parser.add_argument("proceso", nargs="?", choices=["scr", "cobros"], default="scr")
+# El backend pasa su propia copia de los JSON y un archivo temporal: en el
+# servidor no existe Frontend/ y dos descargas no deben pisarse el archivo.
+parser.add_argument("--datos", help="Carpeta con data.json y data_*.json")
+parser.add_argument("--salida", help="Ruta del .xlsx a generar")
+args = parser.parse_args()
+
 print("Cargando data.json...")
-base_path = "Frontend/dashboard/public/scr"
+base_path = args.datos or f"Frontend/dashboard/public/{args.proceso}"
 with open(os.path.join(base_path, "data.json"), encoding="utf8") as f:
     main_data = json.load(f)
 
@@ -99,7 +108,7 @@ total_fallidas = pareto["Frecuencia"].sum()
 pareto["% Impacto"] = (pareto["Frecuencia"] / total_fallidas).apply(lambda x: f"{x:.1%}")
 
 print("Guardando Excel...")
-out_path = "Reporte_Operativo_SCR.xlsx"
+out_path = args.salida or f"Reporte_Operativo_{args.proceso.upper()}.xlsx"
 with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
     tec_perf.to_excel(writer, sheet_name="Rendimiento_Tecnicos", index=False)
     geo_perf.to_excel(writer, sheet_name="Analisis_Geografico", index=False)

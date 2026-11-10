@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { AlertTriangle, ChevronDown, Moon, RefreshCw, Sun } from "lucide-react";
+import { AlertTriangle, ChevronDown, Download, Moon, RefreshCw, Sun } from "lucide-react";
 
 import { useTheme } from "@/lib/theme";
 import FiltroPildora from "@/components/FiltroPildora";
@@ -141,6 +141,37 @@ export default function Topbar({
     st.act !== "" || st.gest !== "" || mesesPuestos || st.barrios?.length > 0 ||
     st.causaSel != null || !st.est.every(Boolean) || st.efOcultas.length > 0 || st.hotspot !== 60 ||
     st.minOrders !== (esCobros ? 1 : 10);
+
+  const [exportando, setExportando] = React.useState(false);
+  const [errorExport, setErrorExport] = React.useState("");
+
+  // El backend responde 202 mientras arma el libro: Cobros tarda minutos.
+  const descargarReporte = async () => {
+    const api = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+    setExportando(true);
+    setErrorExport("");
+    try {
+      let res = await fetch(`${api}/api/v1/reportes/${proceso}`);
+      while (res.status === 202) {
+        await new Promise((listo) => setTimeout(listo, 5000));
+        res = await fetch(`${api}/api/v1/reportes/${proceso}`);
+      }
+      if (!res.ok) {
+        const cuerpo = await res.json().catch(() => null);
+        throw new Error(cuerpo?.detail || `El servidor respondió ${res.status}`);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = `Reporte_Operativo_${proceso.toUpperCase()}.xlsx`;
+      enlace.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setErrorExport(err.message || "No se pudo generar el reporte");
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const edad = edadDeLosDatos(st.generated);
   const estadoRefresco =
@@ -295,6 +326,23 @@ export default function Topbar({
             {estadoRefresco}
           </span>
         )}
+
+        {(exportando || errorExport) && (
+          <span className={`hd-fresh ${errorExport ? "warn" : ""}`} title={errorExport || undefined} aria-live="polite">
+            {errorExport ? "No se pudo generar el Excel" : "Generando Excel…"}
+          </span>
+        )}
+
+        <button
+          type="button"
+          className="hd-ico"
+          onClick={descargarReporte}
+          disabled={exportando}
+          aria-label={`Descargar reporte de ${esCobros ? "Cobros" : "SCR"} en Excel`}
+          title="Descargar reporte en Excel"
+        >
+          <Download size={16} strokeWidth={2.2} aria-hidden="true" />
+        </button>
 
         {onRefresh && (
           <button
