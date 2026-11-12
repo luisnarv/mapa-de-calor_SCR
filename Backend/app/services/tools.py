@@ -1251,9 +1251,12 @@ class ToolRunner:
                 # Sin su municipio, «Cabecera municipal» sería casi todo el Atlántico.
                 poner("corregimiento", v.corregimiento, "corregimiento")
                 poner("municipio", v.municipio, "municipio", "municipio")
-                poner("zona", None if v.municipio else v.zona, "zona", "zona")
+                poner("zona", v.zona, "zona", "zona")
             elif v.municipio:
+                # Un municipio puede repartirse entre zonas (Barranquilla está en Norte y en Centro):
+                # soltar la zona daba el municipio entero, no lo que el usuario tenía en pantalla.
                 poner("municipio", v.municipio, "municipio", "municipio")
+                poner("zona", v.zona, "zona", "zona")
             elif v.zona:
                 poner("zona", v.zona, "zona", "zona")
         # Estos son independientes del sitio.
@@ -1280,7 +1283,7 @@ class ToolRunner:
             if por_gestor:
                 if v.municipio and agrupar != "municipio":
                     nuevos["municipio"], puestos["municipio"] = v.municipio, v.municipio
-                elif v.zona and agrupar != "zona":
+                if v.zona and agrupar != "zona":
                     nuevos["zona"], puestos["zona"] = v.zona, v.zona
                 if barrios:
                     puestos["barrio"] = "; ".join(barrios) + " (el recaudo por gestor no se cruza con el barrio)"
@@ -1294,7 +1297,7 @@ class ToolRunner:
                     puestos["barrio"] = "; ".join(barrios)
                 elif v.municipio and agrupar != "municipio":
                     nuevos["municipio"], puestos["municipio"] = v.municipio, v.municipio
-                if v.zona and "municipio" not in nuevos and "barrio" not in nuevos:
+                if v.zona and "barrio" not in nuevos:
                     nuevos["zona"], puestos["zona"] = v.zona, v.zona
         if v.brigada and agrupar != "plan" and not pidio("plan"):
             nuevos["plan"], puestos["plan"] = v.brigada, v.brigada
@@ -1419,6 +1422,20 @@ class ToolRunner:
             raise FiltroNoResuelto("corregimiento", f"{corregimiento} en {municipio or zona}", p.corrs[:30])
         return claves
 
+    def _barrios_del_municipio_en_zona(self, municipio: str, zona: str) -> list[str] | None:
+        """Los barrios (BKEY) del municipio que caen en la zona; None si alguno no resuelve.
+
+        Un municipio puede repartirse entre zonas, así que zona ∩ municipio no es ni uno ni la otra.
+        Si no resuelven se deja pasar para que el cálculo lance su propio `FiltroNoResuelto`."""
+        p = self.metrics.datos
+        mi, zi = self.metrics._indice(p.munis, municipio), self.metrics._indice(p.zonas, zona)
+        if mi is None or zi is None:
+            return None
+        claves = [p.barrios[b] for b in range(len(p.barrios)) if p.b_muni[b] == mi and p.b_zona[b] == zi]
+        if not claves:
+            raise FiltroNoResuelto("zona", f"{zona} (en {municipio})", p.zonas)
+        return claves
+
     async def _recorte(
         self,
         barrio: str | list[str] | None,
@@ -1460,9 +1477,16 @@ class ToolRunner:
             # municipio sería casi todo el Atlántico. Se traduce a los barrios que le tocan y el resto del
             # cálculo (que ya sabe de barrios) no cambia.
             bkeys = self._barrios_del_corregimiento(corregimiento, municipio, zona)
+        elif municipio and zona:
+            bkeys = self._barrios_del_municipio_en_zona(municipio, zona)
 
+        # Los barrios de un corregimiento o de municipio ∩ zona no son «barrios pedidos»: el tablero los
+        # filtra con su propio filtro de ubicación, no como una lista.
+        por_ubicacion = bool(bkeys) and not nombres
         if corregimiento and not nombres:
             donde = f"corregimiento {corregimiento}" + (f" de {municipio}" if municipio else "")
+        elif por_ubicacion:
+            donde = f"{municipio}, zona {zona}"
         elif bkeys and len(bkeys) == 1:
             donde = bkeys[0]
         elif bkeys and len(nombres) > 1:
@@ -1479,10 +1503,10 @@ class ToolRunner:
         filtro = FiltroMapa(
             # Un barrio se marca como barrio; varios, como lista: el tablero filtra por
             # varios a la vez. Con barrios puestos el municipio sobra.
-            barrio=bkeys[0] if bkeys and len(bkeys) == 1 and not corregimiento else None,
-            barrios=bkeys if bkeys and len(bkeys) > 1 and not corregimiento else None,
-            municipio=None if bkeys and not corregimiento else municipio,
-            zona=None if bkeys or municipio else zona,
+            barrio=bkeys[0] if bkeys and len(bkeys) == 1 and not por_ubicacion else None,
+            barrios=bkeys if bkeys and len(bkeys) > 1 and not por_ubicacion else None,
+            municipio=None if bkeys and not por_ubicacion else municipio,
+            zona=zona if por_ubicacion else (None if bkeys or municipio else zona),
             corregimiento=corregimiento if not nombres else None,
             brigada=brigada,
             meses=meses,
@@ -2173,9 +2197,10 @@ class ToolRunner:
         brigada: str | None = None,
         limite: int = 10,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
+        bkeys, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         filas = await self.metrics.ranking(
-            dimension=dimension, municipio=municipio, zona=None if municipio else zona, meses=meses,
+            dimension=dimension, bkeys=bkeys, municipio=None if bkeys else municipio,
+            zona=None if bkeys or municipio else zona, meses=meses,
             brigada=brigada, min_ordenes=0, limite=10**6, ordenar_por="volumen")
         if (error := self._sin_financiaciones(ordenar_por)) is not None:
             return error, None
@@ -2283,10 +2308,10 @@ class ToolRunner:
         solo_altos: bool = False,
         limite: int | None = None,
     ) -> tuple[dict[str, Any], FiltroMapa | None]:
-        _, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
+        bkeys, municipio, meses, base, _ = await self._recorte(None, municipio, mes, brigada, zona=zona, corregimiento=corregimiento)
         filas = riesgo.calcular(
-            self.metrics, cobros=self._es_cobros, min_ordenes=min_ordenes, meses=meses,
-            municipio=municipio, zona=None if municipio else zona, brigada=brigada)
+            self.metrics, cobros=self._es_cobros, min_ordenes=min_ordenes, meses=meses, bkeys=bkeys,
+            municipio=None if bkeys else municipio, zona=None if bkeys or municipio else zona, brigada=brigada)
         if solo_altos:
             filas = [f for f in filas if f["riesgo"] >= 61]
         total = len(filas)

@@ -1363,12 +1363,88 @@ async def test_un_corregimiento_inexistente_o_sin_datos_no_devuelve_el_total(tmp
 async def test_el_corregimiento_de_la_pantalla_se_aplica_con_su_municipio(tmp_path):
     metrics = MetricsService(_datos_con_corregimientos(tmp_path))
     p = metrics.datos
-    vista = VistaTablero(municipio=p.munis[0], corregimiento="Vereda Norte", zona=p.zonas[0])
+    # Barranquilla (índice 1) tiene barrios en Norte (índice 1): la zona viaja junto al municipio.
+    vista = VistaTablero(municipio=p.munis[1], corregimiento="Vereda Norte", zona=p.zonas[1])
     r = ToolRunner(metrics, vista=vista)
 
     salida, _ = await r.run("efectividad", {"mes": "todo"})
 
     assert salida["filtros_de_pantalla"]["corregimiento"] == "Vereda Norte"
-    assert salida["filtros_de_pantalla"]["municipio"] == p.munis[0]
-    assert "zona" not in salida["filtros_de_pantalla"]  # el municipio ya la acota
+    assert salida["filtros_de_pantalla"]["municipio"] == p.munis[1]
+    assert salida["filtros_de_pantalla"]["zona"] == p.zonas[1]
+
+
+# --- Zona y municipio a la vez ------------------------------------------------------------------
+# Barranquilla tiene barrios en dos zonas: soltar una de las dos daba el municipio (o la zona) entero.
+
+
+def _conteo_municipio_en_zona(p, municipio: str, zona: str) -> int:
+    mi, zi = p.munis.index(municipio), p.zonas.index(zona)
+    b_muni, b_zona = p.b_muni, p.b_zona
+    return sum(1 for b in p.b if b_muni[b] == mi and b_zona[b] == zi)
+
+
+@pytest.mark.asyncio
+async def test_municipio_y_zona_juntos_dan_la_interseccion(metrics):
+    p, r = metrics.datos, ToolRunner(metrics)
+    municipio, norte, centro = "BARRANQUILLA", "ATLANTICO NORTE", "ATLANTICO CENTRO"
+
+    en_norte, filtro = await r.run("efectividad", {"municipio": municipio, "zona": norte, "mes": "todo"})
+    en_centro, _ = await r.run("efectividad", {"municipio": municipio, "zona": centro, "mes": "todo"})
+    entero, _ = await r.run("efectividad", {"municipio": municipio, "mes": "todo"})
+
+    assert en_norte["metricas"]["tot"] == _conteo_municipio_en_zona(p, municipio, norte)
+    assert en_centro["metricas"]["tot"] == _conteo_municipio_en_zona(p, municipio, centro)
+    assert en_norte["metricas"]["tot"] + en_centro["metricas"]["tot"] <= entero["metricas"]["tot"]
+    assert en_norte["metricas"]["tot"] < entero["metricas"]["tot"]
+    assert f"{municipio}, zona {norte}" in en_norte["base"]
+    # El mapa recibe los dos filtros, no una lista de barrios.
+    assert filtro.municipio == municipio and filtro.zona == norte and not filtro.barrios
+
+
+@pytest.mark.asyncio
+async def test_municipio_en_una_zona_que_no_le_toca_no_devuelve_otro_recorte(metrics):
+    salida, _ = await ToolRunner(metrics).run(
+        "efectividad", {"municipio": "BARANOA", "zona": "ATLANTICO NORTE", "mes": "todo"})
+
+    assert salida["error"] == "filtro_no_reconocido" and salida["campo"] == "zona"
+
+
+@pytest.mark.asyncio
+async def test_la_zona_de_la_pantalla_no_se_pierde_con_el_municipio(metrics):
+    vista = VistaTablero(municipio="BARRANQUILLA", zona="ATLANTICO NORTE", meses=["2026-08"])
+
+    salida, _ = await ToolRunner(metrics, vista=vista).run("efectividad", {})
+
+    assert salida["filtros_de_pantalla"]["zona"] == "ATLANTICO NORTE"
+    p = metrics.datos
+    mes, mi, zi = p.meses.index("2026-08"), p.munis.index("BARRANQUILLA"), p.zonas.index("ATLANTICO NORTE")
+    # Variables locales: recorrer las filas con acceso de atributos en cada vuelta tardaba minutos.
+    b_muni, b_zona = p.b_muni, p.b_zona
+    assert salida["metricas"]["tot"] == sum(
+        1 for m, b in zip(p.mes, p.b) if m == mes and b_muni[b] == mi and b_zona[b] == zi)
+
+
+@pytest.mark.asyncio
+async def test_el_recaudo_de_pantalla_lleva_zona_y_municipio(metrics):
+    vista = VistaTablero(municipio="BARRANQUILLA", zona="ATLANTICO NORTE")
+
+    nuevos, puestos = ToolRunner(metrics, vista=vista)._recaudo_con_pantalla({})
+    por_gestor, _ = ToolRunner(metrics, vista=vista)._recaudo_con_pantalla({"agrupar_por": "gestor"})
+
+    assert nuevos["municipio"] == "BARRANQUILLA" and nuevos["zona"] == "ATLANTICO NORTE"
+    assert por_gestor["municipio"] == "BARRANQUILLA" and por_gestor["zona"] == "ATLANTICO NORTE"
+
+
+@pytest.mark.asyncio
+async def test_concentracion_y_barrios_criticos_respetan_el_corregimiento(tmp_path):
+    metrics = MetricsService(_datos_con_corregimientos(tmp_path))
+    r, p = ToolRunner(metrics), metrics.datos
+    municipio = p.munis[0]
+    en_corr = {p.barrios[b] for b in range(len(p.barrios)) if p.b_corr[b] == 1 and p.b_muni[b] == 0}
+
+    criticos, _ = await r.run("barrios_criticos", {"municipio": municipio, "corregimiento": "Vereda Norte", "min_ordenes": 1, "limite": 50, "mes": "todo"})
+
+    assert criticos["total_barrios"] > 0
+    assert {f["barrio"] for f in criticos["filas"]} <= en_corr
 
