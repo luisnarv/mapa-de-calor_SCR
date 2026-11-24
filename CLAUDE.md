@@ -42,7 +42,8 @@ pedir que se lea.
 | `Backend/` | API FastAPI. Chatbot con OpenAI y tool calling sobre los datos del tablero. |
 | `Backend/migraciones/` | Los `.sql` del esquema, numerados. Se aplican a mano; no hay Alembic. |
 | `Frontend/dashboard/` | Tablero Next.js: mapa de calor, paneles y el chat. |
-| `Modelos/` | Modelo CatBoost de riesgo social (predice agresividad del cliente). |
+| `Modelos/Recomendacion Social/` | Modelo CatBoost de riesgo social (predice agresividad del cliente). |
+| `Modelos/Recomendacion Alcance/` | Matriz de alcance: CatBoost que da el % de efectividad por alcance. `correr_matriz.py` la recalcula a diario en `dbanalitica.matriz_alcance`. |
 | `.github/workflows/etl.yml` | Cron del ETL. **Debe vivir en la raíz**: GitHub solo lee ahí. |
 
 ## Reglas del dominio que no son obvias
@@ -159,6 +160,11 @@ cd Etl && python run_etl.py
 
 - El endpoint del chat no tiene autenticación ni límite de peticiones. Y
   `ChatRequest.model` es libre: el cliente elige con qué modelo se le responde.
+- `/api/v1/matriz-alcance` tampoco tiene autenticación (decisión del 2026-11-13).
+  Solo devuelve `pct_recomendado` por NIC, pero deja ver qué NICs tienen gestiones
+  de SCR. Lee `dbanalitica.matriz_alcance_completa`, que solo está al día si corre
+  a diario `Modelos/Recomendacion Alcance/correr_matriz.py`; ese cron todavía no
+  está montado en el servidor.
 - Los endpoints de lectura del feedback (`GET /api/v1/feedback`) tampoco tienen
   autenticación, y ahí sí hay conversaciones completas de usuarios.
 - El ciclo de leer votos, diagnosticar con la traza y convertirlos en casos de

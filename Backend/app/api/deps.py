@@ -13,6 +13,7 @@ from app.services.balanza_service import BalanzaService
 from app.services.cargue_store import CargueStore
 from app.services.feedback_service import FeedbackService
 from app.services.geolocalizacion import Geolocalizador
+from app.services.matriz_alcance_service import MatrizAlcanceService
 from app.services.propension_service import PropensionService, get_propension_service
 from app.services.metrics_service import MetricsService
 from app.services.openai_service import OpenAIService, get_openai_service
@@ -110,6 +111,14 @@ def get_feedback_service() -> FeedbackService:
 
 
 FeedbackDep = Annotated[FeedbackService, Depends(get_feedback_service)]
+
+
+@lru_cache
+def get_matriz_alcance_service() -> MatrizAlcanceService:
+    return MatrizAlcanceService()
+
+
+MatrizAlcanceDep = Annotated[MatrizAlcanceService, Depends(get_matriz_alcance_service)]
 
 
 @lru_cache

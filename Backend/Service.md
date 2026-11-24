@@ -422,3 +422,57 @@ En COBROS cada elemento de `resultados` tiene la misma forma que el ejemplo indi
   "no_encontrados": ["9999999"]
 }
 ```
+
+---
+
+## Matriz de alcance — `/api/v1/matriz-alcance`
+
+Devuelve, por NIC, el **% de probabilidad de que la orden de SCR salga efectiva si se manda con el
+alcance que recomienda la matriz** (`pct_recomendado`). La matriz calcula ese % para cada alcance
+posible con el modelo CatBoost de `Modelos/Recomendacion Alcance`, ya ajustado por la propensión de
+pago, y se queda con el más alto. La respuesta no dice cuál alcance es: solo su %.
+
+No calcula nada en la petición: lee `dbanalitica.matriz_alcance_completa`, que se recalcula cada
+madrugada para todos los NICs (unos 185 mil, ~10 minutos). La respuesta no trae la fecha del
+cálculo: si la corrida diaria falla, se sigue respondiendo con la del último día que corrió.
+
+**Sin autenticación** por ahora (decisión del 2026-11-13).
+
+### Por lotes — `POST /api/v1/matriz-alcance`
+
+```bash
+curl -X POST http://52.88.48.137/api/v1/matriz-alcance   -H "Content-Type: application/json"   -d '{"nics": ["7913631", "1072118", "123"]}'
+```
+
+- Hasta **5.000 NICs** por petición; más se rechaza con 422 y hay que partirla.
+- Acepta los NICs como texto o número; quita espacios y repetidos. Un NIC con algo que no sea dígito
+  responde 422 diciendo cuál.
+- Tarda 1–2 s, casi igual con 900 que con 5.000: el tiempo es la ida y vuelta a la base.
+
+```json
+{
+  "solicitados": 3,
+  "encontrados": 2,
+  "no_encontrados": ["123"],
+  "resultados": [
+    {"nic": "7913631", "pct_recomendado": 98.5},
+    {"nic": "1072118", "pct_recomendado": null}
+  ]
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `resultados` | Un elemento por NIC encontrado, en el orden pedido |
+| `pct_recomendado` | % de efectividad con el alcance recomendado (0–100, un decimal) |
+| `pct_recomendado: null` | El NIC quedó excluido y no se le recomienda nada (p. ej. pagó después de la última suspensión y no tiene reconexión efectiva) |
+| `no_encontrados` | No están en `dbanalitica.recomendacion_aire_scr`: no tienen gestiones de SCR |
+
+### Individual — `GET /api/v1/matriz-alcance/{nic}`
+
+```json
+{"nic": "7913631", "pct_recomendado": 98.5}
+```
+
+Un NIC que no está responde **404**.
+

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matriz de alcance · __MES__</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14181f;--mut:#5b6573;--line:#e3e7ee;--ok:#1a8f5b;--okbg:#e4f5ec;--bad:#d03b3b;--badbg:#fdeaea;--warn:#c47a00;--warnbg:#fff3dc;--blue:#2f6df6;--bluebg:#e8efff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#171c23;--ink:#eef1f5;--mut:#9aa5b4;--line:#2a323d;--ok:#42c88b;--okbg:#12281f;--bad:#ff7070;--badbg:#321a1a;--warn:#f0b64a;--warnbg:#332711;--blue:#7ba3ff;--bluebg:#18233d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:18px 14px 50px}h1{font-size:23px;margin:4px 0}h2{font-size:17px;margin:28px 0 8px}h3{font-size:14px;margin:0}
+.sub{color:var(--mut);font-size:13px}.nav{position:sticky;top:0;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line);z-index:5;display:flex;gap:6px;margin-top:8px}
+.nav a{color:var(--ink);text-decoration:none;padding:4px 11px;border-radius:99px;background:var(--card);border:1px solid var(--line);font-size:13px}
+.grid{display:grid;gap:10px}.g5{grid-template-columns:repeat(6,1fr)}.g2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:900px){.g5{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi .l{color:var(--mut);font-size:12px}.kpi .v{font-size:25px;font-weight:700;letter-spacing:-.4px}.kpi .n{font-size:12px;color:var(--mut)}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.p-ok{background:var(--okbg);color:var(--ok)}.p-bad{background:var(--badbg);color:var(--bad)}.p-warn{background:var(--warnbg);color:var(--warn)}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}.tbl th,.tbl td{padding:6px 7px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.tbl td.r,.tbl th.r{text-align:right}
+.tbl th{color:var(--mut);font-weight:600;font-size:11.5px;background:var(--card)}
+.vh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px}.imp{height:7px;border-radius:4px;background:var(--blue);margin-top:4px}
+.pct{border-radius:6px;padding:1px 6px;font-weight:600;display:inline-block;min-width:46px;text-align:center}
+.scroll{overflow:auto;max-height:640px;border:1px solid var(--line);border-radius:10px;background:var(--card)}.scroll th{position:sticky;top:0;cursor:pointer;z-index:2}
+tr.r:hover{background:var(--bluebg);cursor:pointer}.det td{background:var(--bg);white-space:normal;padding:12px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.filters input,.filters select{padding:7px 9px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit}
+.pg{display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--mut);font-size:12.5px}.pg button{padding:5px 11px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+.two{display:grid;grid-template-columns:1.1fr 1fr;gap:14px}@media(max-width:900px){.two{grid-template-columns:1fr}}.mini{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.cur td{font-weight:700;background:var(--bluebg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Matriz de alcance · AIRE SCR · __MES__</h1>
+<div class="sub" id="sub"></div>
+<div class="nav"><a href="#vars">Variables que más pesan</a><a href="#casos">Casos</a></div>
+<div class="grid g5" id="kpis" style="margin-top:12px"></div>
+
+<h2 id="vars">Variables que más pesan en el modelo</h2>
+<div class="sub">Por banda de cada variable: órdenes efectivas (✓) y fallidas (✗) en el histórico (hasta __PREV__) y en __MES_MIN__, y lo que dijo el modelo.</div>
+<div class="grid g2" id="varsGrid" style="margin-top:10px"></div>
+
+<h2 id="casos">Casos de __MES_MIN__</h2>
+<div class="sub">Clic en un caso: historial completo del NIC y su valor en cada variable.</div>
+<div class="filters">
+  <input id="q" placeholder="Buscar NIC" size="14">
+  <select id="fReal"><option value="">Real: todos</option><option value="EFECTIVA">Efectiva</option><option value="FALLIDA">Fallida</option></select>
+  <select id="fTipo"><option value="">Modelo: todos</option><option value="OK">Acertó</option><option value="FP">Dijo efectiva y falló</option><option value="FN">Dijo no efectiva y era efectiva</option></select>
+  <select id="fHist"><option value="">Historial: todos</option><option value="sin">Sin historial (0 previas)</option><option value="poco">Poco historial (1–2 previas)</option><option value="ok">3 o más órdenes previas</option></select>
+  <select id="fMun"><option value="">Todos los municipios</option></select>
+  <select id="fCausa"><option value="">Todas las causas</option></select>
+</div>
+<div class="scroll"><table class="tbl" id="tbl"><thead></thead><tbody></tbody></table></div>
+<div class="pg"><button id="prev">←</button><span id="pginfo"></span><button id="next">→</button></div>
+</div>
+<script>
+/*DATOS*/
+const $=s=>document.querySelector(s),nf=x=>Math.round(x).toLocaleString('es-CO'),pc=(x,d=0)=>(x*100).toLocaleString('es-CO',{minimumFractionDigits:d,maximumFractionDigits:d})+' %';
+const K=D.kpi;
+$('#sub').textContent=`${K.desde} a ${K.hasta} · suspensiones SCR (${K.tipos}) · modelo entrenado hasta ${K.corte} (no vio __MES_MIN__)`;
+$('#kpis').innerHTML=[['Órdenes con historial',nf(K.n),`${nf(K.nics)} NICs · ${nf(K.sin_hist)} sin historial (sin %)`],['Efectivas',`<span class="ok">${nf(K.ef)}</span>`,pc(K.real,1)],['Fallidas',`<span class="bad">${nf(K.fa)}</span>`,pc(1-K.real,1)],
+ ['Modelo dijo (promedio)',pc(K.modelo,1),`Real ${pc(K.real,1)} · AUC ${K.auc.toLocaleString('es-CO',{maximumFractionDigits:3})}`],['Histórico (hasta __PREV_ABR__)',nf(K.h_n),`${pc(K.h_ef/K.h_n,1)} efectivas`],['Poco historial (1–2 previas)',nf(K.lh.n),`Modelo ${pc(K.lh.modelo,1)} · Real ${pc(K.lh.real,1)}`]]
+ .map(k=>`<div class="card kpi"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="n">${k[2]}</div></div>`).join('');
+const heat=v=>{if(v==null)return '';const t=Math.max(0,Math.min(1,(v-.4)/.55)),h=Math.round(t*125);return `background:hsla(${h},65%,45%,.22)`};
+const cell=(ef,n)=>n?`<span class="pct" style="${heat(ef/n)}">${pc(ef/n)}</span>`:'—';
+const mx=Math.max(...D.vars.map(v=>v.imp));
+$('#varsGrid').innerHTML=D.vars.map((v,i)=>`<div class="card"><div class="vh"><div><h3>${i+1}. ${v.nombre}</h3><div class="imp" style="width:${v.imp/mx*180}px"></div></div><div class="sub">peso ${v.imp.toLocaleString('es-CO')}</div></div>
+<table class="tbl"><thead><tr><th>Banda</th><th class="r">Hist. ✓ / ✗</th><th class="r">Hist. % ✓</th><th class="r">__MES_ABR__ ✓ / ✗</th><th class="r">__MES_ABR__ % ✓</th><th class="r">Modelo</th></tr></thead><tbody>
+${v.bands.map(b=>`<tr><td>${b.k}</td><td class="r"><span class="ok">${nf(b.h_ef)}</span> / <span class="bad">${nf(b.h_n-b.h_ef)}</span></td><td class="r">${cell(b.h_ef,b.h_n)}</td><td class="r"><span class="ok">${nf(b.o_ef)}</span> / <span class="bad">${nf(b.o_n-b.o_ef)}</span></td><td class="r">${cell(b.o_ef,b.o_n)}</td><td class="r">${b.o_p==null?'—':pc(b.o_p)}</td></tr>`).join('')}</tbody></table></div>`).join('');
+const R=D.rows,I={nic:0,f:1,mun:2,zona:3,p:4,real:5,caus:6,ef:7,fa:8,efh:9,fact:10,deuda:11,brig:12,tipo:13,vv:14,prev:15};
+[...new Set(R.map(r=>r[I.mun]))].sort().forEach(m=>$('#fMun').insertAdjacentHTML('beforeend',`<option>${m}</option>`));
+[...new Set(R.map(r=>r[I.caus]).filter(Boolean))].sort().forEach(m=>$('#fCausa').insertAdjacentHTML('beforeend',`<option>${m}</option>`));
+const H=[['NIC','nic'],['Fecha','f'],['Municipio','mun'],['Modelo','p'],['Real','real'],['Previas del NIC ✓ / ✗','ef'],['Efect. previa','efh'],['Facturas','fact'],['Deuda','deuda'],['Brigada','brig'],['Causa real','caus']];
+$('#tbl thead').innerHTML='<tr>'+H.map(h=>`<th data-k="${h[1]}">${h[0]}</th>`).join('')+'</tr>';
+let sk='p',dir=-1,page=0,view=[];const PS=100;
+function filt(){const hh=$('#fHist').value,q=$('#q').value,re=$('#fReal').value,t=$('#fTipo').value,m=$('#fMun').value,c=$('#fCausa').value;
+ view=R.filter(r=>(!q||String(r[I.nic]).includes(q))&&(!re||r[I.real]===re)&&(!t||r[I.tipo]===t)&&(!m||r[I.mun]===m)&&(!c||r[I.caus]===c)&&(!hh||(hh==='sin'?r[I.prev]===0:hh==='poco'?(r[I.prev]>0&&r[I.prev]<3):r[I.prev]>=3)));
+ view.sort((a,b)=>{const x=a[I[sk]],y=b[I[sk]];return((x==null?-1:x)>(y==null?-1:y)?1:(x==null?-1:x)<(y==null?-1:y)?-1:0)*dir});page=0;draw()}
+function draw(){const s=page*PS;$('#tbl tbody').innerHTML=view.slice(s,s+PS).map((r,i)=>`<tr class="r" data-i="${s+i}"><td>${r[I.nic]}${r[I.prev]>0&&r[I.prev]<3?' <span class="pill p-warn" title="Menos de 3 órdenes previas">poco historial</span>':''}</td><td>${r[I.f]}</td><td>${r[I.mun]}</td><td>${r[I.p]==null?'<span class="pill p-warn">sin historial</span>':'<b>'+r[I.p].toLocaleString('es-CO',{maximumFractionDigits:1})+' %</b>'}</td>
+ <td>${r[I.real]==='EFECTIVA'?'<span class="pill p-ok">Efectiva</span>':'<span class="pill p-bad">Fallida</span>'}</td><td><span class="ok">${r[I.ef]}</span> / <span class="bad">${r[I.fa]}</span></td><td>${r[I.efh]==null?'—':r[I.efh]+' %'}</td><td>${r[I.fact]??'—'}</td><td>${r[I.deuda]==null?'—':'$ '+nf(r[I.deuda])}</td><td>${r[I.brig]}</td><td>${r[I.caus]||'—'}</td></tr>`).join('');
+ $('#pginfo').textContent=`${nf(view.length)} casos · ${view.length?s+1:0}–${Math.min(s+PS,view.length)}`}
+$('#tbl tbody').addEventListener('click',e=>{const tr=e.target.closest('tr.r');if(!tr)return;const nx=tr.nextElementSibling;if(nx&&nx.classList.contains('det')){nx.remove();return}
+ const r=view[+tr.dataset.i],hist=D.hist[r[I.nic]]||[];
+ const vt=r[I.vv]?`<div class="mini"><table class="tbl"><thead><tr><th>Variable</th><th class="r">Valor del caso</th><th>Banda</th><th class="r">Hist. % ✓</th><th class="r">__MES_ABR__ % ✓</th></tr></thead><tbody>${D.vars.map((v,j)=>{const b=v.bands[r[I.vv][j][1]]||{};return `<tr><td>${v.nombre}</td><td class="r"><b>${r[I.vv][j][0]}</b></td><td>${b.k||'—'}</td><td class="r">${b.h_n?cell(b.h_ef,b.h_n):'—'}</td><td class="r">${b.o_n?cell(b.o_ef,b.o_n):'—'}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="sub">Brigada no incluida en el modelo: sin detalle de variables.</div>';
+ const ht=`<div class="mini" style="max-height:330px;overflow:auto"><table class="tbl"><thead><tr><th>Fecha</th><th>Resultado</th><th>Causa</th><th>Brigada</th><th class="r">Fact.</th><th class="r">Deuda</th></tr></thead><tbody>${hist.slice().reverse().map(h=>`<tr class="${h[0].startsWith('__MES_ISO__')?'cur':''}"><td>${h[0]}</td><td>${h[1]?'<span class="pill p-ok">Efectiva</span>':'<span class="pill p-bad">Fallida</span>'}</td><td>${h[2]||'—'}</td><td>${h[3]}</td><td class="r">${h[4]??'—'}</td><td class="r">${h[5]==null?'—':'$ '+nf(h[5])}</td></tr>`).join('')}</tbody></table></div>`;
+ tr.insertAdjacentHTML('afterend',`<tr class="det"><td colspan="11"><div class="sub" style="margin-bottom:8px"><b>NIC ${r[I.nic]}</b> · historial: <span class="ok"><b>${hist.filter(h=>h[1]).length}</b> efectivas</span> · <span class="bad"><b>${hist.filter(h=>!h[1]).length}</b> fallidas</span> (incluye __MES_MIN__, resaltado)${r[I.prev]===0?' · <span class="pill p-warn">Sin historial: no se calcula %</span>':r[I.prev]<3?' · <span class="pill p-warn">Poco historial (&lt; 3 órdenes previas)</span>':''}</div><div class="two"><div><div class="sub" style="margin-bottom:4px">Variables que más pesan</div>${vt}</div><div><div class="sub" style="margin-bottom:4px">Historial del NIC</div>${ht}</div></div></td></tr>`)});
+$('#tbl thead').addEventListener('click',e=>{const k=e.target.closest('th')?.dataset.k;if(!k)return;dir=sk===k?-dir:-1;sk=k;filt()});
+['q','fReal','fTipo','fMun','fCausa','fHist'].forEach(id=>$('#'+id).addEventListener('input',filt));
+$('#prev').onclick=()=>{if(page>0){page--;draw()}};$('#next').onclick=()=>{if((page+1)*PS<view.length){page++;draw()}};
+filt();
+</script>
+</body>
+</html>

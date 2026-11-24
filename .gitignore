@@ -30,6 +30,8 @@ Etl/salida/
 .ipynb_checkpoints/
 catboost_info/
 *.parquet
+# Informes del backtest: llevan NICs de clientes.
+Modelos/*/salidas/*.html
 
 # ===== NODE =====
 node_modules/

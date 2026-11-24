@@ -128,7 +128,8 @@ Aire_Cobros_SCR/
 │       │   └── lib/           # Caché IndexedDB, temas, utilidades matemáticas
 │       └── package.json
 ├── Modelos/                   # Modelos de Machine Learning (CatBoost)
-│   └── Recomendacion Social/  # Notebooks y modelos serializados (.cbm) de riesgo social
+│   ├── Recomendacion Social/  # Notebooks y modelos serializados (.cbm) de riesgo social
+│   └── Recomendacion Alcance/ # Matriz de alcance: notebooks, modelo .cbm y corrida diaria
 ├── Pruebas/                   # Scripts automatizados de pruebas E2E con bots (Playwright/Node)
 │   └── bots/
 ├── CLAUDE.md                  # Reglas obligatorias de desarrollo y dominio para agentes IA
@@ -201,6 +202,11 @@ Ubicados en `Modelos/Recomendacion Social`:
 - **Propósito:** Predecir el nivel de riesgo social y probabilidad de agresividad de usuarios contra las brigadas en terreno antes de enviar a los operarios.
 - **Artefactos:** `Modelo_RiesgoSocial.cbm` entrenado sobre variables sociodemográficas, antecedentes del predio, estrato, histórico de suspensiones y registro de actas de visitas previas.
 - **Servicios Externos:** El chatbot se conecta adicionalmente con el *Modelo Propensión de Pago Service* (microservicio externo con modelos `.cbm`) mediante el NIC para estimar la probabilidad de recaudo voluntario.
+
+Ubicada en `Modelos/Recomendacion Alcance` (ver su `README.md`):
+- **Propósito:** Para cada NIC de SCR, el % de que la orden salga efectiva con cada alcance (Brigada Pesada, Liviana, etc.) y cuál conviene. Usa la propensión de pago como variable con restricción monótona: a más propensión de pago, menor % de efectividad.
+- **Corrida diaria:** `correr_matriz.py` recalcula todos los NICs en `dbanalitica.matriz_alcance`; la vista `dbanalitica.matriz_alcance_completa` la une con `recomendacion_aire_scr`.
+- **Consulta:** `POST /api/v1/matriz-alcance` devuelve el `pct_recomendado` de hasta 5.000 NICs (ver `Backend/Service.md`).
 
 ---
 

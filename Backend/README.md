@@ -11,6 +11,7 @@ app/
     v1/
       endpoints/openai.py     # POST /chat y /chat/stream
       endpoints/ordenes.py    # POST /ordenes/cargar
+      endpoints/matriz_alcance.py  # % de la matriz de alcance por NIC
       router.py               # une las rutas de la v1
     deps.py                   # sesión de BD e inyección de servicios
   core/
@@ -25,12 +26,14 @@ app/
     chat.py                   # ChatRequest, ChatResponse, Message
     metrics.py                # Efectividad, FilaCausa, FiltroMapa
     ordenes.py                # ResumenCargue
+    matriz_alcance.py         # petición y respuesta de la matriz de alcance
   services/
     metrics_service.py        # consultas de negocio contra Postgres
     tools.py                  # herramientas que el modelo puede invocar
     openai_service.py         # ciclo de tool calling y streaming
     carga_ordenes.py          # lee y limpia el Excel/CSV que sube el usuario
     cargue_store.py           # guarda los cargues vivos entre turnos
+    matriz_alcance_service.py # lee dbanalitica.matriz_alcance_completa
   main.py                     # instancia FastAPI, CORS y /health
 tests/
 ```
@@ -105,6 +108,11 @@ uvicorn app.main:app --reload
 | POST | `/api/v1/openai/chat/stream` | Igual, por trozos vía SSE (`data: {"delta": …}`, cierra con `data: [DONE]`) |
 | POST | `/api/v1/ordenes/cargar` | Sube el Excel/CSV de órdenes por ejecutar y devuelve su id |
 | GET | `/api/v1/ordenes/{id}/puntos` | Ubica esas órdenes en el mapa (ver abajo) |
+| POST | `/api/v1/matriz-alcance` | % de la matriz de alcance de hasta 5.000 NICs (ver `Service.md`) |
+| GET | `/api/v1/matriz-alcance/{nic}` | Lo mismo para un NIC |
+
+La matriz de alcance no se calcula aquí: la llena cada madrugada
+`Modelos/Recomendacion Alcance/correr_matriz.py` y el backend solo la lee.
 
 ### Cómo se ubican las órdenes cargadas
 
@@ -157,4 +165,4 @@ Sustituyen el servicio de OpenAI por un doble: no consumen créditos ni tocan la
   de peticiones.
 - **Secretos:** `OPENAI_API_KEY`, `DATABASE_URL` y `HERE_API_KEY` están en `.env` (ignorado por git).
   En despliegue van como secretos del entorno.
-- **Migraciones:** falta Alembic; aún no hay tablas propias.
+- **Migraciones:** no hay Alembic. Los `.sql` de `migraciones/` se aplican a mano y en orden.

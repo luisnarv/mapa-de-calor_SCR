@@ -1,0 +1,120 @@
+{
+  "features": [
+    "CANASTA",
+    "tipo_os",
+    "territorio",
+    "zona",
+    "municipio",
+    "localidad_barrio",
+    "SEGMENTO",
+    "RESULTADO_ANTERIOR",
+    "TIPO_OS_ANTERIOR",
+    "CANASTA_ANTERIOR",
+    "ESTRATO",
+    "deuda_act",
+    "LOG_DEUDA",
+    "cant_factura_act",
+    "DEUDA_POR_FACTURA",
+    "ORDENES_PREVIAS",
+    "EFECTIVAS_PREVIAS",
+    "FALLIDAS_PREVIAS",
+    "PERDIDAS_PREVIAS",
+    "IMPOSIB_PREVIAS",
+    "PAGOS_CLIENTE_PREVIOS",
+    "RESISTENCIAS_PREVIAS",
+    "SUSP_PREVIAS",
+    "SUSP_EFECTIVAS_PREVIAS",
+    "TASA_EF_HIST",
+    "TASA_EF_SUSP_HIST",
+    "DIAS_DESDE_ANTERIOR",
+    "SIN_ORDEN_90D",
+    "DELTA_DEUDA",
+    "ORDENES_PREVIAS_CANASTA",
+    "EF_PREVIAS_CANASTA",
+    "TASA_EF_CANASTA_NIC",
+    "ORDENES_PREV_BARRIO",
+    "TASA_EF_BARRIO",
+    "TASA_EF_MUNICIPIO",
+    "ORDENES_PREV_BARRIO_CANASTA",
+    "TASA_EF_BARRIO_CANASTA",
+    "TASA_EF_MUNICIPIO_CANASTA",
+    "ORDENES_PREV_TRAFO",
+    "TASA_EF_TRAFO",
+    "TASA_EF_CIRCUITO",
+    "ORDENES_PREV_TRAFO_CANASTA",
+    "TASA_EF_TRAFO_CANASTA",
+    "TASA_AGRESIVO_TRAFO",
+    "TASA_IMPOSIB_TRAFO",
+    "TASA_PAGO_VISITA_TRAFO",
+    "ORDENES_PREV_TECNICO",
+    "TASA_EF_TECNICO",
+    "ORDENES_PREV_TECNICO_MUNICIPIO",
+    "TASA_EF_TECNICO_MUNICIPIO",
+    "PROB_PAGO_SIN_INTERVENCION",
+    "PROB_PAGO_CON_INTERVENCION"
+  ],
+  "categoricas": [
+    "CANASTA",
+    "tipo_os",
+    "territorio",
+    "zona",
+    "municipio",
+    "localidad_barrio",
+    "SEGMENTO",
+    "RESULTADO_ANTERIOR",
+    "TIPO_OS_ANTERIOR",
+    "CANASTA_ANTERIOR"
+  ],
+  "target": "EFECTIVA",
+  "canastas": [
+    "(D) Brigada Pesada",
+    "Brigada Canasta",
+    "Brigada Liviana",
+    "Brigada Minicanasta",
+    "Brigada Pesada",
+    "Gestor Integral Multi",
+    "Pesada Disponible",
+    "Pesada MT-AT"
+  ],
+  "iteraciones": 817,
+  "params": {
+    "depth": 6,
+    "learning_rate": 0.05,
+    "l2_leaf_reg": 3,
+    "loss_function": "Logloss",
+    "eval_metric": "Logloss",
+    "max_ctr_complexity": 1,
+    "monotone_constraints": {
+      "PROB_PAGO_SIN_INTERVENCION": -1,
+      "PROB_PAGO_CON_INTERVENCION": -1
+    },
+    "random_seed": 42
+  },
+  "entrenado_hasta": "2026-11-11",
+  "evaluacion": {
+    "validacion": "2026-08",
+    "metricas_test": [
+      {
+        "modelo": "CatBoost",
+        "AUC": 0.7638,
+        "Brier": 0.1986,
+        "LogLoss": 0.5802,
+        "prob_media": 0.4646
+      },
+      {
+        "modelo": "Base: barrio x canasta",
+        "AUC": 0.6624,
+        "Brier": 0.2295,
+        "LogLoss": 0.6498,
+        "prob_media": 0.5121
+      },
+      {
+        "modelo": "Base: tasa constante",
+        "AUC": 0.5,
+        "Brier": 0.2505,
+        "LogLoss": 0.6941,
+        "prob_media": 0.5153
+      }
+    ]
+  }
+}
