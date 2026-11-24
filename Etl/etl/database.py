@@ -1,8 +1,6 @@
 """Acceso a la base de datos (PostgreSQL de producción, solo lectura).
 
-Encapsula la conexión y las dos consultas del ETL: las órdenes de
-`dbanalitica.historico_mo` y el mapa subacción->estado de
-`dbanalitica.maestro_tarifas`.
+Encapsula la conexión y las consultas del ETL.
 """
 from __future__ import annotations
 
@@ -12,9 +10,7 @@ from typing import Iterator
 import pandas as pd
 import psycopg2
 
-from .config import QUERY_ESTADOS
 from .logging_conf import get_logger
-from .text import norm_dato
 
 log = get_logger()
 
@@ -74,16 +70,3 @@ class Database:
             df = pd.DataFrame(cur.fetchall(), columns=columns)
         log.info("Cargadas %s filas.", f"{len(df):,}")
         return df
-
-    def fetch_estado_map(self) -> dict[str, str]:
-        """Devuelve el mapa {subacción normalizada -> estado} desde maestro_tarifas."""
-        log.info("Cargando Convertidor_Estados desde maestro_tarifas…")
-        conv: dict[str, str] = {}
-        with self._cursor() as cur:
-            cur.execute(QUERY_ESTADOS)
-            for sub, estado in cur.fetchall():
-                clave = norm_dato(sub)
-                if clave:
-                    conv[clave] = str(estado).strip()
-        log.info("Convertidor_Estados: %d subacciones mapeadas.", len(conv))
-        return conv

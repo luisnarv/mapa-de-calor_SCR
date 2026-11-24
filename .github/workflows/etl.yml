@@ -57,6 +57,7 @@ jobs:
           cp Etl/salida/scr/data.json Etl/salida/scr/data_*.json \
              Etl/salida/scr/direcciones.json \
              Etl/salida/scr/observaciones_*.json \
+             Etl/salida/scr/sin_gps.json \
              Backend/app/data/scr/
 
           # --- COBROS ---
@@ -70,6 +71,7 @@ jobs:
           cp Etl/salida/cobros/data.json Etl/salida/cobros/data_*.json \
              Etl/salida/cobros/direcciones.json \
              Etl/salida/cobros/observaciones_*.json \
+             Etl/salida/cobros/sin_gps.json \
              Etl/salida/cobros/gestores.json \
              Etl/salida/cobros/recaudo_barrio.json \
              Backend/app/data/cobros/

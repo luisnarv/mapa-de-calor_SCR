@@ -3,7 +3,7 @@
 Replica exactamente la lógica de negocio del `Index.py` original (filtro VS,
 GPS, fecha, Estado, causa, dedup), pero **vectorizada**:
 
-* Las normalizaciones (`norm`, `norm_dato`) se calculan una vez por valor único
+* Las normalizaciones (`norm`) se calculan una vez por valor único
   y no por fila (antes había un `df.apply(..., axis=1)` que dominaba el tiempo).
 * La clasificación de causa pasa de row-wise a `map` con diccionarios.
 
@@ -31,7 +31,7 @@ from .taxonomy import (
     homolog_brigada,
     homolog_linea_accion,
 )
-from .text import RE_VS, norm, norm_dato
+from .text import RE_VS, norm
 
 log = get_logger()
 
@@ -66,16 +66,14 @@ def _map_por_unico(serie: pd.Series, fn) -> pd.Series:
 
 def enrich(
     df: pd.DataFrame,
-    estado_map: dict[str, str] | None,
     *,
     proceso: str = "scr",
 ) -> pd.DataFrame:
     """Aplica todos los filtros y campos derivados del ETL.
 
     Args:
-        df: DataFrame crudo con los alias de columna del pipeline.
-        estado_map: {subacción normalizada -> Estado}. Solo para SCR;
-            COBROS pasa ``None`` y deriva el estado de ``AV/RESULTADO``.
+        df: DataFrame crudo con los alias de columna del pipeline. En SCR trae
+            ``ESTADO_NORM``; COBROS deriva el estado de ``ESTADO_GESTION``.
         proceso: ``"scr"`` o ``"cobros"``.
 
     Returns:
@@ -135,10 +133,8 @@ def enrich(
 
     # --- Estado ---
     if proceso == "scr":
-        df["Estado"] = _map_por_unico(
-            df["SUBACCION/SUBANOMALIA"],
-            lambda s: estado_map.get(norm_dato(s)) if pd.notna(s) else None,
-        )
+        # «Sin Clasificar» queda sin estado: el mapa solo pinta las tres categorías.
+        df["Estado"] = df["ESTADO_NORM"].where(df["ESTADO_NORM"].isin(["Efectiva", "Fallida", "Perdida"]))
     else:
         # Sin "Fallida": en cobros la gestión se pudo hacer (Efectiva) o no (Perdida).
         # object y no "string": con NA, `== "VF"` devuelve NA y np.where no lo admite.

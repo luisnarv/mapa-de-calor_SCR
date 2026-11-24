@@ -59,7 +59,8 @@ def process_pts(pts):
             "Brigada": brig,
             "Barrio": barrio,
             "Municipio": muni,
-            "Zona": zona
+            "Zona": zona,
+            "En mapa": "Sí"
         })
     return records
 
@@ -73,6 +74,15 @@ for fpath in glob.glob(os.path.join(base_path, "data_*.json")):
     with open(fpath, encoding="utf8") as f:
         m_data = json.load(f)
     all_records.extend(process_pts(m_data["pts"]))
+
+# Órdenes sin GPS: el mapa no las dibuja, pero el reporte debe contarlas para
+# cuadrar con el tablero operativo. Datos de antes de este archivo no lo traen.
+sin_gps_path = os.path.join(base_path, "sin_gps.json")
+if os.path.exists(sin_gps_path):
+    with open(sin_gps_path, encoding="utf8") as f:
+        sin_gps = json.load(f)["filas"]
+    print(f"Agregando {len(sin_gps)} órdenes sin GPS...")
+    all_records.extend({**fila, "En mapa": "No"} for fila in sin_gps)
 
 df = pd.DataFrame(all_records)
 print(f"Total de registros procesados: {len(df)}")

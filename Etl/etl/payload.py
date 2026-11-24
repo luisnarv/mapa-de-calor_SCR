@@ -156,6 +156,33 @@ def _prepare(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     return d
 
 
+def _escribir_sin_gps(df: pd.DataFrame, anio: int, destino: Path) -> None:
+    """Vuelca las órdenes con estado y fecha del año pero sin GPS utilizable.
+
+    El mapa no puede dibujarlas, pero el reporte en Excel sí debe contarlas: sin
+    ellas el Excel no cuadra con el tablero operativo. Van aparte, en las mismas
+    columnas del reporte, para no meter en `pts` puntos sin coordenadas. El
+    barrio y el municipio son los que trae la base: en cobros, los del mapa salen
+    del GPS y aquí no hay con qué calcularlos.
+    """
+    dt = pd.to_datetime(df["FECHA_EJECUCION"], errors="coerce")
+    s = df[df["Estado"].notna() & (df["LATITUD"].isna() | df["LONGITUD"].isna())
+           & (dt.dt.year == anio)].copy()
+    s["dt"] = dt
+    muni = s["MUNICIPIO"].fillna("SIN MUNICIPIO")
+    filas = pd.DataFrame({
+        "Orden": s["ORDEN"], "NIC": s["NIC"],
+        "Fecha": s["dt"].dt.strftime("%Y-%m-%d"), "Hora": s["dt"].dt.strftime("%H:%M"),
+        "Estado": s["Estado"], "Causa": s["CAUSA"].fillna("SIN DATO"),
+        "Subaccion": s["SUBACCION/SUBANOMALIA"].fillna("SIN DATO"),
+        "Tecnico": s["TECNICO"].fillna("SIN DATO"), "Brigada": s["TIPO BRIGADA"].fillna("SIN DATO"),
+        "Barrio": muni + " | " + s["LOCALIDAD/BARRIO"].fillna("SIN BARRIO"),
+        "Municipio": muni, "Zona": s["ZONA"].fillna("SIN ZONA"),
+    })
+    _escribir(destino / "sin_gps.json", {"filas": filas.to_dict("records")})
+    log.info("JSON sin_gps -> %s órdenes con estado y sin GPS (solo para el Excel).", f"{len(filas):,}")
+
+
 def build_and_write(
     df: pd.DataFrame, settings: Settings, recaudo: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
@@ -296,6 +323,7 @@ def build_and_write(
     data_path = settings.public_dir / "data.json"
     _escribir(data_path, data)
     log.info("JSON data -> %s (%.2f MB)", data_path.name, data_path.stat().st_size / 1e6)
+    _escribir_sin_gps(df, int(d["dt"].max().year), settings.public_dir)
 
     # Va en su propio archivo y no dentro de data.json porque son ~5 MB que solo
     # necesita el backend al ubicar un cargue: el tablero lo descargaría en cada

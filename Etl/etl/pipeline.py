@@ -37,11 +37,10 @@ def run(settings: Settings) -> dict[str, Any]:
 
     with Database(settings.database_url) as db:
         df_crudo = db.fetch_ordenes(query)
-        estado_map = db.fetch_estado_map() if settings.proceso == "scr" else None
         gestores = db.fetch_ordenes(QUERY_GESTORES) if settings.proceso == "cobros" else None
         recaudo_barrio = db.fetch_ordenes(QUERY_RECAUDO_BARRIO) if settings.proceso == "cobros" else None
 
-    df = enrich(df_crudo, estado_map, proceso=settings.proceso)
+    df = enrich(df_crudo, proceso=settings.proceso)
 
     if settings.write_csv and settings.csv_path is not None:
         settings.csv_path.parent.mkdir(parents=True, exist_ok=True)

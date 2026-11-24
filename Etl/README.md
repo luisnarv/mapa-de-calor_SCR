@@ -32,7 +32,7 @@ Etl/
 .github/workflows/etl.yml  # automatización (en la RAÍZ: GitHub solo lee ahí)
 ```
 
-**Flujo:** `Database` trae las órdenes y el mapa subacción→estado → `transform.enrich`
+**Flujo:** `Database` trae las órdenes (en SCR con el `estado_norm` que deja el ETL del tablero operativo) → `transform.enrich`
 deriva Estado, GPS, causa, dedup → `payload.build_and_write` arma `dim`/`pts`/`geo`,
 parte por mes y escribe `data.json` + `data_YYYY-MM.json`.
 

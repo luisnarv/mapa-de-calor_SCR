@@ -69,16 +69,14 @@ QUERY_HISTORICO: str = """
       fecha_cierre AS "FECHA_CIERRE",
       observacion AS "OBSERVACION",
       obs_combinada AS "OBS_COMBINADA",
-      gps AS "GPS"
+      gps AS "GPS",
+      -- Lo calcula el ETL del tablero operativo (Desplegable_SCRC) al cargar: homologa la
+      -- subacción por tipo OS, brigada y zona antes de cruzarla con maestro_tarifas. Cruzar
+      -- aquí la subacción cruda dejaba sin estado ~112 mil órdenes de 2026 («SUSPENSIÓN EN
+      -- CARGAS» no existe tal cual en el maestro) y el mapa no cuadraba con ese tablero.
+      estado_norm AS "ESTADO_NORM"
     FROM dbanalitica.historico_mo
 """
-
-# Cruce subacción -> estado (Efectiva/Fallida/Perdida). Solo SCR.
-QUERY_ESTADOS: str = (
-    'SELECT DISTINCT "SubAccion", "Estado" '
-    "FROM dbanalitica.maestro_tarifas "
-    'WHERE "SubAccion" IS NOT NULL AND "Estado" IS NOT NULL'
-)
 
 # Consulta COBROS: mismos alias internos para reutilizar el pipeline.
 QUERY_COBROS: str = """
